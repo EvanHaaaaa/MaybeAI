@@ -39,6 +39,7 @@ class MinecraftController:
         self.food = 20
         self.pos = {"x": 0, "y": 0, "z": 0}
         self.connection_status = "disconnected"  # "disconnected", "connecting", "connected"
+        self.viewer_url: Optional[str] = None
         self.nearby_players: List[Dict[str, Any]] = []
 
         # Bot Process & WebSocket Bridge
@@ -111,6 +112,7 @@ class MinecraftController:
             "servers": self.servers,
             "active_server": self.active_server,
             "connection_status": self.connection_status,
+            "viewer_url": self.viewer_url,
             "speedrun": {
                 "phase": phase,
                 "phase_name": phase_title,
@@ -214,9 +216,15 @@ class MinecraftController:
                     await self.emit_commentary(comment)
                     await self.emit_state()
 
+                elif event_type == "viewer_started":
+                    self.viewer_url = data.get("url", "http://localhost:3007")
+                    print(f"[Minecraft] Live 3D POV window available at: {self.viewer_url}")
+                    await self.emit_state()
+
                 elif event_type in ["bot_kicked", "bot_error", "bot_disconnected"]:
                     self.connection_status = "disconnected"
                     self.is_active = False
+                    self.viewer_url = None
                     reason = data.get("reason") or data.get("message") or "Connection dropped"
                     print(f"[Minecraft] Bot disconnected from server: {reason}")
                     await self.emit_commentary(f"[emotion: sad] Disconnected from server: {reason}")

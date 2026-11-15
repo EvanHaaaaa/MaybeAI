@@ -145,6 +145,31 @@
       </div>
     </section>
 
+    <!-- Minecraft 3D Live POV Stream Section (Eve's Eyes) -->
+    <section class="card mc-viewer-card" id="mcViewerCard">
+      <div class="card-header">
+        <div class="mc-title">
+          <span>📺</span>
+          <h2>Eve's Minecraft POV (First-Person Stream)</h2>
+          <span id="mc-viewer-badge" class="badge">Standby</span>
+        </div>
+        <div class="viewer-actions">
+          <a id="btn-open-pov-tab" href="http://localhost:3007" target="_blank" class="btn btn-secondary btn-sm">↗️ Pop-out Window (OBS Source)</a>
+          <button id="btn-reload-pov" class="btn btn-secondary btn-sm">🔄 Refresh View</button>
+        </div>
+      </div>
+      <div class="mc-viewport-container">
+        <div id="mc-viewer-placeholder" class="mc-placeholder">
+          <div class="placeholder-content">
+            <span class="cube-spin">🧊</span>
+            <p>Minecraft 3D POV will activate automatically when Eve joins a server!</p>
+            <small>URL for OBS Studio Browser Source: <code>http://localhost:3007</code></small>
+          </div>
+        </div>
+        <iframe id="mcViewerFrame" class="mc-viewer-frame" src="" style="display: none;" allow="autoplay; camera; microphone"></iframe>
+      </div>
+    </section>
+
     <!-- Quick Actions Panel -->
     <footer class="controls-footer">
       <div class="quick-prompts">

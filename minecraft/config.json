@@ -4,5 +4,6 @@
   "bot_username": "EveMaybe",
   "minecraft_version": "1.21.1",
   "bridge_ws_port": 25566,
+  "viewer_port": 3007,
   "default_mode": "santai"
 }

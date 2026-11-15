@@ -166,6 +166,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnCancelAddServer = document.getElementById("btn-cancel-add-server");
   const addServerForm = document.getElementById("addServerForm");
 
+  // POV Viewer Elements
+  const mcViewerFrame = document.getElementById("mcViewerFrame");
+  const mcViewerPlaceholder = document.getElementById("mc-viewer-placeholder");
+  const mcViewerBadge = document.getElementById("mc-viewer-badge");
+  const btnReloadPov = document.getElementById("btn-reload-pov");
+  const btnOpenPovTab = document.getElementById("btn-open-pov-tab");
+
   function sendMinecraftAction(actionData) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "minecraft_action", ...actionData }));
@@ -225,6 +232,44 @@ document.addEventListener("DOMContentLoaded", () => {
       btnMcConnect.style.background = "";
       btnMcDisconnect.disabled = true;
     }
+
+    // Update 3D POV Viewer Stream
+    if (mcViewerFrame && mcViewerPlaceholder && mcViewerBadge) {
+      const isConnected = state.connection_status === "connected";
+      const viewerUrl = state.viewer_url || (isConnected ? "http://localhost:3007" : null);
+
+      if (isConnected && viewerUrl) {
+        if (!mcViewerFrame.src || mcViewerFrame.src === "about:blank" || (!mcViewerFrame.src.includes(":3007") && mcViewerFrame.src !== viewerUrl)) {
+          mcViewerFrame.src = viewerUrl;
+        }
+        mcViewerFrame.style.display = "block";
+        mcViewerPlaceholder.style.display = "none";
+        mcViewerBadge.textContent = "🟢 Live 3D POV";
+        mcViewerBadge.className = "badge badge-online";
+        if (btnOpenPovTab) btnOpenPovTab.href = viewerUrl;
+      } else {
+        if (mcViewerFrame.src && mcViewerFrame.src !== "about:blank") {
+          mcViewerFrame.src = "about:blank";
+        }
+        mcViewerFrame.style.display = "none";
+        mcViewerPlaceholder.style.display = "flex";
+        mcViewerBadge.textContent = "Standby";
+        mcViewerBadge.className = "badge";
+      }
+    }
+  }
+
+  // Refresh POV View Button
+  if (btnReloadPov) {
+    btnReloadPov.addEventListener("click", () => {
+      if (mcViewerFrame && mcViewerFrame.style.display !== "none") {
+        const curSrc = mcViewerFrame.src || "http://localhost:3007";
+        mcViewerFrame.src = "about:blank";
+        setTimeout(() => {
+          mcViewerFrame.src = curSrc;
+        }, 150);
+      }
+    });
   }
 
   // Server Action Listeners

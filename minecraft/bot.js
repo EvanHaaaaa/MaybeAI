@@ -15,6 +15,36 @@ const fs = require('fs');
 const SpeedrunRunner = require('./speedrun');
 const CasualRunner = require('./casual');
 
+// Provide lightweight canvas fallback for prismarine-viewer (avoids native C++ build requirements on Windows)
+try {
+  require.resolve('canvas');
+} catch (e) {
+  const Module = require('module');
+  const originalLoad = Module._load;
+  Module._load = function(request) {
+    if (request === 'canvas') {
+      return {
+        createCanvas: () => ({
+          getContext: () => ({
+            font: '',
+            fillStyle: '',
+            strokeStyle: '',
+            lineWidth: 1,
+            measureText: () => ({ width: 64 }),
+            fillRect: () => {},
+            strokeText: () => {},
+            fillText: () => {}
+          }),
+          toDataURL: () => ''
+        })
+      };
+    }
+    return originalLoad.apply(this, arguments);
+  };
+}
+
+const { mineflayer: viewer } = require('prismarine-viewer');
+
 const config = JSON.parse(fs.readFileSync('./config.json', 'utf8'));
 
 let bot = null;
@@ -154,6 +184,7 @@ function createBot(host, port, username, version, mode) {
   console.log(`[Mineflayer] Connecting to ${targetHost}:${targetPort} as ${targetUser} (v${targetVer}, mode=${currentMode})...`);
 
   if (bot) {
+    if (bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
     try { bot.quit(); } catch (e) {}
     bot = null;
   }
@@ -202,6 +233,18 @@ function createBot(host, port, username, version, mode) {
     } else {
       speedrunRunner.stop();
       casualRunner.start();
+    }
+
+    // Start 3D First-Person View Stream (Prismarine Viewer on port 3007)
+    try {
+      if (!bot.viewer) {
+        const viewerPort = config.viewer_port || 3007;
+        viewer(bot, { port: viewerPort, firstPerson: true, viewDistance: 6 });
+        console.log(`[Minecraft Viewer] Live 3D POV window running on http://localhost:${viewerPort}`);
+        sendToPython('viewer_started', { port: viewerPort, url: `http://localhost:${viewerPort}` });
+      }
+    } catch (err) {
+      console.log('[Minecraft Viewer Notice]', err.message);
     }
   });
 
@@ -267,6 +310,7 @@ function createBot(host, port, username, version, mode) {
 
   bot.on('kicked', (reason) => {
     console.log('[Mineflayer] Kicked from server:', reason);
+    if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
     if (speedrunRunner) speedrunRunner.stop();
     if (casualRunner) casualRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
@@ -281,6 +325,7 @@ function createBot(host, port, username, version, mode) {
 
   bot.on('end', (reason) => {
     console.log('[Mineflayer] Bot session ended:', reason);
+    if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
     if (speedrunRunner) speedrunRunner.stop();
     if (casualRunner) casualRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
@@ -296,6 +341,7 @@ function handlePythonCommand(cmd) {
 
   if (cmd.action === 'disconnect_server') {
     console.log('[Mineflayer] Disconnecting bot from server...');
+    if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
     if (speedrunRunner) speedrunRunner.stop();
     if (casualRunner) casualRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
