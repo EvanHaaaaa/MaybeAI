@@ -41,6 +41,10 @@ class MinecraftController:
         self.on_commentary_callback: Optional[Callable[[str], Any]] = None
         self.on_state_change_callback: Optional[Callable[[Dict[str, Any]], Any]] = None
 
+    def set_callbacks(self, on_commentary: Callable[[str], Any], on_state_change: Optional[Callable[[Dict[str, Any]], Any]] = None):
+        self.on_commentary_callback = on_commentary
+        self.on_state_change_callback = on_state_change
+
     def load_servers(self):
         if self.servers_config_path.exists():
             try:
