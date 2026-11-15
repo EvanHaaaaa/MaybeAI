@@ -19,6 +19,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let blinkTimer = 0;
   let headTilt = 0;
   let time = 0;
+  let isSinging = false;
+  let musicNotes = [];
 
   // --- WebSocket Connection ---
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
@@ -51,6 +53,22 @@ document.addEventListener("DOMContentLoaded", () => {
       if (msg.data.emotion) {
         setEmotion(msg.data.emotion);
       }
+      if (msg.data.is_singing !== undefined) {
+        isSinging = msg.data.is_singing;
+      }
+    } else if (msg.type === "song_started") {
+      isSinging = true;
+      subtitles.textContent = `🎵 Playing: "${msg.data.title}" 🎵`;
+      addChatMessage("Eve", `[Singing: ${msg.data.title}]`, true);
+    } else if (msg.type === "lyric_line") {
+      isSinging = true;
+      subtitles.textContent = `♪ ${msg.data.text} ♪`;
+      if (msg.data.emotion) {
+        setEmotion(msg.data.emotion);
+      }
+      spawnMusicNote();
+    } else if (msg.type === "song_ended") {
+      isSinging = false;
     }
   };
 
@@ -186,7 +204,44 @@ document.addEventListener("DOMContentLoaded", () => {
     drawHair();
 
     ctx.restore();
+
+    // 9. Floating Karaoke Musical Notes
+    if (isSinging && Math.random() < 0.1) {
+      spawnMusicNote();
+    }
+    for (let i = musicNotes.length - 1; i >= 0; i--) {
+      const n = musicNotes[i];
+      n.x += n.vx;
+      n.y += n.vy;
+      n.opacity -= 0.015;
+
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, n.opacity);
+      ctx.fillStyle = n.color;
+      ctx.font = `bold ${n.size}px sans-serif`;
+      ctx.fillText(n.char, n.x, n.y);
+      ctx.restore();
+
+      if (n.opacity <= 0) {
+        musicNotes.splice(i, 1);
+      }
+    }
+
     requestAnimationFrame(render);
+  }
+
+  const NOTE_CHARS = ["♪", "♫", "♬", "♩"];
+  function spawnMusicNote() {
+    musicNotes.push({
+      x: canvas.width / 2 + (Math.random() - 0.5) * 200,
+      y: canvas.height / 2 + 50,
+      vx: (Math.random() - 0.5) * 1.5,
+      vy: -1.2 - Math.random() * 1.8,
+      char: NOTE_CHARS[Math.floor(Math.random() * NOTE_CHARS.length)],
+      opacity: 1.0,
+      size: 18 + Math.random() * 14,
+      color: Math.random() > 0.5 ? "#ff4d8d" : "#00f0ff"
+    });
   }
 
   function drawEye(x, y, scaleY) {

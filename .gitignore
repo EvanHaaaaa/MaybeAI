@@ -16,7 +16,8 @@ __pycache__/
 
 # Audio outputs & Temp
 *.mp3
-*.wav
+!assets/songs/*.wav
+!assets/songs/*.mp3
 temp/
 logs/
 

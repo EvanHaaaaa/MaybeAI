@@ -7,6 +7,7 @@ from core.vts_client import VTSClient
 from core.chat_receiver import ChatReceiver, ChatMessage
 from core.moderator import Moderator
 from core.actions import ActionParser
+from core.singer import Singer
 
 class Orchestrator:
     """
@@ -33,6 +34,12 @@ class Orchestrator:
             host=vts_cfg.get("host", "localhost"),
             port=vts_cfg.get("port", 8001),
             plugin_name=vts_cfg.get("plugin_name", "MaybeAI-VTuber")
+        )
+
+        # Singer (Karaoke Engine)
+        self.singer = Singer(
+            songs_config_path=f"{config_dir}/songs.json",
+            voice=tts_cfg.get("voice", "en-US-AnaNeural")
         )
 
         self.chat = ChatReceiver()
@@ -111,6 +118,16 @@ class Orchestrator:
             "source": msg.source
         })
 
+        # Check for sing command / request
+        msg_lower = clean_input.lower()
+        if msg_lower.startswith("!sing") or "sing a song" in msg_lower or "nyanyi" in msg_lower or "coba nyanyi" in msg_lower:
+            song_id = "digital_world"
+            parts = clean_input.split()
+            if len(parts) > 1 and parts[1] in self.singer.songs:
+                song_id = parts[1]
+            await self.perform_song(song_id)
+            return
+
         # 2. Brain generates response
         raw_response = await self.brain.generate_response(msg.user, clean_input)
 
@@ -155,4 +172,87 @@ class Orchestrator:
         await self.broadcast("avatar_state", {
             "mouth_open": 0.0,
             "emotion": "neutral"
+        })
+
+    async def perform_song(self, song_id: str):
+        song = self.singer.songs.get(song_id)
+        if not song:
+            print(f"[Singer] Song '{song_id}' not found.")
+            return
+
+        title = song.get("title", song_id)
+        intro = song.get("intro_dialogue", f"Alright chat! Let me sing {title} for you! [action: wink]")
+        outro = song.get("outro_dialogue", "Thank you everyone for listening! [action: giggle]")
+
+        print(f"[Karaoke] Eve is starting song: {title}")
+
+        # 1. Intro Speech
+        speech_text, emotions, actions = ActionParser.parse(intro)
+        primary_emotion = emotions[0] if emotions else "happy"
+        await self.broadcast("ai_response", {
+            "user": "System",
+            "raw": intro,
+            "speech": speech_text,
+            "emotions": emotions,
+            "actions": actions
+        })
+        if self.vts.connected:
+            await self.vts.trigger_expression(primary_emotion)
+
+        async def on_mouth_update(val: float):
+            if self.vts.connected:
+                await self.vts.update_mouth(val)
+            await self.broadcast("avatar_state", {"mouth_open": val, "emotion": primary_emotion})
+
+        await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+
+        # 2. Singing Performance
+        await self.broadcast("song_started", {"song_id": song_id, "title": title})
+
+        async def on_lyric_update(line_text: str, emotion: str):
+            print(f"[Singing] [{emotion}] ♪ {line_text} ♪")
+            if self.vts.connected:
+                await self.vts.trigger_expression(emotion)
+            await self.broadcast("lyric_line", {
+                "text": line_text,
+                "emotion": emotion,
+                "is_singing": True
+            })
+
+        async def on_sing_mouth(val: float):
+            if self.vts.connected:
+                await self.vts.update_mouth(val)
+            await self.broadcast("avatar_state", {"mouth_open": val, "is_singing": True})
+
+        await self.singer.sing(
+            song_id=song_id,
+            on_lyric_update=on_lyric_update,
+            on_mouth_update=lambda val: asyncio.create_task(on_sing_mouth(val))
+        )
+
+        await self.broadcast("song_ended", {"song_id": song_id, "title": title})
+
+        # 3. Outro Speech
+        speech_text, emotions, actions = ActionParser.parse(outro)
+        primary_emotion = emotions[0] if emotions else "blush"
+        await self.broadcast("ai_response", {
+            "user": "System",
+            "raw": outro,
+            "speech": speech_text,
+            "emotions": emotions,
+            "actions": actions
+        })
+        if self.vts.connected:
+            await self.vts.trigger_expression(primary_emotion)
+        await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+
+        # Return to idle
+        if self.vts.connected:
+            await self.vts.trigger_expression("neutral")
+            await self.vts.update_mouth(0.0)
+
+        await self.broadcast("avatar_state", {
+            "mouth_open": 0.0,
+            "emotion": "neutral",
+            "is_singing": False
         })

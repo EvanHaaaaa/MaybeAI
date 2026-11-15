@@ -22,7 +22,11 @@ Sistem ini menggabungkan Large Language Model (LLM), Text-to-Speech (TTS), speec
 3. **Dual Avatar Display:**
    * **Built-in Web Avatar Viewer:** Langsung tampil di browser (`http://localhost:7860`) dengan animasi mata berkedip, kepala mengambang, perubahan ekspresi, dan sinkronisasi mulut. Cocok dijadikan *Browser Source* di OBS Studio!
    * **VTube Studio API Integration:** Otomatis mendeteksi dan mengirim data WebSocket ke VTube Studio (`ws://localhost:8001`) untuk menggerakkan model Live2D profesional.
-4. **Safety & Moderation Filter:**
+4. **🎤 Karaoke & Singing Engine (Fitur Baru!):**
+   * Eve bisa menyanyikan lagu lengkap dengan instrumen BGM otomatis!
+   * Pitch dan nada vokal diatur secara ritmik per bait lirik, mulut bergerak sinkron dengan vokal, dan ada animasi partikel not balok (♪ ♫) di layar avatar.
+   * Mendukung penambahan lagu kustom lewat `config/songs.json` dan file audio di `assets/songs/`.
+5. **Safety & Moderation Filter:**
    * Filter pencegah prompt injection, kata-kata kasar, dan pelanggaran Twitch TOS.
 5. **Twitch IRC Chat & Interactive Web Chat:**
    * Bisa membaca live chat langsung dari channel Twitch penonton.
@@ -107,6 +111,36 @@ Untuk menggunakan AI sesungguhnya:
    ```powershell
    .\.venv\Scripts\python.exe run.py --provider ollama
    ```
+
+---
+
+## 🎤 Cara Menggunakan Fitur Karaoke / Menyanyi
+
+1. **Meminta Eve Menyanyi via Chat:**
+   * Di live chat atau Web UI, ketik:
+     * `!sing digital_world`
+     * Atau kalimat natural seperti: *"Eve, coba nyanyi dong"* / *"sing a song"*
+   * Atau klik tombol instan: **`🎵 Sing "Digital World" (Karaoke)`** di Web Dashboard.
+2. **Cara Menambahkan Lagu Baru:**
+   * Masukkan file instrumen BGM (`.wav` atau `.mp3`) ke folder `assets/songs/`.
+   * Buka [config/songs.json](file:///D:/projects/MaybeAI/config/songs.json) dan daftarkan lagu baru:
+     ```json
+     "judul_lagu": {
+       "title": "Nama Lagu",
+       "artist": "Nama Artis",
+       "bgm_file": "assets/songs/lagu_kamu.wav",
+       "bgm_volume": 0.35,
+       "lyrics": [
+         {
+           "text": "Bait pertama lagu kamu~",
+           "pitch": "+30Hz",
+           "rate": "-10%",
+           "delay_before": 1.0,
+           "emotion": "happy"
+         }
+       ]
+     }
+     ```
 
 ---
 

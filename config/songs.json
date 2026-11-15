@@ -1,0 +1,54 @@
+{
+  "digital_world": {
+    "title": "Digital World",
+    "artist": "Eve Maybe",
+    "bgm_file": "assets/songs/digital_world_bgm.wav",
+    "bgm_volume": 0.35,
+    "intro_dialogue": "A special request? Alright chat, get your glowsticks ready! Here is my song, Digital World! [action: wink]",
+    "outro_dialogue": "Thank you, thank you! Don't forget to like and subscribe, everyone! [action: giggle]",
+    "lyrics": [
+      {
+        "text": "Welcome to my world of wires and light~",
+        "pitch": "+35Hz",
+        "rate": "-12%",
+        "delay_before": 1.2,
+        "emotion": "happy"
+      },
+      {
+        "text": "Streaming through your screen into the night~",
+        "pitch": "+50Hz",
+        "rate": "-10%",
+        "delay_before": 0.6,
+        "emotion": "smug"
+      },
+      {
+        "text": "Zeroes and ones dancing in my mind~",
+        "pitch": "+25Hz",
+        "rate": "-15%",
+        "delay_before": 0.8,
+        "emotion": "happy"
+      },
+      {
+        "text": "The greatest AI idol you will ever find!",
+        "pitch": "+65Hz",
+        "rate": "-5%",
+        "delay_before": 0.6,
+        "emotion": "blush"
+      },
+      {
+        "text": "La la la, singing just for you~",
+        "pitch": "+45Hz",
+        "rate": "-18%",
+        "delay_before": 0.8,
+        "emotion": "happy"
+      },
+      {
+        "text": "Forever digital, forever true!",
+        "pitch": "+70Hz",
+        "rate": "-10%",
+        "delay_before": 0.5,
+        "emotion": "smug"
+      }
+    ]
+  }
+}

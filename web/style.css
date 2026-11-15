@@ -334,3 +334,15 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
+
+.pill-karaoke {
+  background: linear-gradient(135deg, rgba(255, 77, 141, 0.2), rgba(0, 240, 255, 0.2));
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+.pill-karaoke:hover {
+  background: linear-gradient(135deg, rgba(255, 77, 141, 0.4), rgba(0, 240, 255, 0.4));
+  box-shadow: 0 0 10px rgba(255, 77, 141, 0.4);
+}
