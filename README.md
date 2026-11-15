@@ -191,15 +191,14 @@ Di halaman `http://localhost:7860`, pada panel **Minecraft Live Gameplay Engine*
   * Tombol uji interaksi: `👤 Player Nearby`, `🗡️ Hit Eve`, `💎 Give Diamond`, `🙇 Friendly Crouch`, `⏩ Next Milestone`.
   * HUD live status: Status koneksi server, Timer split, dan Darah (❤️ 20/20).
 
-### 4. Menghubungkan ke Server Minecraft Asli (Mineflayer)
-Jika kamu menjalankan server Minecraft Java (LAN atau Dedicated Server di `localhost:25565`):
-1. Masuk ke folder `minecraft/`:
-   ```powershell
-   cd minecraft
-   npm install
-   node bot.js
-   ```
-2. Bot `EveMaybe` akan langsung login ke server Minecraft kamu dan terhubung ke otak Eve!
+### 4. Menghubungkan ke Server Minecraft Asli (Otomatis & Terintegrasi)
+Sistem sudah dilengkapi **Portable Node.js bawaan** dan modul **Mineflayer Bridge**:
+* Kamu **tidak perlu menginstal Node.js secara manual di Windows**.
+* Saat kamu menekan tombol **`🚀 Join Server`** di Web Dashboard (atau lewat chat), sistem secara otomatis menjalankan proses bot di latar belakang, terhubung via WebSocket port `25566`, dan bot `EveMaybe` langsung spawn di server Minecraft kamu!
+* Bot dilengkapi:
+  * **Pathfinding & Obstacle Avoidance** (`mineflayer-pathfinder`).
+  * **Social Head Tracking & Follow Player** di Mode Santai.
+  * **Autonomous Speedrun Loop**: Penebangan pohon (`_log`), penambangan batu (`cobblestone`), perburuan hewan/makanan, pertahanan terhadap monster, dan kalkulasi split timer otomatis di Mode Kompe.
 
 ---
 
