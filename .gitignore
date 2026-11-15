@@ -23,6 +23,8 @@ logs/
 
 # Node & JavaScript dependencies
 node_modules/
+minecraft/node/
+minecraft/node_modules/
 npm-debug.log*
 
 # IDE & Editor settings

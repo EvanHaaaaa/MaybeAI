@@ -1,8 +1,11 @@
 import asyncio
 import json
 import uuid
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional, Callable, List
+import websockets
 from core.minecraft.casual_agent import CasualAgent
 from core.minecraft.speedrun_agent import SpeedrunAgent, PHASE_NAMES, SpeedrunPhase
 
@@ -13,7 +16,7 @@ class MinecraftController:
     - Mode switching: 'santai' (Casual / Social) vs 'kompe' (Speedrun / Competitive)
     - Multi-server manager (Add, Delete, Select, Connect)
     - State synchronization (Health, Position, Inventory, Current Objective)
-    - In-game Player Interactions & Chat
+    - Mineflayer bot process spawning and live WebSocket bridge communication
     - Real-time commentary triggered via Orchestrator
     """
 
@@ -34,9 +37,14 @@ class MinecraftController:
         # Telemetry & Game State
         self.health = 20
         self.food = 20
-        self.pos = {"x": 120, "y": 64, "z": -250}
+        self.pos = {"x": 0, "y": 0, "z": 0}
         self.connection_status = "disconnected"  # "disconnected", "connecting", "connected"
         self.nearby_players: List[Dict[str, Any]] = []
+
+        # Bot Process & WebSocket Bridge
+        self.bot_process: Optional[subprocess.Popen] = None
+        self.bridge_ws: Optional[websockets.WebSocketClientProtocol] = None
+        self.bridge_task: Optional[asyncio.Task] = None
 
         self.on_commentary_callback: Optional[Callable[[str], Any]] = None
         self.on_state_change_callback: Optional[Callable[[Dict[str, Any]], Any]] = None
@@ -104,6 +112,72 @@ class MinecraftController:
             "nearby_players": self.nearby_players
         }
 
+    async def _ensure_bridge_running(self):
+        """Checks and starts the Mineflayer Node.js bot process and WebSocket bridge."""
+        node_exe = Path("minecraft/node/node.exe")
+        if not node_exe.exists():
+            node_cmd = shutil.which("node") or "node"
+        else:
+            node_cmd = str(node_exe.resolve())
+
+        if self.bot_process is None or self.bot_process.poll() is not None:
+            print(f"[Minecraft] Starting Mineflayer bot process with: {node_cmd}...")
+            self.bot_process = subprocess.Popen(
+                [node_cmd, "bot.js"],
+                cwd="minecraft"
+            )
+            await asyncio.sleep(1.5)
+
+        if self.bridge_ws is None:
+            try:
+                self.bridge_ws = await websockets.connect("ws://localhost:25566")
+                print("[Minecraft] Connected to Mineflayer WebSocket bridge!")
+                if self.bridge_task is None or self.bridge_task.done():
+                    self.bridge_task = asyncio.create_task(self._listen_bridge())
+            except Exception as e:
+                print(f"[Minecraft] Failed connecting to bridge ws://localhost:25566: {e}")
+
+    async def _listen_bridge(self):
+        """Listens for real-time events from the Mineflayer bot."""
+        while self.bridge_ws:
+            try:
+                msg_raw = await self.bridge_ws.recv()
+                event = json.loads(msg_raw)
+                event_type = event.get("type")
+                data = event.get("data", {})
+
+                if event_type == "bot_spawned":
+                    self.connection_status = "connected"
+                    self.is_active = True
+                    self.pos = data.get("pos", self.pos)
+                    self.health = data.get("health", 20)
+                    self.food = data.get("food", 20)
+                    print(f"[Minecraft] Eve spawned in server! Pos: {self.pos}")
+                    await self.emit_commentary("[emotion: happy] I'm in! Eve has spawned into the world! Time to explore. [action: wink]")
+                    await self.emit_state()
+
+                elif event_type == "player_nearby":
+                    await self.player_joined_proximity(data.get("username", ""), data.get("distance", 5.0))
+
+                elif event_type == "player_chat":
+                    await self.player_sent_chat(data.get("username", ""), data.get("message", ""))
+
+                elif event_type == "bot_hurt":
+                    await self.player_attacked_bot(data.get("source", "danger"))
+
+                elif event_type in ["bot_kicked", "bot_error", "bot_disconnected"]:
+                    self.connection_status = "disconnected"
+                    self.is_active = False
+                    reason = data.get("reason") or data.get("message") or "Connection dropped"
+                    print(f"[Minecraft] Bot disconnected from server: {reason}")
+                    await self.emit_commentary(f"[emotion: sad] Disconnected from server: {reason}")
+                    await self.emit_state()
+
+            except Exception as e:
+                print(f"[Minecraft Bridge Reader] Error or disconnect: {e}")
+                break
+        self.bridge_ws = None
+
     async def connect_to_server(self, server_id: Optional[str] = None) -> str:
         """Connect bot to designated server."""
         if server_id:
@@ -115,15 +189,29 @@ class MinecraftController:
             return "No server selected."
 
         name = self.active_server.get("name", "Minecraft Server")
-        host = self.active_server.get("host", "localhost")
-        port = self.active_server.get("port", 25565)
+        host = self.active_server.get("host", "basic.raehost.com")
+        port = self.active_server.get("port", 19214)
+        version = self.active_server.get("version", "1.21.1")
 
-        self.connection_status = "connected"
-        self.is_active = True
+        self.connection_status = "connecting"
+        await self.emit_state()
 
         speech = f"[emotion: happy] Logging into {name} at {host}:{port}! Wish me luck chat, Eve is entering the server! [action: wink]"
         await self.emit_commentary(speech)
-        await self.emit_state()
+
+        # Start bridge and send connect command
+        await self._ensure_bridge_running()
+        if self.bridge_ws:
+            cmd = {
+                "action": "connect_server",
+                "host": host,
+                "port": port,
+                "username": self.bot_name,
+                "version": version
+            }
+            await self.bridge_ws.send(json.dumps(cmd))
+            print(f"[Minecraft] Sent connect command to bridge for {host}:{port}")
+
         return speech
 
     async def disconnect_from_server(self) -> str:
@@ -131,10 +219,47 @@ class MinecraftController:
         self.connection_status = "disconnected"
         self.is_active = False
 
+        if self.bridge_ws:
+            try:
+                await self.bridge_ws.send(json.dumps({"action": "disconnect_server"}))
+            except Exception:
+                pass
+
+        if self.bot_process and self.bot_process.poll() is None:
+            try:
+                self.bot_process.terminate()
+            except Exception:
+                pass
+            self.bot_process = None
+
         speech = "[emotion: smug] Left the server for now! Back to streaming with chat."
         await self.emit_commentary(speech)
         await self.emit_state()
         return speech
+
+    async def send_bridge_cmd(self, action: str, **kwargs):
+        """Sends command payload to Mineflayer bot bridge."""
+        if self.bridge_ws:
+            payload = {"action": action, **kwargs}
+            try:
+                await self.bridge_ws.send(json.dumps(payload))
+            except Exception as e:
+                print(f"[Minecraft Command Error] {e}")
+
+    async def follow_nearest(self):
+        await self.send_bridge_cmd("follow_nearest")
+
+    async def stop_moving(self):
+        await self.send_bridge_cmd("stop_moving")
+
+    async def jump(self):
+        await self.send_bridge_cmd("jump")
+
+    async def crouch(self):
+        await self.send_bridge_cmd("crouch")
+
+    async def toggle_wander(self):
+        await self.send_bridge_cmd("toggle_wander")
 
     async def emit_commentary(self, speech: str):
         if self.on_commentary_callback and speech:

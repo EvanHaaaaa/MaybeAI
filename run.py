@@ -92,6 +92,16 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif act == "delete_server":
                     orchestrator.minecraft.delete_server(data.get("server_id"))
                     await orchestrator.minecraft.emit_state()
+                elif act == "follow_nearest":
+                    await orchestrator.minecraft.follow_nearest()
+                elif act == "stop_moving":
+                    await orchestrator.minecraft.stop_moving()
+                elif act == "jump":
+                    await orchestrator.minecraft.jump()
+                elif act == "crouch":
+                    await orchestrator.minecraft.crouch()
+                elif act == "toggle_wander":
+                    await orchestrator.minecraft.toggle_wander()
                 elif act == "simulate_event":
                     event_name = data.get("event")
                     target = data.get("target", "Player1")

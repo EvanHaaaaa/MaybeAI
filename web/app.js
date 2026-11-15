@@ -247,6 +247,33 @@ document.addEventListener("DOMContentLoaded", () => {
     sendMinecraftAction({ action: "advance_speedrun" });
   });
 
+  // Real in-game movement buttons
+  const btnFollowNearest = document.getElementById("btn-follow-nearest");
+  const btnStopMoving = document.getElementById("btn-stop-moving");
+  const btnJump = document.getElementById("btn-jump");
+  const btnCrouch = document.getElementById("btn-crouch");
+
+  if (btnFollowNearest) {
+    btnFollowNearest.addEventListener("click", () => {
+      sendMinecraftAction({ action: "follow_nearest" });
+    });
+  }
+  if (btnStopMoving) {
+    btnStopMoving.addEventListener("click", () => {
+      sendMinecraftAction({ action: "stop_moving" });
+    });
+  }
+  if (btnJump) {
+    btnJump.addEventListener("click", () => {
+      sendMinecraftAction({ action: "jump" });
+    });
+  }
+  if (btnCrouch) {
+    btnCrouch.addEventListener("click", () => {
+      sendMinecraftAction({ action: "crouch" });
+    });
+  }
+
   document.getElementById("sim-nearby").addEventListener("click", () => {
     sendMinecraftAction({ action: "simulate_event", event: "nearby", target: "Steve" });
   });
@@ -255,9 +282,6 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("sim-gift").addEventListener("click", () => {
     sendMinecraftAction({ action: "simulate_event", event: "gift", target: "Viewer42", item: "Diamond" });
-  });
-  document.getElementById("sim-crouch").addEventListener("click", () => {
-    sendMinecraftAction({ action: "simulate_event", event: "crouch", target: "Friend" });
   });
 
   // --- 2D Animated Avatar Renderer ---
