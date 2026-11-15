@@ -165,6 +165,19 @@ class MinecraftController:
                 elif event_type == "bot_hurt":
                     await self.player_attacked_bot(data.get("source", "danger"))
 
+                elif event_type == "speedrun_action":
+                    action_type = data.get("action", "")
+                    reaction = self.speedrun_agent.on_speedrun_action(action_type, data)
+                    if reaction:
+                        await self.emit_commentary(reaction)
+                    await self.emit_state()
+
+                elif event_type == "speedrun_phase_completed":
+                    next_p = data.get("nextPhase")
+                    phase, comment = self.speedrun_agent.advance_phase(direct_phase=next_p)
+                    await self.emit_commentary(comment)
+                    await self.emit_state()
+
                 elif event_type in ["bot_kicked", "bot_error", "bot_disconnected"]:
                     self.connection_status = "disconnected"
                     self.is_active = False
@@ -207,7 +220,8 @@ class MinecraftController:
                 "host": host,
                 "port": port,
                 "username": self.bot_name,
-                "version": version
+                "version": version,
+                "mode": self.current_mode
             }
             await self.bridge_ws.send(json.dumps(cmd))
             print(f"[Minecraft] Sent connect command to bridge for {host}:{port}")
@@ -282,6 +296,9 @@ class MinecraftController:
         self.current_mode = new_mode
         self.is_active = True
 
+        # Send command to Mineflayer bridge so it starts/stops speedrun behavior
+        await self.send_bridge_cmd("set_mode", mode=new_mode)
+
         if new_mode == "santai":
             speech = "[emotion: happy] Switching to Mode Santai! Time to chill, explore, and hang out with everyone on the server! [action: wink]"
         else:
@@ -330,6 +347,8 @@ class MinecraftController:
             await self.set_mode("kompe")
 
         phase, comment = self.speedrun_agent.advance_phase()
+        # Inform the bridge bot of the phase advancement
+        await self.send_bridge_cmd("advance_speedrun", phase=phase)
         await self.emit_commentary(comment)
         await self.emit_state()
         return comment

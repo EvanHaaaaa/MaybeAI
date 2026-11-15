@@ -12,6 +12,7 @@ const mineflayer = require('mineflayer');
 const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
 const WebSocket = require('ws');
 const fs = require('fs');
+const SpeedrunRunner = require('./speedrun');
 
 const config = JSON.parse(fs.readFileSync('./config.json', 'utf8'));
 
@@ -21,6 +22,7 @@ let currentMode = config.default_mode || 'santai';
 let followingTarget = null;
 let isWandering = true;
 let autonomyInterval = null;
+let speedrunRunner = null;
 
 // Initialize WebSocket Bridge Server for Python on 25566
 const wsServer = new WebSocket.Server({ port: config.bridge_ws_port });
@@ -140,13 +142,14 @@ function startAutonomyLoop() {
   }, 1500);
 }
 
-function createBot(host, port, username, version) {
+function createBot(host, port, username, version, mode) {
   const targetHost = host || config.server_host;
   const targetPort = port || config.server_port;
   const targetUser = username || config.bot_username || 'EveMaybe';
   const targetVer = version || config.minecraft_version || '1.21.1';
+  if (mode) currentMode = mode;
 
-  console.log(`[Mineflayer] Connecting to ${targetHost}:${targetPort} as ${targetUser} (v${targetVer})...`);
+  console.log(`[Mineflayer] Connecting to ${targetHost}:${targetPort} as ${targetUser} (v${targetVer}, mode=${currentMode})...`);
 
   if (bot) {
     try { bot.quit(); } catch (e) {}
@@ -174,9 +177,9 @@ function createBot(host, port, username, version) {
       const mcData = require('minecraft-data')(bot.version);
       const moves = new Movements(bot, mcData);
       moves.allowParkour = true;
-      moves.canDig = false; // Don't break random blocks in casual
+      moves.canDig = currentMode === 'kompe';
       bot.pathfinder.setMovements(moves);
-      console.log('[Mineflayer] Movements and pathfinding initialized!');
+      console.log(`[Mineflayer] Movements and pathfinding initialized! (canDig=${moves.canDig})`);
     } catch (e) {
       console.log('[Mineflayer] Pathfinder setup notice:', e.message);
     }
@@ -188,8 +191,13 @@ function createBot(host, port, username, version) {
       food: bot.food !== undefined ? bot.food : 20
     });
 
-    // Start lively autonomous movements & look-around
-    startAutonomyLoop();
+    speedrunRunner = new SpeedrunRunner(bot, sendToPython);
+
+    if (currentMode === 'kompe') {
+      speedrunRunner.start();
+    } else {
+      startAutonomyLoop();
+    }
   });
 
   // Handle in-game chat commands directly from other players
@@ -254,6 +262,7 @@ function createBot(host, port, username, version) {
 
   bot.on('kicked', (reason) => {
     console.log('[Mineflayer] Kicked from server:', reason);
+    if (speedrunRunner) speedrunRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     const reasonStr = typeof reason === 'object' ? JSON.stringify(reason) : String(reason);
     sendToPython('bot_kicked', { reason: reasonStr });
@@ -266,6 +275,7 @@ function createBot(host, port, username, version) {
 
   bot.on('end', (reason) => {
     console.log('[Mineflayer] Bot session ended:', reason);
+    if (speedrunRunner) speedrunRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     sendToPython('bot_disconnected', { reason: String(reason) });
   });
@@ -273,12 +283,13 @@ function createBot(host, port, username, version) {
 
 function handlePythonCommand(cmd) {
   if (cmd.action === 'connect_server') {
-    createBot(cmd.host, cmd.port, cmd.username, cmd.version);
+    createBot(cmd.host, cmd.port, cmd.username, cmd.version, cmd.mode);
     return;
   }
 
   if (cmd.action === 'disconnect_server') {
     console.log('[Mineflayer] Disconnecting bot from server...');
+    if (speedrunRunner) speedrunRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     if (bot) {
       try { bot.quit(); } catch (e) {}
@@ -295,6 +306,31 @@ function handlePythonCommand(cmd) {
   } else if (cmd.action === 'set_mode') {
     currentMode = cmd.mode;
     console.log(`[Mineflayer] Mode set to: ${currentMode}`);
+    if (currentMode === 'kompe') {
+      followingTarget = null;
+      if (autonomyInterval) {
+        clearInterval(autonomyInterval);
+        autonomyInterval = null;
+      }
+      if (bot && bot.pathfinder && bot.pathfinder.movements) {
+        bot.pathfinder.movements.canDig = true;
+      }
+      if (speedrunRunner) {
+        speedrunRunner.start();
+      }
+    } else {
+      if (speedrunRunner) {
+        speedrunRunner.stop();
+      }
+      if (bot && bot.pathfinder && bot.pathfinder.movements) {
+        bot.pathfinder.movements.canDig = false;
+      }
+      startAutonomyLoop();
+    }
+  } else if (cmd.action === 'advance_speedrun') {
+    if (speedrunRunner) {
+      speedrunRunner.setPhase(cmd.phase);
+    }
   } else if (cmd.action === 'crouch') {
     bot.setControlState('sneak', true);
     setTimeout(() => bot.setControlState('sneak', false), 800);
