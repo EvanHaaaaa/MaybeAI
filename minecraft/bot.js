@@ -13,6 +13,7 @@ const { pathfinder, Movements, goals } = require('mineflayer-pathfinder');
 const WebSocket = require('ws');
 const fs = require('fs');
 const SpeedrunRunner = require('./speedrun');
+const CasualRunner = require('./casual');
 
 const config = JSON.parse(fs.readFileSync('./config.json', 'utf8'));
 
@@ -23,6 +24,7 @@ let followingTarget = null;
 let isWandering = true;
 let autonomyInterval = null;
 let speedrunRunner = null;
+let casualRunner = null;
 
 // Initialize WebSocket Bridge Server for Python on 25566
 const wsServer = new WebSocket.Server({ port: config.bridge_ws_port });
@@ -192,11 +194,14 @@ function createBot(host, port, username, version, mode) {
     });
 
     speedrunRunner = new SpeedrunRunner(bot, sendToPython);
+    casualRunner = new CasualRunner(bot, sendToPython);
 
     if (currentMode === 'kompe') {
+      casualRunner.stop();
       speedrunRunner.start();
     } else {
-      startAutonomyLoop();
+      speedrunRunner.stop();
+      casualRunner.start();
     }
   });
 
@@ -263,6 +268,7 @@ function createBot(host, port, username, version, mode) {
   bot.on('kicked', (reason) => {
     console.log('[Mineflayer] Kicked from server:', reason);
     if (speedrunRunner) speedrunRunner.stop();
+    if (casualRunner) casualRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     const reasonStr = typeof reason === 'object' ? JSON.stringify(reason) : String(reason);
     sendToPython('bot_kicked', { reason: reasonStr });
@@ -276,6 +282,7 @@ function createBot(host, port, username, version, mode) {
   bot.on('end', (reason) => {
     console.log('[Mineflayer] Bot session ended:', reason);
     if (speedrunRunner) speedrunRunner.stop();
+    if (casualRunner) casualRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     sendToPython('bot_disconnected', { reason: String(reason) });
   });
@@ -290,6 +297,7 @@ function handlePythonCommand(cmd) {
   if (cmd.action === 'disconnect_server') {
     console.log('[Mineflayer] Disconnecting bot from server...');
     if (speedrunRunner) speedrunRunner.stop();
+    if (casualRunner) casualRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     if (bot) {
       try { bot.quit(); } catch (e) {}
@@ -308,6 +316,7 @@ function handlePythonCommand(cmd) {
     console.log(`[Mineflayer] Mode set to: ${currentMode}`);
     if (currentMode === 'kompe') {
       followingTarget = null;
+      if (casualRunner) casualRunner.stop();
       if (autonomyInterval) {
         clearInterval(autonomyInterval);
         autonomyInterval = null;
@@ -323,9 +332,11 @@ function handlePythonCommand(cmd) {
         speedrunRunner.stop();
       }
       if (bot && bot.pathfinder && bot.pathfinder.movements) {
-        bot.pathfinder.movements.canDig = false;
+        bot.pathfinder.movements.canDig = true;
       }
-      startAutonomyLoop();
+      if (casualRunner) {
+        casualRunner.start();
+      }
     }
   } else if (cmd.action === 'advance_speedrun') {
     if (speedrunRunner) {

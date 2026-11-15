@@ -43,9 +43,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const msg = JSON.parse(event.data);
 
     if (msg.type === "chat_received") {
-      addChatMessage(msg.data.user, msg.data.text, false);
+      const author = msg.data.source === "minecraft" ? `🎮 [MC] ${msg.data.user}` : msg.data.user;
+      addChatMessage(author, msg.data.text, false);
     } else if (msg.type === "ai_response") {
-      addChatMessage("Eve", msg.data.speech, true);
+      const author = msg.data.user || "Eve";
+      addChatMessage(author, msg.data.speech, true);
       subtitles.textContent = `"${msg.data.speech}"`;
       if (msg.data.emotions && msg.data.emotions.length > 0) {
         setEmotion(msg.data.emotions[0]);

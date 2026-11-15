@@ -48,10 +48,17 @@ class MinecraftController:
 
         self.on_commentary_callback: Optional[Callable[[str], Any]] = None
         self.on_state_change_callback: Optional[Callable[[Dict[str, Any]], Any]] = None
+        self.on_in_game_chat_callback: Optional[Callable[[str, str], Any]] = None
 
-    def set_callbacks(self, on_commentary: Callable[[str], Any], on_state_change: Optional[Callable[[Dict[str, Any]], Any]] = None):
+    def set_callbacks(
+        self, 
+        on_commentary: Callable[[str], Any], 
+        on_state_change: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        on_in_game_chat: Optional[Callable[[str, str], Any]] = None
+    ):
         self.on_commentary_callback = on_commentary
         self.on_state_change_callback = on_state_change
+        self.on_in_game_chat_callback = on_in_game_chat
 
     def load_servers(self):
         if self.servers_config_path.exists():
@@ -160,7 +167,26 @@ class MinecraftController:
                     await self.player_joined_proximity(data.get("username", ""), data.get("distance", 5.0))
 
                 elif event_type == "player_chat":
-                    await self.player_sent_chat(data.get("username", ""), data.get("message", ""))
+                    sender = data.get("username", "")
+                    message = data.get("message", "")
+                    if self.on_in_game_chat_callback and sender and message:
+                        res = self.on_in_game_chat_callback(sender, message)
+                        if asyncio.iscoroutine(res):
+                            await res
+                    else:
+                        await self.player_sent_chat(sender, message)
+
+                elif event_type == "casual_action":
+                    act = data.get("action", "")
+                    if act == "picked_flower":
+                        fl = data.get("flower", "bunga")
+                        await self.emit_commentary(f"[emotion: happy] Aku nemu bunga {fl}! Cantik banget buat ditaruh di base.")
+                    elif act == "observed_animal":
+                        an = data.get("animal", "hewan")
+                        await self.emit_commentary(f"[emotion: happy] Liat deh chat, ada {an} lucu! Mau aku pelihara nggak ya?")
+                    elif act == "picked_item":
+                        await self.emit_commentary("[emotion: smug] Ooh, ada item gratis jatuh di tanah! Masuk ke kantongku.")
+                    await self.emit_state()
 
                 elif event_type == "bot_hurt":
                     await self.player_attacked_bot(data.get("source", "danger"))
@@ -259,6 +285,16 @@ class MinecraftController:
                 await self.bridge_ws.send(json.dumps(payload))
             except Exception as e:
                 print(f"[Minecraft Command Error] {e}")
+
+    async def send_chat(self, message: str):
+        """Send message into Minecraft in-game chat."""
+        import re
+        clean_msg = re.sub(r'\[(?:emotion|action):[^\]]+\]', '', message).strip()
+        clean_msg = clean_msg.replace('\n', ' ')
+        if len(clean_msg) > 240:
+            clean_msg = clean_msg[:237] + "..."
+        if clean_msg:
+            await self.send_bridge_cmd("chat", message=clean_msg)
 
     async def follow_nearest(self):
         await self.send_bridge_cmd("follow_nearest")

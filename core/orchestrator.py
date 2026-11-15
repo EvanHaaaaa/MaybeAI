@@ -47,7 +47,8 @@ class Orchestrator:
         self.minecraft = MinecraftController(bot_name="EveMaybe")
         self.minecraft.set_callbacks(
             on_commentary=self._on_minecraft_commentary,
-            on_state_change=self._on_minecraft_state_change
+            on_state_change=self._on_minecraft_state_change,
+            on_in_game_chat=self._on_in_game_chat
         )
 
         self.chat = ChatReceiver()
@@ -159,7 +160,12 @@ class Orchestrator:
             return
 
         # 2. Brain generates response
-        raw_response = await self.brain.generate_response(msg.user, clean_input)
+        if msg.source == "minecraft":
+            llm_input = f"[Minecraft In-Game Chat from {msg.user}]: {clean_input}\n(You are currently inside Minecraft playing with them! Respond directly to {msg.user} in 1-2 witty sentences)"
+        else:
+            llm_input = clean_input
+
+        raw_response = await self.brain.generate_response(msg.user, llm_input)
 
         # Filter AI response just in case
         _, clean_response = self.moderator.clean_text(raw_response)
@@ -169,12 +175,17 @@ class Orchestrator:
         primary_emotion = emotions[0] if emotions else "neutral"
 
         await self.broadcast("ai_response", {
-            "user": msg.user,
+            "user": f"Eve (to {msg.user})" if msg.source == "minecraft" else "Eve",
             "raw": clean_response,
             "speech": speech_text,
             "emotions": emotions,
-            "actions": actions
+            "actions": actions,
+            "source": msg.source
         })
+
+        # If from in-game Minecraft chat, send reply back into Minecraft server chat!
+        if msg.source == "minecraft":
+            await self.minecraft.send_chat(speech_text)
 
         # 4. Trigger Avatar Expression
         if self.vts.connected:
@@ -318,3 +329,7 @@ class Orchestrator:
 
     async def _on_minecraft_state_change(self, state: Dict[str, Any]):
         await self.broadcast("minecraft_state", state)
+
+    async def _on_in_game_chat(self, sender: str, message: str):
+        print(f"[Minecraft Chat Ingested] <{sender}>: {message}")
+        await self.chat.put_message(user=sender, text=message, source="minecraft")
