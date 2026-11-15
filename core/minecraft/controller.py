@@ -186,6 +186,16 @@ class MinecraftController:
                         await self.emit_commentary(f"[emotion: happy] Liat deh chat, ada {an} lucu! Mau aku pelihara nggak ya?")
                     elif act == "picked_item":
                         await self.emit_commentary("[emotion: smug] Ooh, ada item gratis jatuh di tanah! Masuk ke kantongku.")
+                    elif act == "gifted_player":
+                        target = data.get("player", "Player")
+                        item_name = data.get("item", "hadiah")
+                        gift_reactions = [
+                            f"[emotion: blush] Aku baru aja ngasih {item_name} ke {target}! Chat, manis banget kan aku hari ini? [action: giggle]",
+                            f"[emotion: happy] Spesial buat {target}, aku kasih {item_name}! Disimpan baik-baik ya! [action: wink]",
+                            f"[emotion: smug] Nih {target}, aku sedekahin {item_name}. Bersyukurlah kepada AI idol-mu!"
+                        ]
+                        import random
+                        await self.emit_commentary(random.choice(gift_reactions))
                     await self.emit_state()
 
                 elif event_type == "bot_hurt":

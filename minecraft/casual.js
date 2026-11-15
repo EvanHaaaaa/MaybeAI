@@ -18,6 +18,7 @@ class CasualRunner {
     this.busy = false;
     this.interval = null;
     this.greetedPlayers = new Set();
+    this.lastGiftTimes = new Map();
     this.actionCooldown = 0;
     this.lastActionTime = 0;
   }
@@ -110,6 +111,54 @@ class CasualRunner {
     });
   }
 
+  async giftPlayer(player, entity) {
+    if (!this.bot || !this.bot.inventory) return false;
+    const items = this.bot.inventory.items();
+    if (items.length === 0) return false;
+
+    // Prioritize sweet/cute items: flowers, food, seeds, shiny minerals
+    const sweetPriorities = [
+      'flower', 'poppy', 'dandelion', 'tulip', 'orchid', 'sunflower', 'daisy',
+      'apple', 'bread', 'cookie', 'berries', 'carrot',
+      'diamond', 'emerald', 'gold', 'amethyst', 'seed'
+    ];
+
+    let giftItem = items.find(i => sweetPriorities.some(p => i.name.toLowerCase().includes(p)));
+    if (!giftItem) {
+      giftItem = items[Math.floor(Math.random() * items.length)];
+    }
+
+    try {
+      console.log(`[Casual Runner] Gifting ${giftItem.name} to player ${player.username}`);
+      await this.bot.lookAt(entity.position.offset(0, 1.2, 0));
+      await this.bot.toss(giftItem.type, null, 1);
+
+      // Sweet reaction gestures: crouch & wave
+      this.bot.setControlState('sneak', true);
+      setTimeout(() => this.bot.setControlState('sneak', false), 600);
+      try { this.bot.swingArm('right'); } catch (e) {}
+
+      const cleanItemName = giftItem.name.replace(/_/g, ' ');
+      const giftMessages = [
+        `Ini buat kamu, ${player.username}! Hadiah spesial dari aku~ ✨`,
+        `Aku nemu ${cleanItemName} tadi, ini buat kamu ${player.username}! Simpan baik-baik ya 🎁`,
+        `Nih hadiah kecil buat kamu ${player.username}, dijaga baik-baik yaa! 💕`
+      ];
+      const chatMsg = giftMessages[Math.floor(Math.random() * giftMessages.length)];
+      this.bot.chat(chatMsg);
+
+      this.sendToPython('casual_action', {
+        action: 'gifted_player',
+        player: player.username,
+        item: cleanItemName
+      });
+      return true;
+    } catch (e) {
+      console.log('[Casual Runner Gifting Notice]', e.message);
+      return false;
+    }
+  }
+
   async step() {
     if (!this.active || !this.bot || !this.bot.entity) return;
     if (this.busy) return;
@@ -153,6 +202,19 @@ class CasualRunner {
           const greetMsg = greetings[Math.floor(Math.random() * greetings.length)];
           this.bot.chat(greetMsg);
           this.sendToPython('player_nearby', { username: player.username, distance: distance });
+        }
+
+        // --- Sweet Gifting Gesture ---
+        // Hadiahkan barang acak dari inventory ke player (cooldown 20 detik per player)
+        const now = Date.now();
+        const lastGift = this.lastGiftTimes.get(player.username) || 0;
+        if (now - lastGift > 20000) {
+          const gifted = await this.giftPlayer(player, entity);
+          if (gifted) {
+            this.lastGiftTimes.set(player.username, now);
+            this.busy = false;
+            return;
+          }
         }
 
         this.busy = false;
