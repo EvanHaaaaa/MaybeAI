@@ -15,10 +15,21 @@
         <span class="pulse-dot"></span>
         <h1>MaybeAI <span>(Eve Maybe)</span></h1>
       </div>
-      <div class="status-tags">
-        <span id="llm-status" class="badge">LLM: Ready</span>
-        <span id="vts-status" class="badge">VTS: Standby</span>
-        <span id="ws-status" class="badge badge-online">Connected</span>
+      <div class="header-right">
+        <div class="llm-select-box">
+          <label for="llmProviderSelect">🧠 Model:</label>
+          <select id="llmProviderSelect" class="select-llm">
+            <option value="gemini">Google Gemini (Cloud AI)</option>
+            <option value="openai">OpenAI (GPT-4o-mini)</option>
+            <option value="ollama">Local Ollama (Llama 3.2)</option>
+            <option value="mock">Mock Engine (Offline Persona)</option>
+          </select>
+        </div>
+        <div class="status-tags">
+          <span id="llm-status" class="badge badge-accent">LLM: GEMINI</span>
+          <span id="vts-status" class="badge">VTS: Standby</span>
+          <span id="ws-status" class="badge badge-online">Connected</span>
+        </div>
       </div>
     </header>
 

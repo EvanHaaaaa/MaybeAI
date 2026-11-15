@@ -139,12 +139,26 @@ CRITICAL RULES:
         except Exception as e:
             return f"[emotion: confused] Couldn't reach local Ollama: {e}"
 
+    def set_provider(self, provider: str) -> str:
+        prov = provider.lower().strip()
+        if prov in ["mock", "gemini", "openai", "ollama"]:
+            self.settings.setdefault("llm", {})["provider"] = prov
+            try:
+                with open("config/settings.json", "w", encoding="utf-8") as f:
+                    json.dump(self.settings, f, indent=2)
+            except Exception:
+                pass
+            return prov
+        return self.settings.get("llm", {}).get("provider", "mock")
+
     async def _generate_gemini(self) -> str:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            return "[emotion: confused] GEMINI_API_KEY is not set!"
+            print("[Brain Warning] GEMINI_API_KEY is not set. Falling back to local persona engine.")
+            return self._generate_mock(self.history[-1].get("name", "User"), self.history[-1].get("content", ""))
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        model = self.settings.get("llm", {}).get("gemini_model", "gemini-3.8-flash")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         
         # Build contents
         contents = []
@@ -153,20 +167,25 @@ CRITICAL RULES:
             contents.append({"role": role, "parts": [{"text": item["content"]}]})
 
         payload = {
-            "system_instruction": {"parts": [{"text": self.system_prompt}]},
+            "systemInstruction": {"parts": [{"text": self.system_prompt}]},
             "contents": contents,
             "generationConfig": {"temperature": 0.8, "maxOutputTokens": 150}
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=10) as resp:
+            timeout = aiohttp.ClientTimeout(total=12)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.post(url, json=payload) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        return data["candidates"][0]["content"]["parts"][0]["text"]
-                    return f"[emotion: angry] Gemini error status {resp.status}"
+                        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                    else:
+                        err_text = await resp.text()
+                        print(f"[Brain Warning] Gemini returned status {resp.status}: {err_text[:120]}. Using persona fallback.")
+                        return self._generate_mock(self.history[-1].get("name", "User"), self.history[-1].get("content", ""))
         except Exception as e:
-            return f"[emotion: confused] Gemini connection error: {e}"
+            print(f"[Brain Warning] Gemini request error/timeout ({e}). Using persona fallback.")
+            return self._generate_mock(self.history[-1].get("name", "User"), self.history[-1].get("content", ""))
 
     def _pick_unseen(self, options: List[str]) -> str:
         """Picks an option that hasn't been used recently to prevent repetition."""

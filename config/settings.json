@@ -6,7 +6,8 @@
     "port": 7860
   },
   "llm": {
-    "provider": "mock",
+    "provider": "gemini",
+    "gemini_model": "gemini-3.8-flash",
     "model": "gpt-4o-mini",
     "temperature": 0.8,
     "max_tokens": 150,

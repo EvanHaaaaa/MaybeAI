@@ -63,6 +63,14 @@ async def websocket_endpoint(websocket: WebSocket):
         "data": orchestrator.minecraft.get_status()
     })
 
+    # Send current LLM provider
+    await websocket.send_json({
+        "type": "llm_provider_changed",
+        "data": {
+            "provider": orchestrator.brain.settings.get("llm", {}).get("provider", "gemini")
+        }
+    })
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -70,6 +78,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 user = data.get("user", "User")
                 text = data.get("text", "")
                 await orchestrator.chat.put_message(user=user, text=text, source="web")
+            elif data.get("type") == "set_llm_provider":
+                prov = data.get("provider", "mock")
+                active_prov = orchestrator.brain.set_provider(prov)
+                print(f"[Orchestrator] LLM provider switched to: {active_prov}")
+                await orchestrator.broadcast("llm_provider_changed", {"provider": active_prov})
             elif data.get("type") == "minecraft_action":
                 act = data.get("action")
                 if act == "set_mode":

@@ -10,6 +10,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const chatInput = document.getElementById("chatInput");
   const vtsStatus = document.getElementById("vts-status");
   const wsStatus = document.getElementById("ws-status");
+  const llmStatus = document.getElementById("llm-status");
+  const llmProviderSelect = document.getElementById("llmProviderSelect");
 
   // State
   let mouthOpen = 0.0;
@@ -71,8 +73,33 @@ document.addEventListener("DOMContentLoaded", () => {
       isSinging = false;
     } else if (msg.type === "minecraft_state") {
       updateMinecraftHud(msg.data);
+    } else if (msg.type === "llm_provider_changed") {
+      const prov = (msg.data.provider || "gemini").toLowerCase();
+      if (llmProviderSelect) {
+        llmProviderSelect.value = prov;
+      }
+      if (llmStatus) {
+        llmStatus.textContent = `LLM: ${prov.toUpperCase()}`;
+        if (prov === "gemini" || prov === "openai") {
+          llmStatus.className = "badge badge-accent";
+        } else if (prov === "ollama") {
+          llmStatus.className = "badge badge-online";
+        } else {
+          llmStatus.className = "badge";
+        }
+      }
     }
   };
+
+  // LLM Provider Switcher Listener
+  if (llmProviderSelect) {
+    llmProviderSelect.addEventListener("change", () => {
+      const selected = llmProviderSelect.value;
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_llm_provider", provider: selected }));
+      }
+    });
+  }
 
   function setEmotion(newEmotion) {
     emotion = newEmotion.toLowerCase();
