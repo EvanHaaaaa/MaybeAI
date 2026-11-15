@@ -64,6 +64,23 @@ async def websocket_endpoint(websocket: WebSocket):
                 user = data.get("user", "User")
                 text = data.get("text", "")
                 await orchestrator.chat.put_message(user=user, text=text, source="web")
+            elif data.get("type") == "minecraft_action":
+                act = data.get("action")
+                if act == "set_mode":
+                    await orchestrator.minecraft.set_mode(data.get("mode", "santai"))
+                elif act == "advance_speedrun":
+                    await orchestrator.minecraft.advance_speedrun()
+                elif act == "simulate_event":
+                    event_name = data.get("event")
+                    target = data.get("target", "Player1")
+                    if event_name == "nearby":
+                        await orchestrator.minecraft.player_joined_proximity(target)
+                    elif event_name == "attack":
+                        await orchestrator.minecraft.player_attacked_bot(target)
+                    elif event_name == "gift":
+                        await orchestrator.minecraft.player_gave_gift(target, data.get("item", "Diamond"))
+                    elif event_name == "crouch":
+                        await orchestrator.minecraft.player_crouched(target)
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:

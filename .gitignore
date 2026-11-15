@@ -21,6 +21,10 @@ __pycache__/
 temp/
 logs/
 
+# Node & JavaScript dependencies
+node_modules/
+npm-debug.log*
+
 # IDE & Editor settings
 .vscode/
 .idea/

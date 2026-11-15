@@ -22,11 +22,14 @@ Sistem ini menggabungkan Large Language Model (LLM), Text-to-Speech (TTS), speec
 3. **Dual Avatar Display:**
    * **Built-in Web Avatar Viewer:** Langsung tampil di browser (`http://localhost:7860`) dengan animasi mata berkedip, kepala mengambang, perubahan ekspresi, dan sinkronisasi mulut. Cocok dijadikan *Browser Source* di OBS Studio!
    * **VTube Studio API Integration:** Otomatis mendeteksi dan mengirim data WebSocket ke VTube Studio (`ws://localhost:8001`) untuk menggerakkan model Live2D profesional.
-4. **🎤 Karaoke & Singing Engine (Fitur Baru!):**
+4. **🎤 Karaoke & Singing Engine:**
    * Eve bisa menyanyikan lagu lengkap dengan instrumen BGM otomatis!
    * Pitch dan nada vokal diatur secara ritmik per bait lirik, mulut bergerak sinkron dengan vokal, dan ada animasi partikel not balok (♪ ♫) di layar avatar.
    * Mendukung penambahan lagu kustom lewat `config/songs.json` dan file audio di `assets/songs/`.
-5. **Safety & Moderation Filter:**
+5. **🟩 Minecraft Gameplay Engine (Mode Santai & Mode Kompe):**
+   * **Mode Santai (Casual / Social):** Eve berinteraksi santai dengan player lain di server (menyapa saat player mendekat, membalas crouch/t-bag, berterima kasih saat diberi hadiah item, dan marah lucu/roasting jika dipukul player).
+   * **Mode Kompe (Competitive / Speedrun):** Eve fokus speedrun Minecraft sampai tamat (10 fase: Kayu $\rightarrow$ Batu $\rightarrow$ Besi/Ember $\rightarrow$ Nether $\rightarrow$ Blaze Rods $\rightarrow$ Ender Pearl $\rightarrow$ Mata Ender $\rightarrow$ Stronghold $\rightarrow$ End Portal $\rightarrow$ Kalahkan Ender Dragon). Eve memberikan komentar taktis dan split timer secara live!
+6. **Safety & Moderation Filter:**
    * Filter pencegah prompt injection, kata-kata kasar, dan pelanggaran Twitch TOS.
 5. **Twitch IRC Chat & Interactive Web Chat:**
    * Bisa membaca live chat langsung dari channel Twitch penonton.
@@ -141,6 +144,56 @@ Untuk menggunakan AI sesungguhnya:
        ]
      }
      ```
+
+---
+
+## 🟩 Fitur Minecraft: Mode Santai & Mode Kompe
+
+Eve dilengkapi sistem gameplay Minecraft yang memiliki 2 mode interaktif:
+
+### 1. Mode Santai (Casual / Social)
+* **Tujuan:** Berkeliling santai, menyapa penonton/player, dan berinteraksi sosial.
+* **Perilaku AI:**
+  * **Player Mendekat:** Menyapa nama player dengan ramah.
+  * **Player Crouch/T-bag:** Eve membalas crouch sebagai sapaan damai.
+  * **Player Memberi Hadiah (Drop Item):** Berterima kasih dengan ekspresi senang/blush.
+  * **Player Memukul Eve:** Marah lucu khas streamer (*"Hey, kenapa kamu pukul aku?! Chat, catat namanya di blacklist!"*).
+* **Perintah Chat:**
+  * `!mc mode santai` atau ketik *"Eve, main minecraft santai"*
+
+### 2. Mode Kompe (Competitive / Speedrun)
+* **Tujuan:** Speedrun mengalahkan Ender Dragon secepat mungkin!
+* **10 Fase Speedrun:**
+  1. *Wood Tools & Crafting Table*
+  2. *Stone Age Upgrade*
+  3. *Smelt Iron & Water Bucket*
+  4. *Speedrun Lava Portal to Nether*
+  5. *Nether Fortress & Blaze Rods*
+  6. *Piglin Bartering / Ender Pearls*
+  7. *Craft Eyes of Ender*
+  8. *Stronghold Triangulation*
+  9. *Activate End Portal*
+  10. *Slay Ender Dragon (Victory!)*
+* **Perilaku AI:** Menyuarakan split timer (`⏱️ 00:00`), komentar taktis saat naik fase, dan selebrasi kemenangan.
+* **Perintah Chat:**
+  * `!mc mode kompe` (Memulai speedrun)
+  * `!mc next` (Maju ke fase berikutnya)
+
+### 3. Mengontrol via Web Dashboard
+Di halaman `http://localhost:7860`, terdapat panel **Minecraft Live Gameplay Engine** lengkap dengan:
+* Tombol ganti mode: **Mode Santai** vs **Mode Kompe**.
+* Tombol uji interaksi simulasi: `👤 Player Nearby`, `🗡️ Hit Eve`, `💎 Give Diamond`, `🙇 Friendly Crouch`.
+* HUD live status: Mode aktif, Timer split, dan Darah (❤️ 20/20).
+
+### 4. Menghubungkan ke Server Minecraft Asli (Mineflayer)
+Jika kamu menjalankan server Minecraft Java (LAN atau Dedicated Server di `localhost:25565`):
+1. Masuk ke folder `minecraft/`:
+   ```powershell
+   cd minecraft
+   npm install
+   node bot.js
+   ```
+2. Bot `EveMaybe` akan langsung login ke server Minecraft kamu dan terhubung ke otak Eve!
 
 ---
 

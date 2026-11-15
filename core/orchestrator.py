@@ -8,6 +8,7 @@ from core.chat_receiver import ChatReceiver, ChatMessage
 from core.moderator import Moderator
 from core.actions import ActionParser
 from core.singer import Singer
+from core.minecraft.controller import MinecraftController
 
 class Orchestrator:
     """
@@ -40,6 +41,13 @@ class Orchestrator:
         self.singer = Singer(
             songs_config_path=f"{config_dir}/songs.json",
             voice=tts_cfg.get("voice", "en-US-AnaNeural")
+        )
+
+        # Minecraft Gameplay Controller
+        self.minecraft = MinecraftController(bot_name="EveMaybe")
+        self.minecraft.set_callbacks(
+            on_commentary=self._on_minecraft_commentary,
+            on_state_change=self._on_minecraft_state_change
         )
 
         self.chat = ChatReceiver()
@@ -126,6 +134,28 @@ class Orchestrator:
             if len(parts) > 1 and parts[1] in self.singer.songs:
                 song_id = parts[1]
             await self.perform_song(song_id)
+            return
+
+        # Check for Minecraft command / request
+        if msg_lower.startswith("!mc") or "main minecraft" in msg_lower or "speedrun minecraft" in msg_lower:
+            parts = clean_input.split()
+            if "santai" in msg_lower or ("mode" in msg_lower and "santai" in msg_lower):
+                await self.minecraft.set_mode("santai")
+            elif "kompe" in msg_lower or "speedrun" in msg_lower:
+                await self.minecraft.set_mode("kompe")
+            elif len(parts) > 1 and parts[1] == "next":
+                await self.minecraft.advance_speedrun()
+            elif len(parts) > 2 and parts[1] == "attack":
+                await self.minecraft.player_attacked_bot(parts[2])
+            elif len(parts) > 2 and parts[1] == "nearby":
+                await self.minecraft.player_joined_proximity(parts[2])
+            elif len(parts) > 1 and parts[1] == "crouch":
+                await self.minecraft.player_crouched("Player1")
+            elif len(parts) > 3 and parts[1] == "gift":
+                await self.minecraft.player_gave_gift(parts[2], parts[3])
+            else:
+                # Default start santai if general request
+                await self.minecraft.set_mode("santai")
             return
 
         # 2. Brain generates response
@@ -256,3 +286,35 @@ class Orchestrator:
             "emotion": "neutral",
             "is_singing": False
         })
+
+    async def _on_minecraft_commentary(self, speech_raw: str):
+        speech_text, emotions, actions = ActionParser.parse(speech_raw)
+        primary_emotion = emotions[0] if emotions else "neutral"
+
+        await self.broadcast("ai_response", {
+            "user": "Minecraft",
+            "raw": speech_raw,
+            "speech": speech_text,
+            "emotions": emotions,
+            "actions": actions
+        })
+
+        if self.vts.connected:
+            await self.vts.trigger_expression(primary_emotion)
+
+        async def on_mouth_update(val: float):
+            if self.vts.connected:
+                await self.vts.update_mouth(val)
+            await self.broadcast("avatar_state", {"mouth_open": val, "emotion": primary_emotion})
+
+        print(f"[Minecraft Commentary] [{primary_emotion}] {speech_text}")
+        await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+
+        if self.vts.connected:
+            await self.vts.trigger_expression("neutral")
+            await self.vts.update_mouth(0.0)
+
+        await self.broadcast("avatar_state", {"mouth_open": 0.0, "emotion": "neutral"})
+
+    async def _on_minecraft_state_change(self, state: Dict[str, Any]):
+        await self.broadcast("minecraft_state", state)

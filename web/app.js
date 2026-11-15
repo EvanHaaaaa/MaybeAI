@@ -69,6 +69,8 @@ document.addEventListener("DOMContentLoaded", () => {
       spawnMusicNote();
     } else if (msg.type === "song_ended") {
       isSinging = false;
+    } else if (msg.type === "minecraft_state") {
+      updateMinecraftHud(msg.data);
     }
   };
 
@@ -117,6 +119,68 @@ document.addEventListener("DOMContentLoaded", () => {
       ws.send(JSON.stringify({ type: "user_message", user: user, text: text }));
     }
   }
+
+  // --- Minecraft Controls ---
+  const mcModeBadge = document.getElementById("mc-mode-badge");
+  const mcTimerBadge = document.getElementById("mc-timer-badge");
+  const mcHpBadge = document.getElementById("mc-hp-badge");
+  const mcPhaseDesc = document.getElementById("mcPhaseDesc");
+  const btnMcSantai = document.getElementById("btn-mc-santai");
+  const btnMcKompe = document.getElementById("btn-mc-kompe");
+  const btnMcNext = document.getElementById("btn-mc-next");
+
+  function sendMinecraftAction(actionData) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "minecraft_action", ...actionData }));
+    }
+  }
+
+  function updateMinecraftHud(state) {
+    if (state.mode === "santai") {
+      mcModeBadge.textContent = "Mode: Santai (Casual)";
+      mcModeBadge.className = "badge badge-online";
+      btnMcNext.style.display = "none";
+      btnMcSantai.classList.add("active");
+      btnMcKompe.classList.remove("active");
+      mcPhaseDesc.textContent = "Status: Exploring peacefully & socializing with players.";
+    } else if (state.mode === "kompe") {
+      mcModeBadge.textContent = "Mode: Kompe (Speedrun)";
+      mcModeBadge.className = "badge badge-accent";
+      btnMcNext.style.display = "inline-block";
+      btnMcKompe.classList.add("active");
+      btnMcSantai.classList.remove("active");
+      if (state.speedrun) {
+        mcTimerBadge.textContent = `⏱️ ${state.speedrun.split_time || "00:00"}`;
+        mcPhaseDesc.textContent = `Target: ${state.speedrun.phase_name || "Speedrun"}`;
+      }
+    }
+    mcHpBadge.textContent = `❤️ ${state.health || 20}/20`;
+  }
+
+  btnMcSantai.addEventListener("click", () => {
+    sendMinecraftAction({ action: "set_mode", mode: "santai" });
+  });
+
+  btnMcKompe.addEventListener("click", () => {
+    sendMinecraftAction({ action: "set_mode", mode: "kompe" });
+  });
+
+  btnMcNext.addEventListener("click", () => {
+    sendMinecraftAction({ action: "advance_speedrun" });
+  });
+
+  document.getElementById("sim-nearby").addEventListener("click", () => {
+    sendMinecraftAction({ action: "simulate_event", event: "nearby", target: "Steve" });
+  });
+  document.getElementById("sim-attack").addEventListener("click", () => {
+    sendMinecraftAction({ action: "simulate_event", event: "attack", target: "Alex" });
+  });
+  document.getElementById("sim-gift").addEventListener("click", () => {
+    sendMinecraftAction({ action: "simulate_event", event: "gift", target: "Viewer42", item: "Diamond" });
+  });
+  document.getElementById("sim-crouch").addEventListener("click", () => {
+    sendMinecraftAction({ action: "simulate_event", event: "crouch", target: "Friend" });
+  });
 
   // --- 2D Animated Avatar Renderer ---
   function render() {

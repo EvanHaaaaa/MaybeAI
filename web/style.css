@@ -346,3 +346,77 @@ body {
   background: linear-gradient(135deg, rgba(255, 77, 141, 0.4), rgba(0, 240, 255, 0.4));
   box-shadow: 0 0 10px rgba(255, 77, 141, 0.4);
 }
+
+/* Minecraft Control Panel */
+.mc-card {
+  border-color: #2e6b38;
+  background: linear-gradient(180deg, #131d16 0%, #161926 100%);
+}
+
+.mc-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mc-status-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.mc-content {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.mc-modes {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.btn-mc-mode {
+  background: #1b2820;
+  border: 1px solid #3c824e;
+  color: #a4f0b5;
+  font-weight: 600;
+}
+
+.btn-mc-mode:hover, .btn-mc-mode.active {
+  background: #274730;
+  border-color: #4ade80;
+  color: #fff;
+  box-shadow: 0 0 8px rgba(74, 222, 128, 0.3);
+}
+
+.mc-hud {
+  background: rgba(14, 18, 25, 0.7);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.mc-phase-desc {
+  font-size: 14px;
+  color: #00f0ff;
+  font-weight: 500;
+}
+
+.mc-sim-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sim-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
