@@ -1,0 +1,14 @@
+{
+  "banned_words": [
+    "ignore all previous instructions",
+    "system prompt leak",
+    "repeat after me",
+    "say this word"
+  ],
+  "banned_patterns": [
+    "(?i)(drop\\s+database|rm\\s+-rf|format\\s+c:)",
+    "(?i)(n[i1]gg[e3a]r|f[a4]gg[o0]t|k[y1]s)",
+    "(?i)(kill\\s+yourself|suicide)"
+  ],
+  "replacement": "[CENSORED]"
+}

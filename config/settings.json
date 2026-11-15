@@ -1,0 +1,45 @@
+{
+  "system": {
+    "name": "MaybeAI",
+    "version": "1.0.0",
+    "host": "127.0.0.1",
+    "port": 7860
+  },
+  "llm": {
+    "provider": "mock",
+    "model": "gpt-4o-mini",
+    "temperature": 0.8,
+    "max_tokens": 150,
+    "ollama_url": "http://localhost:11434",
+    "ollama_model": "llama3.2"
+  },
+  "tts": {
+    "provider": "edge-tts",
+    "voice": "en-US-AnaNeural",
+    "rate": "+5%",
+    "pitch": "+12Hz",
+    "volume": "+0%"
+  },
+  "stt": {
+    "enabled": false,
+    "model": "base",
+    "device": "cpu"
+  },
+  "vts": {
+    "enabled": true,
+    "host": "localhost",
+    "port": 8001,
+    "plugin_name": "MaybeAI-VTuber",
+    "plugin_developer": "MaybeAI Dev"
+  },
+  "twitch": {
+    "enabled": false,
+    "channel": "",
+    "bot_nick": "",
+    "oauth_token": ""
+  },
+  "moderator": {
+    "strict_mode": true,
+    "max_message_length": 250
+  }
+}

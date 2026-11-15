@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MaybeAI - AI VTuber Studio</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="pulse-dot"></span>
+        <h1>MaybeAI <span>(Eve Maybe)</span></h1>
+      </div>
+      <div class="status-tags">
+        <span id="llm-status" class="badge">LLM: Ready</span>
+        <span id="vts-status" class="badge">VTS: Standby</span>
+        <span id="ws-status" class="badge badge-online">Connected</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="main-grid">
+      <!-- Left: Interactive Avatar Viewer (OBS Ready) -->
+      <section class="card avatar-card">
+        <div class="card-header">
+          <h2>Virtual Avatar (OBS Browser Source)</h2>
+          <span id="emotion-badge" class="badge badge-accent">Neutral</span>
+        </div>
+        <div class="avatar-canvas-wrapper">
+          <canvas id="avatarCanvas" width="450" height="450"></canvas>
+          <div class="subtitles" id="subtitles">"Waiting for chat..."</div>
+        </div>
+        <div class="avatar-meta">
+          <div class="mouth-meter">
+            <span>Lip-Sync:</span>
+            <div class="meter-bar"><div id="meter-fill" style="width: 0%"></div></div>
+          </div>
+          <button id="toggle-audio-btn" class="btn btn-secondary">🔊 Unmute Browser Audio</button>
+        </div>
+      </section>
+
+      <!-- Right: Live Chat & Control Panel -->
+      <section class="card chat-card">
+        <div class="card-header">
+          <h2>Live Stream Chat</h2>
+          <span class="user-count">Twitch / Web</span>
+        </div>
+        
+        <div class="chat-history" id="chatHistory">
+          <div class="chat-msg system-msg">
+            <span class="author">System:</span>
+            <span class="text">Welcome to MaybeAI! Type a message below to talk to Eve.</span>
+          </div>
+        </div>
+
+        <form id="chatForm" class="chat-input-area">
+          <input type="text" id="chatInput" placeholder="Send a message to Eve..." autocomplete="off" required>
+          <button type="submit" class="btn btn-primary">Send</button>
+        </form>
+      </section>
+    </main>
+
+    <!-- Quick Actions Panel -->
+    <footer class="controls-footer">
+      <div class="quick-prompts">
+        <span>Quick Tests:</span>
+        <button class="pill" data-msg="Hi Eve! How are you feeling today?">👋 Say Hi</button>
+        <button class="pill" data-msg="Can you sing a song for us?">🎤 Sing a Song</button>
+        <button class="pill" data-msg="Are you smarter than your creator?">🧠 Who is Smarter?</button>
+        <button class="pill" data-msg="Chat says you have no legs, is that true?">🦵 Legs Question</button>
+      </div>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

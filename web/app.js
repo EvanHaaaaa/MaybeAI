@@ -1,0 +1,332 @@
+// MaybeAI Frontend App & Virtual Avatar Renderer
+document.addEventListener("DOMContentLoaded", () => {
+  const canvas = document.getElementById("avatarCanvas");
+  const ctx = canvas.getContext("2d");
+  const meterFill = document.getElementById("meter-fill");
+  const emotionBadge = document.getElementById("emotion-badge");
+  const subtitles = document.getElementById("subtitles");
+  const chatHistory = document.getElementById("chatHistory");
+  const chatForm = document.getElementById("chatForm");
+  const chatInput = document.getElementById("chatInput");
+  const vtsStatus = document.getElementById("vts-status");
+  const wsStatus = document.getElementById("ws-status");
+
+  // State
+  let mouthOpen = 0.0;
+  let targetMouthOpen = 0.0;
+  let emotion = "neutral";
+  let eyeBlink = 0.0;
+  let blinkTimer = 0;
+  let headTilt = 0;
+  let time = 0;
+
+  // --- WebSocket Connection ---
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  const wsUrl = `${protocol}//${window.location.host}/ws`;
+  const ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => {
+    wsStatus.textContent = "Connected";
+    wsStatus.className = "badge badge-online";
+  };
+
+  ws.onclose = () => {
+    wsStatus.textContent = "Disconnected";
+    wsStatus.className = "badge";
+  };
+
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+
+    if (msg.type === "chat_received") {
+      addChatMessage(msg.data.user, msg.data.text, false);
+    } else if (msg.type === "ai_response") {
+      addChatMessage("Eve", msg.data.speech, true);
+      subtitles.textContent = `"${msg.data.speech}"`;
+      if (msg.data.emotions && msg.data.emotions.length > 0) {
+        setEmotion(msg.data.emotions[0]);
+      }
+    } else if (msg.type === "avatar_state") {
+      targetMouthOpen = msg.data.mouth_open || 0.0;
+      if (msg.data.emotion) {
+        setEmotion(msg.data.emotion);
+      }
+    }
+  };
+
+  function setEmotion(newEmotion) {
+    emotion = newEmotion.toLowerCase();
+    emotionBadge.textContent = emotion.charAt(0).toUpperCase() + emotion.slice(1);
+    if (emotion === "smug") headTilt = -0.1;
+    else if (emotion === "confused") headTilt = 0.15;
+    else if (emotion === "angry") headTilt = 0.05;
+    else headTilt = 0.0;
+  }
+
+  function addChatMessage(author, text, isAi = false) {
+    const div = document.createElement("div");
+    div.className = `chat-msg ${isAi ? "neuro-msg" : ""}`;
+    div.innerHTML = `<span class="author">${author}:</span><span class="text">${escapeHtml(text)}</span>`;
+    chatHistory.appendChild(div);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
+  }
+
+  function escapeHtml(string) {
+    const el = document.createElement("div");
+    el.innerText = string;
+    return el.innerHTML;
+  }
+
+  // --- Chat Submit ---
+  chatForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = chatInput.value.trim();
+    if (!text) return;
+    sendMessage("ChatUser", text);
+    chatInput.value = "";
+  });
+
+  // Quick prompt pills
+  document.querySelectorAll(".pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      const msg = pill.getAttribute("data-msg");
+      sendMessage("ChatUser", msg);
+    });
+  });
+
+  function sendMessage(user, text) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "user_message", user: user, text: text }));
+    }
+  }
+
+  // --- 2D Animated Avatar Renderer ---
+  function render() {
+    time += 0.03;
+
+    // Smooth mouth interpolation
+    mouthOpen += (targetMouthOpen - mouthOpen) * 0.4;
+    meterFill.style.width = `${Math.min(100, Math.round(mouthOpen * 100))}%`;
+
+    // Blink timer
+    blinkTimer += 1;
+    if (blinkTimer > 180 + Math.random() * 80) {
+      eyeBlink = 1.0;
+      blinkTimer = 0;
+    }
+    eyeBlink = Math.max(0, eyeBlink - 0.15);
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const centerX = canvas.width / 2;
+    const centerY = canvas.height / 2 + Math.sin(time) * 4; // Idle breathe float
+
+    ctx.save();
+    ctx.translate(centerX, centerY);
+    ctx.rotate(headTilt + Math.sin(time * 0.5) * 0.02);
+
+    // 1. Hair Back
+    ctx.fillStyle = "#8a7ba7";
+    ctx.beginPath();
+    ctx.arc(0, -20, 115, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. Neck
+    ctx.fillStyle = "#ffe0d6";
+    ctx.fillRect(-22, 50, 44, 45);
+
+    // 3. Body / Clothes
+    ctx.fillStyle = "#2d2338";
+    ctx.beginPath();
+    ctx.moveTo(-70, 150);
+    ctx.lineTo(70, 150);
+    ctx.lineTo(40, 85);
+    ctx.lineTo(-40, 85);
+    ctx.closePath();
+    ctx.fill();
+
+    // Tie / Collar
+    ctx.fillStyle = "#ff4d8d";
+    ctx.beginPath();
+    ctx.moveTo(0, 95);
+    ctx.lineTo(-12, 130);
+    ctx.lineTo(0, 145);
+    ctx.lineTo(12, 130);
+    ctx.closePath();
+    ctx.fill();
+
+    // 4. Face Base
+    ctx.fillStyle = "#fff0eb";
+    ctx.beginPath();
+    ctx.arc(0, 0, 85, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 5. Blush
+    if (emotion === "blush" || emotion === "happy" || emotion === "smug") {
+      ctx.fillStyle = "rgba(255, 77, 141, 0.4)";
+      ctx.beginPath();
+      ctx.ellipse(-48, 18, 16, 9, 0, 0, Math.PI * 2);
+      ctx.ellipse(48, 18, 16, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 6. Eyes
+    const eyeScaleY = 1.0 - eyeBlink;
+    drawEye(-35, -5, eyeScaleY);
+    drawEye(35, -5, eyeScaleY);
+
+    // Eyebrows
+    drawEyebrows();
+
+    // 7. Mouth (Lip-sync dynamic)
+    drawMouth();
+
+    // 8. Front Hair / Bangs
+    drawHair();
+
+    ctx.restore();
+    requestAnimationFrame(render);
+  }
+
+  function drawEye(x, y, scaleY) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(1, Math.max(0.08, scaleY));
+
+    // Eye white
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 17, 24, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Iris (Cyan/Digital like Eve)
+    ctx.fillStyle = "#00f0ff";
+    ctx.beginPath();
+    ctx.ellipse(0, 2, 12, 18, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Pupil
+    ctx.fillStyle = "#112233";
+    ctx.beginPath();
+    ctx.arc(0, 2, 6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Catchlight
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(-4, -4, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawEyebrows() {
+    ctx.strokeStyle = "#5a4d70";
+    ctx.lineWidth = 3.5;
+    ctx.lineCap = "round";
+
+    let leftAngle = 0;
+    let rightAngle = 0;
+
+    if (emotion === "smug") {
+      leftAngle = -0.15;
+      rightAngle = 0.1;
+    } else if (emotion === "angry") {
+      leftAngle = 0.25;
+      rightAngle = -0.25;
+    } else if (emotion === "confused") {
+      leftAngle = -0.2;
+      rightAngle = 0.2;
+    }
+
+    // Left Brow
+    ctx.beginPath();
+    ctx.moveTo(-50, -38 + leftAngle * 20);
+    ctx.quadraticCurveTo(-35, -45 - leftAngle * 10, -20, -38);
+    ctx.stroke();
+
+    // Right Brow
+    ctx.beginPath();
+    ctx.moveTo(20, -38);
+    ctx.quadraticCurveTo(35, -45 - rightAngle * 10, 50, -38 + rightAngle * 20);
+    ctx.stroke();
+  }
+
+  function drawMouth() {
+    const openH = Math.max(2, mouthOpen * 28);
+    const width = 22 + (emotion === "happy" || emotion === "smug" ? 8 : 0);
+
+    ctx.save();
+    ctx.translate(0, 36);
+
+    if (openH > 5) {
+      // Open mouth (speaking)
+      ctx.fillStyle = "#cc3355";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, width / 2, openH / 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Tongue
+      ctx.fillStyle = "#ff75a0";
+      ctx.beginPath();
+      ctx.ellipse(0, openH / 4, width / 3, openH / 4, 0, 0, Math.PI);
+      ctx.fill();
+
+      // Teeth
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-width / 3, -openH / 2, (width * 2) / 3, openH * 0.35);
+    } else {
+      // Closed mouth
+      ctx.strokeStyle = "#803040";
+      ctx.lineWidth = 3;
+      ctx.lineCap = "round";
+      ctx.beginPath();
+      if (emotion === "smug" || emotion === "happy") {
+        ctx.arc(0, -6, 12, 0.2 * Math.PI, 0.8 * Math.PI);
+      } else if (emotion === "angry") {
+        ctx.arc(0, 10, 10, 1.2 * Math.PI, 1.8 * Math.PI);
+      } else {
+        ctx.moveTo(-8, 0);
+        ctx.lineTo(8, 0);
+      }
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawHair() {
+    ctx.fillStyle = "#aa9ec2";
+
+    // Center Bangs
+    ctx.beginPath();
+    ctx.moveTo(0, -85);
+    ctx.quadraticCurveTo(-15, -40, -10, -15);
+    ctx.quadraticCurveTo(-5, -35, 0, -20);
+    ctx.quadraticCurveTo(5, -35, 10, -15);
+    ctx.quadraticCurveTo(15, -40, 0, -85);
+    ctx.fill();
+
+    // Left Bangs
+    ctx.beginPath();
+    ctx.moveTo(-50, -70);
+    ctx.quadraticCurveTo(-80, -20, -75, 45);
+    ctx.quadraticCurveTo(-60, 0, -45, -30);
+    ctx.fill();
+
+    // Right Bangs
+    ctx.beginPath();
+    ctx.moveTo(50, -70);
+    ctx.quadraticCurveTo(80, -20, 75, 45);
+    ctx.quadraticCurveTo(60, 0, 45, -30);
+    ctx.fill();
+
+    // Hair Ribbons / Clips
+    ctx.fillStyle = "#ff4d8d";
+    ctx.fillRect(-65, -60, 14, 8);
+    ctx.fillRect(51, -60, 14, 8);
+  }
+
+  render();
+});
