@@ -116,6 +116,25 @@ function createBot() {
 }
 
 function handlePythonCommand(cmd) {
+  if (cmd.action === 'connect_server') {
+    if (cmd.host) config.server_host = cmd.host;
+    if (cmd.port) config.server_port = cmd.port;
+    if (cmd.version) config.minecraft_version = cmd.version;
+    console.log(`[Minecraft Bridge] Switching server to: ${config.server_host}:${config.server_port}`);
+    if (bot) {
+      try { bot.quit(); } catch (e) {}
+    }
+    createBot();
+    return;
+  } else if (cmd.action === 'disconnect_server') {
+    console.log('[Minecraft Bridge] Disconnecting bot from server...');
+    if (bot) {
+      try { bot.quit(); } catch (e) {}
+      bot = null;
+    }
+    return;
+  }
+
   if (!bot) return;
 
   if (cmd.action === 'chat') {

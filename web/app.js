@@ -129,13 +129,24 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnMcKompe = document.getElementById("btn-mc-kompe");
   const btnMcNext = document.getElementById("btn-mc-next");
 
+  // Server Manager Elements
+  const mcServerSelect = document.getElementById("mcServerSelect");
+  const btnMcConnect = document.getElementById("btn-mc-connect");
+  const btnMcDisconnect = document.getElementById("btn-mc-disconnect");
+  const btnToggleAddServer = document.getElementById("btn-toggle-add-server");
+  const btnCancelAddServer = document.getElementById("btn-cancel-add-server");
+  const addServerForm = document.getElementById("addServerForm");
+
   function sendMinecraftAction(actionData) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "minecraft_action", ...actionData }));
     }
   }
 
+  let cachedServersJson = "";
+
   function updateMinecraftHud(state) {
+    // Update Mode
     if (state.mode === "santai") {
       mcModeBadge.textContent = "Mode: Santai (Casual)";
       mcModeBadge.className = "badge badge-online";
@@ -155,7 +166,74 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
     mcHpBadge.textContent = `❤️ ${state.health || 20}/20`;
+
+    // Update Server Dropdown
+    if (state.servers && JSON.stringify(state.servers) !== cachedServersJson) {
+      cachedServersJson = JSON.stringify(state.servers);
+      const currentVal = mcServerSelect.value;
+      mcServerSelect.innerHTML = "";
+      state.servers.forEach(srv => {
+        const opt = document.createElement("option");
+        opt.value = srv.id;
+        opt.textContent = `${srv.name} (${srv.host}:${srv.port})`;
+        if (state.active_server && state.active_server.id === srv.id) {
+          opt.selected = true;
+        }
+        mcServerSelect.appendChild(opt);
+      });
+      if (currentVal && Array.from(mcServerSelect.options).some(o => o.value === currentVal)) {
+        mcServerSelect.value = currentVal;
+      }
+    }
+
+    // Update Connection Status
+    if (state.connection_status === "connected") {
+      btnMcConnect.textContent = "🟢 In Server";
+      btnMcConnect.style.background = "#2e6b38";
+      btnMcDisconnect.disabled = false;
+    } else {
+      btnMcConnect.textContent = "🚀 Join Server";
+      btnMcConnect.style.background = "";
+      btnMcDisconnect.disabled = true;
+    }
   }
+
+  // Server Action Listeners
+  btnMcConnect.addEventListener("click", () => {
+    const srvId = mcServerSelect.value;
+    sendMinecraftAction({ action: "connect_server", server_id: srvId });
+  });
+
+  btnMcDisconnect.addEventListener("click", () => {
+    sendMinecraftAction({ action: "disconnect_server" });
+  });
+
+  btnToggleAddServer.addEventListener("click", () => {
+    addServerForm.style.display = addServerForm.style.display === "none" ? "flex" : "none";
+  });
+
+  btnCancelAddServer.addEventListener("click", () => {
+    addServerForm.style.display = "none";
+  });
+
+  addServerForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const name = document.getElementById("newSrvName").value;
+    const host = document.getElementById("newSrvHost").value;
+    const port = document.getElementById("newSrvPort").value;
+    const version = document.getElementById("newSrvVersion").value;
+
+    sendMinecraftAction({
+      action: "add_server",
+      name: name,
+      host: host,
+      port: parseInt(port) || 25565,
+      version: version || "1.20.1"
+    });
+
+    addServerForm.reset();
+    addServerForm.style.display = "none";
+  });
 
   btnMcSantai.addEventListener("click", () => {
     sendMinecraftAction({ action: "set_mode", mode: "santai" });

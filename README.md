@@ -179,11 +179,17 @@ Eve dilengkapi sistem gameplay Minecraft yang memiliki 2 mode interaktif:
   * `!mc mode kompe` (Memulai speedrun)
   * `!mc next` (Maju ke fase berikutnya)
 
-### 3. Mengontrol via Web Dashboard
-Di halaman `http://localhost:7860`, terdapat panel **Minecraft Live Gameplay Engine** lengkap dengan:
-* Tombol ganti mode: **Mode Santai** vs **Mode Kompe**.
-* Tombol uji interaksi simulasi: `👤 Player Nearby`, `🗡️ Hit Eve`, `💎 Give Diamond`, `🙇 Friendly Crouch`.
-* HUD live status: Mode aktif, Timer split, dan Darah (❤️ 20/20).
+### 3. Mengontrol via Web Dashboard & Server Manager
+Di halaman `http://localhost:7860`, pada panel **Minecraft Live Gameplay Engine**, kamu bisa:
+* **Server Manager:**
+  * Memilih server target dari daftar (Server kamu **`Raehost Server (basic.raehost.com:19214)`** sudah otomatis terdaftar sebagai pilihan default!).
+  * Menambah server baru kapan saja lewat tombol **`➕ Add Server`** (Nama, Host, Port, Versi).
+  * Menekan tombol **`🚀 Join Server`** agar Eve otomatis login dan menyapa chat streaming saat masuk, serta **`🛑 Disconnect`** untuk keluar.
+* **Ganti Mode:**
+  * Beralih antara **🌿 Mode Santai** dan **⚡ Mode Kompe**.
+* **Simulasi & Pengujian Interaksi:**
+  * Tombol uji interaksi: `👤 Player Nearby`, `🗡️ Hit Eve`, `💎 Give Diamond`, `🙇 Friendly Crouch`, `⏩ Next Milestone`.
+  * HUD live status: Status koneksi server, Timer split, dan Darah (❤️ 20/20).
 
 ### 4. Menghubungkan ke Server Minecraft Asli (Mineflayer)
 Jika kamu menjalankan server Minecraft Java (LAN atau Dedicated Server di `localhost:25565`):

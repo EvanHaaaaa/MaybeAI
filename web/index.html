@@ -83,6 +83,38 @@
           <button id="btn-mc-kompe" class="btn btn-mc-mode">⚡ Mode Kompe (Speedrun)</button>
           <button id="btn-mc-next" class="btn btn-primary" style="display: none;">⏩ Next Milestone</button>
         </div>
+
+        <!-- Server Manager Section -->
+        <div class="mc-server-manager">
+          <div class="mc-server-row">
+            <div class="server-select-wrap">
+              <label for="mcServerSelect">Target Server:</label>
+              <select id="mcServerSelect" class="select-server">
+                <!-- Dynamically populated -->
+              </select>
+            </div>
+            <div class="server-actions">
+              <button id="btn-mc-connect" class="btn btn-primary">🚀 Join Server</button>
+              <button id="btn-mc-disconnect" class="btn btn-secondary">🛑 Disconnect</button>
+              <button id="btn-toggle-add-server" class="btn btn-secondary">➕ Add Server</button>
+            </div>
+          </div>
+
+          <!-- Add Server Form -->
+          <form id="addServerForm" class="add-server-form" style="display: none;">
+            <div class="form-grid">
+              <input type="text" id="newSrvName" placeholder="Server Name (e.g. My Server)" required>
+              <input type="text" id="newSrvHost" placeholder="Host/IP (e.g. basic.raehost.com)" required>
+              <input type="number" id="newSrvPort" placeholder="Port (e.g. 19214)" value="25565" required>
+              <input type="text" id="newSrvVersion" placeholder="Version" value="1.20.1">
+            </div>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary btn-sm">Save Server</button>
+              <button type="button" id="btn-cancel-add-server" class="btn btn-secondary btn-sm">Cancel</button>
+            </div>
+          </form>
+        </div>
+
         <div class="mc-hud" id="mcHud">
           <div class="mc-phase-desc" id="mcPhaseDesc">Current Objective: Select a mode to begin playing!</div>
           <div class="mc-sim-tools">

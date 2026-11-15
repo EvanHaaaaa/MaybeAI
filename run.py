@@ -57,6 +57,12 @@ async def websocket_endpoint(websocket: WebSocket):
 
     orchestrator.register_listener(listener)
 
+    # Send initial minecraft state immediately upon connection
+    await websocket.send_json({
+        "type": "minecraft_state",
+        "data": orchestrator.minecraft.get_status()
+    })
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -70,6 +76,22 @@ async def websocket_endpoint(websocket: WebSocket):
                     await orchestrator.minecraft.set_mode(data.get("mode", "santai"))
                 elif act == "advance_speedrun":
                     await orchestrator.minecraft.advance_speedrun()
+                elif act == "connect_server":
+                    await orchestrator.minecraft.connect_to_server(data.get("server_id"))
+                elif act == "disconnect_server":
+                    await orchestrator.minecraft.disconnect_from_server()
+                elif act == "add_server":
+                    orchestrator.minecraft.add_server(
+                        name=data.get("name", ""),
+                        host=data.get("host", ""),
+                        port=data.get("port", 25565),
+                        version=data.get("version", "1.20.1"),
+                        notes=data.get("notes", "")
+                    )
+                    await orchestrator.minecraft.emit_state()
+                elif act == "delete_server":
+                    orchestrator.minecraft.delete_server(data.get("server_id"))
+                    await orchestrator.minecraft.emit_state()
                 elif act == "simulate_event":
                     event_name = data.get("event")
                     target = data.get("target", "Player1")

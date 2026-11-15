@@ -1,0 +1,18 @@
+[
+  {
+    "id": "raehost_server",
+    "name": "Raehost Server",
+    "host": "basic.raehost.com",
+    "port": 19214,
+    "version": "1.20.1",
+    "notes": "Community / Private Server"
+  },
+  {
+    "id": "localhost_server",
+    "name": "Localhost LAN",
+    "host": "localhost",
+    "port": 25565,
+    "version": "1.20.1",
+    "notes": "Default Singleplayer LAN"
+  }
+]
