@@ -386,6 +386,133 @@
       </div>
     </section>
 
+    <!-- Autonomous Goal & Planning System (Agentic Intelligence) -->
+    <section class="card goal-card" id="goalCard">
+      <div class="card-header">
+        <div class="goal-title">
+          <span class="goal-icon">🎯</span>
+          <div>
+            <h2>Autonomous Goal & Planning System</h2>
+            <small class="goal-subtitle">Agentic Intelligence, Subtask Decomposition & Strategy Replanning</small>
+          </div>
+        </div>
+        <div class="goal-status-bar">
+          <span id="goal-active-badge" class="badge badge-accent">Active: Membangun rumah</span>
+          <span id="goal-stats-badge" class="badge">Goals: 4 | Selesai: 0</span>
+        </div>
+      </div>
+
+      <div class="goal-content">
+        <!-- Goal Tabs -->
+        <div class="goal-tabs">
+          <button type="button" class="goal-tab active" data-tab="tab-goal-active">⚡ Active Mission & Subtasks</button>
+          <button type="button" class="goal-tab" data-tab="tab-goal-all">📋 Agenda by Tier (Daily/Weekly/Social)</button>
+          <button type="button" class="goal-tab" data-tab="tab-goal-agenda">📓 Agenda Markdown (.md)</button>
+          <button type="button" class="goal-tab" data-tab="tab-goal-add">➕ Add New Goal</button>
+        </div>
+
+        <!-- Tab 1: Active Mission & Subtasks -->
+        <div id="tab-goal-active" class="goal-tab-panel active">
+          <!-- Active Mission Banner -->
+          <div class="goal-active-banner">
+            <div class="goal-banner-header">
+              <div class="goal-header-left">
+                <span id="goal-tier-badge" class="badge badge-sm badge-online">DAILY GOAL</span>
+                <h3 id="goal-current-title">Membangun rumah di Minecraft</h3>
+              </div>
+              <span id="goal-progress-text" class="goal-prog-pct">0%</span>
+            </div>
+            <p id="goal-current-desc" class="goal-banner-desc">Membangun rumah kayu yang nyaman dan aman di Minecraft sebagai markas stream.</p>
+            <div class="goal-bar-track">
+              <div id="goal-progress-bar" class="goal-bar-fill" style="width: 0%;"></div>
+            </div>
+          </div>
+
+          <!-- Strategy & Directive Snippet -->
+          <div class="goal-directive-snippet">
+            <span class="snippet-label">🧠 Agentic Strategy / Taktik Aktif:</span>
+            <div id="goal-strategy-text" class="snippet-text">
+              Strategi: Fokus pengumpulan kayu oak di sekitar hutan terdekat.
+            </div>
+          </div>
+
+          <!-- Subtasks Breakdown Checklist -->
+          <div class="goal-subtasks-container">
+            <div class="subtasks-header">
+              <h4>Daftar Subtask & Milestones:</h4>
+              <span class="subtasks-hint">Klik tombol kontrol untuk simulasi progres atau kegagalan strategi.</span>
+            </div>
+            <div id="goal-subtasks-list" class="goal-subtasks-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Strategy Adaptation & Failure Pivot Alert -->
+          <div id="goal-pivot-alert" class="goal-pivot-alert" style="display: none;">
+            <div class="pivot-header">
+              <span class="pivot-icon">🔄</span>
+              <strong>Tactical Pivot (Adaptasi Strategi):</strong>
+            </div>
+            <div id="goal-pivot-desc" class="pivot-desc">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Action Controls -->
+          <div class="goal-actions-bar">
+            <button type="button" id="btn-goal-advance" class="btn btn-primary btn-sm">⚡ Progres Subtask (+1)</button>
+            <button type="button" id="btn-goal-complete" class="btn btn-secondary btn-sm">✅ Selesaikan Subtask</button>
+            <button type="button" id="btn-goal-replan" class="btn btn-danger btn-sm">💥 Simulasi Gagal & Replan (Plan B)</button>
+            <button type="button" id="btn-goal-autonomous" class="btn btn-accent btn-sm">🤖 Autonomous Agenda Step</button>
+          </div>
+        </div>
+
+        <!-- Tab 2: Categorized Agenda (Daily, Weekly, Social, Short-Term) -->
+        <div id="tab-goal-all" class="goal-tab-panel">
+          <div class="goal-tiers-grid" id="goalTiersGrid">
+            <!-- Dynamically populated with Daily, Short-term, Weekly, Social cards -->
+          </div>
+        </div>
+
+        <!-- Tab 3: Markdown Agenda File Viewer -->
+        <div id="tab-goal-agenda" class="goal-tab-panel">
+          <div class="tab-panel-header">
+            <h3>Jurnal Agenda Mandiri (data/goals/agenda.md)</h3>
+            <button type="button" id="btn-refresh-agenda" class="btn btn-secondary btn-sm">🔄 Reload Agenda</button>
+          </div>
+          <pre id="goalAgendaContent" class="markdown-journal-viewer">Loading agenda.md...</pre>
+        </div>
+
+        <!-- Tab 4: Add New Goal Form -->
+        <div id="tab-goal-add" class="goal-tab-panel">
+          <form id="addGoalForm" class="add-goal-form">
+            <div class="form-grid">
+              <input type="text" id="goalNewTitle" placeholder="Judul Tujuan (misal: Cari 5 Diamond di Y=-58)" required>
+              <select id="goalNewTier" class="select-mem-type">
+                <option value="daily">📅 Daily Goal (Tujuan Hari Ini)</option>
+                <option value="short_term">⚡ Short-Term Goal (Tujuan Berikutnya)</option>
+                <option value="weekly">🏆 Weekly Goal (Tujuan Mingguan)</option>
+                <option value="social">🤝 Social Goal (Tujuan Sosial)</option>
+              </select>
+              <select id="goalNewCategory" class="select-mem-type">
+                <option value="minecraft">🟩 Minecraft</option>
+                <option value="chess">♟️ Catur</option>
+                <option value="social">👥 Sosial</option>
+                <option value="stream">🎥 Stream</option>
+                <option value="creative">🎨 Kreatif</option>
+                <option value="general">🌐 Umum</option>
+              </select>
+              <input type="number" id="goalNewPriority" placeholder="Prioritas (1-10)" value="7" min="1" max="10">
+            </div>
+            <textarea id="goalNewDesc" rows="3" placeholder="Deskripsi rinci tujuan dan konteks yang diinginkan..."></textarea>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">🎯 Buat & Dekomposisi Goal</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">

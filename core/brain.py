@@ -37,6 +37,10 @@ class Brain:
     def mood(self):
         return self.conversation.mood
 
+    @property
+    def goals(self):
+        return self.conversation.goals
+
     def _load_json(self, path_str: str) -> Dict[str, Any]:
         p = Path(path_str)
         if p.exists():
@@ -67,7 +71,8 @@ class Brain:
             "total_chatters": len(self.conversation.user_memory.users),
             "memory_turns": len(self.conversation.context_memory.buffer),
             "second_brain": self.conversation.episodic_memory.get_stats(),
-            "mood": self.mood.get_state()
+            "mood": self.mood.get_state(),
+            "goals": self.goals.get_state()
         }
 
     async def generate_response(

@@ -115,6 +115,14 @@ document.addEventListener("DOMContentLoaded", () => {
       updateChessUi(msg.data);
     } else if (msg.type === "mood_updated") {
       updateMoodUi(msg.data);
+    } else if (msg.type === "goal_updated") {
+      updateGoalUi(msg.data);
+    } else if (msg.type === "goal_completed") {
+      showGoalCompletedAlert(msg.data);
+    } else if (msg.type === "strategy_adapted") {
+      showStrategyPivotAlert(msg.data);
+    } else if (msg.type === "goal_agenda_data") {
+      if (goalAgendaContent) goalAgendaContent.textContent = msg.data.markdown || "No agenda.";
     } else if (msg.type === "memory_updated") {
       updateMemoryStats(msg.data);
     } else if (msg.type === "memory_search_results") {
@@ -1303,6 +1311,275 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnMoodReset) {
     btnMoodReset.addEventListener("click", () => {
       sendMoodAction({ action: "reset" });
+    });
+  }
+
+  // --- Autonomous Goal & Planning Engine Elements ---
+  const goalActiveBadge = document.getElementById("goal-active-badge");
+  const goalStatsBadge = document.getElementById("goal-stats-badge");
+  const goalTierBadge = document.getElementById("goal-tier-badge");
+  const goalCurrentTitle = document.getElementById("goal-current-title");
+  const goalCurrentDesc = document.getElementById("goal-current-desc");
+  const goalProgressText = document.getElementById("goal-progress-text");
+  const goalProgressBar = document.getElementById("goal-progress-bar");
+  const goalStrategyText = document.getElementById("goal-strategy-text");
+  const goalSubtasksList = document.getElementById("goal-subtasks-list");
+  const goalPivotAlert = document.getElementById("goal-pivot-alert");
+  const goalPivotDesc = document.getElementById("goal-pivot-desc");
+  const goalTiersGrid = document.getElementById("goalTiersGrid");
+  const goalAgendaContent = document.getElementById("goalAgendaContent");
+  const btnGoalAdvance = document.getElementById("btn-goal-advance");
+  const btnGoalComplete = document.getElementById("btn-goal-complete");
+  const btnGoalReplan = document.getElementById("btn-goal-replan");
+  const btnGoalAutonomous = document.getElementById("btn-goal-autonomous");
+  const btnRefreshAgenda = document.getElementById("btn-refresh-agenda");
+  const addGoalForm = document.getElementById("addGoalForm");
+
+  let currentGoalData = null;
+
+  function sendGoalAction(actionPayload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "goal_action",
+        ...actionPayload
+      }));
+    }
+  }
+
+  function updateGoalUi(data) {
+    if (!data) return;
+    currentGoalData = data;
+
+    const activeGoal = data.active_goal;
+    const activeSub = data.active_subtask;
+    const total = data.total_goals || 0;
+    const completed = data.completed_goals || 0;
+
+    if (goalStatsBadge) {
+      goalStatsBadge.textContent = `Goals: ${total} | Selesai: ${completed}`;
+    }
+
+    if (activeGoal) {
+      const pct = Math.round((activeGoal.progress || 0) * 100);
+      if (goalActiveBadge) goalActiveBadge.textContent = `Active: ${activeGoal.title} [${pct}%]`;
+      if (goalTierBadge) goalTierBadge.textContent = `${(activeGoal.tier || "daily").toUpperCase()} GOAL`;
+      if (goalCurrentTitle) goalCurrentTitle.textContent = activeGoal.title;
+      if (goalCurrentDesc) goalCurrentDesc.textContent = activeGoal.description || "";
+      if (goalProgressText) goalProgressText.textContent = `${pct}%`;
+      if (goalProgressBar) goalProgressBar.style.width = `${pct}%`;
+
+      if (goalStrategyText) {
+        const strat = activeSub ? activeSub.strategy : "Evaluasi pencapaian akhir misi";
+        goalStrategyText.textContent = `Strategi: ${strat}`;
+      }
+
+      // Render Subtasks list
+      if (goalSubtasksList) {
+        goalSubtasksList.innerHTML = "";
+        const subs = activeGoal.subtasks || [];
+        subs.forEach((s, idx) => {
+          const isCurrent = activeSub && activeSub.id === s.id;
+          const div = document.createElement("div");
+          div.className = `subtask-item ${isCurrent ? 'active-subtask' : ''}`;
+
+          let icon = "⏳";
+          let badgeClass = "badge-sub-pending";
+          let badgeText = "Pending";
+
+          if (s.status === "completed") {
+            icon = "✅";
+            badgeClass = "badge-sub-completed";
+            badgeText = "Done";
+          } else if (s.status === "in_progress") {
+            icon = "⚡";
+            badgeClass = "badge-sub-progress";
+            badgeText = "In Progress";
+          } else if (s.status === "replanned" || s.status === "failed") {
+            icon = "🔄";
+            badgeClass = "badge-sub-replanned";
+            badgeText = "Plan B (Replanned)";
+          }
+
+          const currentCount = s.current_count !== undefined ? s.current_count : 0;
+          const targetCount = s.target_count || 1;
+          const unit = s.unit || "step";
+
+          div.innerHTML = `
+            <div class="subtask-left">
+              <span class="subtask-icon">${icon}</span>
+              <div class="subtask-info">
+                <span class="subtask-title">Step ${idx + 1}: ${escapeHtml(s.title)}</span>
+                <span class="subtask-strat">${escapeHtml(s.strategy || s.description || "")}</span>
+              </div>
+            </div>
+            <div class="subtask-right">
+              <span class="badge ${badgeClass}">${currentCount}/${targetCount} ${escapeHtml(unit)}</span>
+              <span class="subtask-badge ${badgeClass}">${badgeText}</span>
+            </div>
+          `;
+          goalSubtasksList.appendChild(div);
+        });
+      }
+    } else {
+      if (goalActiveBadge) goalActiveBadge.textContent = "Tidak ada goal aktif";
+      if (goalCurrentTitle) goalCurrentTitle.textContent = "Semua Agenda Selesai";
+      if (goalCurrentDesc) goalCurrentDesc.textContent = "Eve sedang bersiap memilih agenda mandiri berikutnya.";
+      if (goalProgressText) goalProgressText.textContent = "100%";
+      if (goalProgressBar) goalProgressBar.style.width = "100%";
+      if (goalSubtasksList) goalSubtasksList.innerHTML = "<div class='subtask-item'>Semua misi aktif tuntas! Klik 'Autonomous Agenda Step' untuk memulai misi baru.</div>";
+    }
+
+    // Pivot alert check
+    if (data.last_strategy_pivot && goalPivotAlert && goalPivotDesc) {
+      const p = data.last_strategy_pivot;
+      goalPivotAlert.style.display = "flex";
+      goalPivotDesc.innerHTML = `
+        <strong>Subtask Terhambat:</strong> ${escapeHtml(p.failed_subtask)}<br>
+        <strong>Alasan Kegagalan:</strong> ${escapeHtml(p.reason)}<br>
+        <strong>Plan B Diadopsi:</strong> ${escapeHtml(p.new_subtask)} (${escapeHtml(p.strategy || "")})
+      `;
+    }
+
+    // Render Categorized Grid (tab-goal-all)
+    if (goalTiersGrid && data.goals_by_tier) {
+      goalTiersGrid.innerHTML = "";
+      const tierTitles = {
+        "daily": "📅 Daily Goals (Tujuan Hari Ini)",
+        "short_term": "⚡ Short-Term Goals (Tujuan Berikutnya)",
+        "weekly": "🏆 Weekly Milestones (Tujuan Mingguan)",
+        "social": "🤝 Social Goals (Tujuan Sosial)"
+      };
+
+      for (const [tierKey, goalsList] of Object.entries(data.goals_by_tier)) {
+        const card = document.createElement("div");
+        card.className = "goal-tier-card";
+        let listHtml = "";
+
+        goalsList.forEach(g => {
+          const isActive = activeGoal && activeGoal.id === g.id;
+          const pct = Math.round((g.progress || 0) * 100);
+          listHtml += `
+            <div class="tier-goal-item ${isActive ? 'is-active-goal' : ''}" data-goal-id="${g.id}">
+              <div class="tier-goal-header">
+                <span>${escapeHtml(g.title)}</span>
+                <span class="goal-prog-pct" style="font-size: 12px;">${pct}%</span>
+              </div>
+              <div class="tier-goal-bar">
+                <div class="tier-goal-bar-fill" style="width: ${pct}%;"></div>
+              </div>
+            </div>
+          `;
+        });
+
+        if (!listHtml) listHtml = "<div class='subtasks-hint'>Belum ada goal di kategori ini.</div>";
+
+        card.innerHTML = `
+          <div class="tier-card-header">
+            <span class="tier-card-title">${tierTitles[tierKey] || tierKey}</span>
+            <span class="badge badge-sm">${goalsList.length}</span>
+          </div>
+          ${listHtml}
+        `;
+        goalTiersGrid.appendChild(card);
+      }
+
+      // Allow clicking tier goal items to switch active goal
+      document.querySelectorAll(".tier-goal-item").forEach(item => {
+        item.addEventListener("click", () => {
+          const gid = item.dataset.goalId;
+          if (gid) {
+            sendGoalAction({ action: "set_active", goal_id: gid });
+          }
+        });
+      });
+    }
+  }
+
+  function showGoalCompletedAlert(data) {
+    const g = data.goal || {};
+    addChatMessage("Eve (Achievement 🏆)", `Horeee! Misi '${g.title || 'Utama'}' berhasil kita selesaikan tuntas secara mandiri! [action: giggle] [emotion: happy]`, true);
+  }
+
+  function showStrategyPivotAlert(data) {
+    if (data.speech) {
+      addChatMessage("Eve (Plan B 🔄)", data.speech, true);
+    }
+  }
+
+  // Tab switching for goal tabs
+  document.querySelectorAll(".goal-tab").forEach(tab => {
+    tab.addEventListener("click", () => {
+      document.querySelectorAll(".goal-tab").forEach(t => t.classList.remove("active"));
+      document.querySelectorAll(".goal-tab-panel").forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      const targetPanel = document.getElementById(tab.dataset.tab);
+      if (targetPanel) targetPanel.classList.add("active");
+      if (tab.dataset.tab === "tab-goal-agenda") {
+        sendGoalAction({ action: "get_agenda" });
+      }
+    });
+  });
+
+  // Goal Control Buttons
+  if (btnGoalAdvance) {
+    btnGoalAdvance.addEventListener("click", () => {
+      if (currentGoalData && currentGoalData.active_subtask) {
+        sendGoalAction({
+          action: "advance_subtask",
+          subtask_id: currentGoalData.active_subtask.id,
+          delta: 1.0
+        });
+      }
+    });
+  }
+
+  if (btnGoalComplete) {
+    btnGoalComplete.addEventListener("click", () => {
+      sendGoalAction({ action: "complete_subtask" });
+    });
+  }
+
+  if (btnGoalReplan) {
+    btnGoalReplan.addEventListener("click", () => {
+      const reason = prompt("Masukkan alasan kendala/kegagalan subtask (misal: 'Diserang creeper di gua', 'Kayu di sekitar habis', 'Pemain menolak sapaan'):", "Diserang monster tak terduga");
+      if (reason) {
+        sendGoalAction({ action: "replan_subtask", reason: reason });
+      }
+    });
+  }
+
+  if (btnGoalAutonomous) {
+    btnGoalAutonomous.addEventListener("click", () => {
+      sendGoalAction({ action: "autonomous_select" });
+    });
+  }
+
+  if (btnRefreshAgenda) {
+    btnRefreshAgenda.addEventListener("click", () => {
+      sendGoalAction({ action: "get_agenda" });
+    });
+  }
+
+  if (addGoalForm) {
+    addGoalForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const title = document.getElementById("goalNewTitle").value;
+      const tier = document.getElementById("goalNewTier").value;
+      const cat = document.getElementById("goalNewCategory").value;
+      const priority = document.getElementById("goalNewPriority").value;
+      const desc = document.getElementById("goalNewDesc").value;
+
+      sendGoalAction({
+        action: "add_goal",
+        title: title,
+        tier: tier,
+        category: cat,
+        priority: priority,
+        description: desc
+      });
+
+      addGoalForm.reset();
+      alert("Goal baru berhasil ditambahkan dan didekomposisi menjadi subtask!");
     });
   }
 

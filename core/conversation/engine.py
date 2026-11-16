@@ -7,6 +7,7 @@ from core.conversation.prompts import MasterPromptBuilder
 from core.conversation.chat_curator import ChatCurator, LiveChatMessage, ChatInteraction
 from core.memory import EpisodicMemoryStore
 from core.mood import MoodEngine
+from core.planning import GoalEngine
 
 class ConversationEngine:
     """
@@ -35,6 +36,7 @@ class ConversationEngine:
         self.chat_curator = ChatCurator(max_buffer_size=50)
         self.episodic_memory = EpisodicMemoryStore(db_path="data/memory.db", markdown_dir="data/second_brain")
         self.mood = MoodEngine()
+        self.goals = GoalEngine()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -180,6 +182,7 @@ class ConversationEngine:
         )
         memory_recall_block = recall_res.to_prompt_text(current_user)
         mood_directive = self.mood.get_behavioral_directive()
+        goal_directive = self.goals.get_goal_directive()
 
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
@@ -195,13 +198,26 @@ class ConversationEngine:
             is_group_debate=is_group_debate,
             debate_users=debate_users,
             memory_recall_block=memory_recall_block,
-            mood_directive=mood_directive
+            mood_directive=mood_directive,
+            goal_directive=goal_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
         active_chatters = self.user_memory.get_active_chatters()
         user_shoutout = random.choice(active_chatters) if active_chatters else "Chat"
         dominant_mood, _ = self.mood.get_dominant_mood()
+
+        # Autonomous goal-oriented thoughts
+        active_goal = self.goals.get_active_goal()
+        if active_goal and random.random() < 0.35:
+            active_sub = active_goal.get_active_subtask()
+            sub_title = active_sub.title if active_sub else "fase akhir"
+            prog_pct = int(active_goal.progress * 100)
+            return self._pick_unseen([
+                f"[emotion: happy] Chat! Aku lagi fokus banget nyelesain misi mandiriku: '{active_goal.title}'! Sekarang giliran '{sub_title}'. Menurut kalian bakal sukses gak? [action: wink]",
+                f"[emotion: smug] Sambil nunggu chat ngetik, aku lanjutin agenda stream: '{active_goal.title}' (progres {prog_pct}%). AI idol mandiri itu harus produktif dan punya tujuan hidup! [action: giggle]",
+                f"[emotion: neutral] Target aktif stream hari ini: '{active_goal.title}'. Yang mau bantuin langkah '{sub_title}', kasih saran terbaikmu di chat ya!"
+            ])
 
         # Mood-influenced spontaneous thoughts
         if dominant_mood == "SASSY_ANNOYED":
@@ -352,6 +368,19 @@ class ConversationEngine:
         intent, param = self.analyze_intent(user_name, message)
         active_chatters = self.user_memory.get_active_chatters()
         other_user = next((u for u in active_chatters if u.lower() != user_name.lower()), "Chat")
+
+        # Autonomous Goals & Plans Inquiry
+        goal_keywords = ["target", "rencana", "tujuan", "goal", "agenda", "lagi ngapain", "what are you doing", "what are your plans", "fokus hari ini"]
+        if any(k in msg_lower for k in goal_keywords):
+            active_goal = self.goals.get_active_goal()
+            if active_goal:
+                active_sub = active_goal.get_active_subtask()
+                sub_detail = f", khususnya '{active_sub.title}'" if active_sub else ""
+                prog_pct = int(active_goal.progress * 100)
+                if is_indonesian:
+                    return f"[emotion: happy] Agenda utamaku saat ini adalah '{active_goal.title}'{sub_detail} dengan progres {prog_pct}%! Sebagai AI mandiri, aku selalu punya agenda jelas di stream ini! [action: wink]"
+                else:
+                    return f"[emotion: happy] My active objective right now is '{active_goal.title}'{sub_detail} at {prog_pct}% progress! An autonomous AI idol always has a master plan! [action: wink]"
 
         # 3. Viewer Jokes & Puns Reaction
         if intent == self.INTENT_JOKE:

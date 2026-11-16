@@ -34,7 +34,8 @@ class MasterPromptBuilder:
         is_group_debate: bool = False,
         debate_users: Optional[List[str]] = None,
         memory_recall_block: str = "",
-        mood_directive: str = ""
+        mood_directive: str = "",
+        goal_directive: str = ""
     ) -> str:
         name = character.get("name", "Eve Maybe")
         nickname = character.get("nickname", "Eve")
@@ -102,6 +103,8 @@ CURRENT STREAM SITUATION & CONTEXT:
 {memory_recall_block if memory_recall_block else ""}
 
 {mood_directive if mood_directive else ""}
+
+{goal_directive if goal_directive else ""}
 
 CORE CHARACTER LORE:
 {lore}

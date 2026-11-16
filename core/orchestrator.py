@@ -122,6 +122,11 @@ class Orchestrator:
             if idle_duration >= 40.0 and (now - last_banter_time) >= 45.0 and not self.is_busy:
                 last_banter_time = now
                 print(f"[Orchestrator] Chat idle for {idle_duration:.1f}s. Triggering spontaneous streamer banter!")
+                active_g = self.brain.goals.get_active_goal()
+                if not active_g or active_g.status == "completed":
+                    self.brain.goals.autonomous_select_next_activity(self.brain.mood.dimensions)
+                    await self.broadcast("goal_updated", self.brain.goals.get_state())
+
                 self.brain.mood.apply_stimulus("chat_idle")
                 await self.broadcast("mood_updated", self.brain.mood.get_state())
                 await self.trigger_improv()
@@ -576,6 +581,7 @@ class Orchestrator:
         prof.tags.add("minecraft_player")
         if "plays on server" not in prof.known_facts:
             prof.known_facts.append("plays on server")
+        await self.evaluate_goal_event("player_greeted", {"player": sender})
         await self.chat.put_message(user=sender, text=message, source="minecraft")
 
     async def _on_chess_commentary(self, speech_raw: str):
@@ -629,7 +635,32 @@ class Orchestrator:
             )
             if data.get("eve_won"):
                 self.brain.mood.apply_stimulus("chess_victory")
+                await self.evaluate_goal_event("chess_game_won", data)
             elif data.get("player_won"):
                 self.brain.mood.apply_stimulus("chess_defeat")
         await self.broadcast("memory_updated", self.brain.episodic_memory.get_stats())
         await self.broadcast("mood_updated", self.brain.mood.get_state())
+
+    async def evaluate_goal_event(self, event_type: str, data: Dict[str, Any]):
+        """Evaluates domain events against autonomous active subtasks."""
+        res = self.brain.goals.evaluate_event(event_type, data)
+        if res.get("advanced"):
+            details = res.get("details", {})
+            if details.get("goal_completed"):
+                self.brain.mood.apply_stimulus("goal_all_completed")
+                g_dict = details.get("goal", {})
+                self.brain.episodic_memory.record_episode(
+                    title=f"Misi Selesai: {g_dict.get('title')}",
+                    content=f"Eve berhasil menyelesaikan seluruh target '{g_dict.get('title')}' secara mandiri!",
+                    episode_type="achievement",
+                    user="Stream",
+                    emotional_tag="happy",
+                    importance_score=0.9
+                )
+                await self.broadcast("goal_completed", details)
+                await self.broadcast("memory_updated", self.brain.episodic_memory.get_stats())
+            elif details.get("subtask_completed"):
+                self.brain.mood.apply_stimulus("goal_milestone_completed")
+
+            await self.broadcast("goal_updated", self.brain.goals.get_state())
+            await self.broadcast("mood_updated", self.brain.mood.get_state())

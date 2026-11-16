@@ -86,7 +86,12 @@ class MoodEngine:
             "chess_blunder_eve": { "annoyance": +0.45 * mult, "excitement": +0.25 * mult, "happiness": -0.25 * mult },
             "chess_victory": { "happiness": +0.40 * mult, "excitement": +0.35 * mult, "competitiveness": +0.20 * mult, "annoyance": -0.20 * mult },
             "chess_defeat": { "annoyance": +0.40 * mult, "competitiveness": +0.45 * mult, "happiness": -0.25 * mult },
-            "chess_opponent_resigned": { "happiness": +0.35 * mult, "excitement": +0.30 * mult, "annoyance": -0.15 * mult }
+            "chess_opponent_resigned": { "happiness": +0.35 * mult, "excitement": +0.30 * mult, "annoyance": -0.15 * mult },
+
+            # Autonomous Goals & Planning Stimuli
+            "goal_milestone_completed": { "happiness": +0.35 * mult, "excitement": +0.30 * mult, "annoyance": -0.15 * mult },
+            "goal_strategy_failed": { "annoyance": +0.30 * mult, "competitiveness": +0.35 * mult, "happiness": -0.15 * mult },
+            "goal_all_completed": { "happiness": +0.45 * mult, "excitement": +0.40 * mult, "annoyance": -0.25 * mult }
         }
 
         delta_map = deltas.get(stimulus_type, {})

@@ -67,6 +67,17 @@ async def get_recent_memories(limit: int = 15):
 async def get_mood_state():
     return orchestrator.brain.mood.get_state()
 
+@app.get("/api/goals")
+async def get_goals_state():
+    return orchestrator.brain.goals.get_state()
+
+@app.get("/api/goals/agenda")
+async def get_goals_agenda_markdown():
+    p = Path("data/goals/agenda.md")
+    if p.exists():
+        return {"markdown": p.read_text(encoding="utf-8")}
+    return {"markdown": "# No agenda yet."}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -115,6 +126,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "mood_updated",
         "data": orchestrator.brain.mood.get_state()
+    })
+
+    # Send initial goal planning state
+    await websocket.send_json({
+        "type": "goal_updated",
+        "data": orchestrator.brain.goals.get_state()
     })
 
     try:
@@ -188,6 +205,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     target = data.get("target", "Player1")
                     if event_name == "nearby":
                         await orchestrator.minecraft.player_joined_proximity(target)
+                        await orchestrator.evaluate_goal_event("player_greeted", {"player": target})
                     elif event_name == "attack":
                         await orchestrator.minecraft.player_attacked_bot(target)
                         orchestrator.brain.episodic_memory.on_minecraft_attack(target)
@@ -199,6 +217,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await orchestrator.minecraft.player_gave_gift(target, item_name)
                         orchestrator.brain.episodic_memory.on_minecraft_gift(target, item_name)
                         orchestrator.brain.mood.apply_stimulus("minecraft_gift")
+                        await orchestrator.evaluate_goal_event("minecraft_item_collected", {"item": item_name, "count": 1})
                         await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
                         await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
                     elif event_name == "crouch":
@@ -217,6 +236,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await orchestrator.minecraft.emit_commentary(comment)
                         await orchestrator.minecraft.emit_state()
                         orchestrator.brain.episodic_memory.on_minecraft_guard_incident(target, mob)
+                        await orchestrator.evaluate_goal_event("minecraft_guard_victory", {"mob": mob, "target": target})
                         await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
                         await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
             elif data.get("type") == "chess_action":
@@ -274,6 +294,81 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif act == "reset":
                     orchestrator.brain.mood.reset_to_baseline()
                     await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+            elif data.get("type") == "goal_action":
+                act = data.get("action")
+                if act == "add_goal":
+                    orchestrator.brain.goals.create_goal(
+                        title=data.get("title", ""),
+                        description=data.get("description", ""),
+                        tier=data.get("tier", "daily"),
+                        category=data.get("category", "general"),
+                        priority=int(data.get("priority", 5)),
+                        autonomous=False
+                    )
+                    await orchestrator.broadcast("goal_updated", orchestrator.brain.goals.get_state())
+                elif act == "set_active":
+                    orchestrator.brain.goals.set_active_goal(data.get("goal_id"))
+                    await orchestrator.broadcast("goal_updated", orchestrator.brain.goals.get_state())
+                elif act == "advance_subtask":
+                    sub_id = data.get("subtask_id")
+                    delta = float(data.get("delta", 1.0))
+                    res = orchestrator.brain.goals.advance_subtask_progress(sub_id, delta)
+                    if res.get("subtask_completed"):
+                        orchestrator.brain.mood.apply_stimulus("goal_milestone_completed")
+                        await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                    if res.get("goal_completed"):
+                        orchestrator.brain.mood.apply_stimulus("goal_all_completed")
+                        g_dict = res.get("goal", {})
+                        orchestrator.brain.episodic_memory.record_episode(
+                            title=f"Misi Selesai: {g_dict.get('title')}",
+                            content=f"Eve berhasil menyelesaikan target '{g_dict.get('title')}' secara mandiri!",
+                            episode_type="achievement",
+                            user="Stream",
+                            emotional_tag="happy",
+                            importance_score=0.9
+                        )
+                        await orchestrator.broadcast("goal_completed", res)
+                        await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
+                        await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                    await orchestrator.broadcast("goal_updated", orchestrator.brain.goals.get_state())
+                elif act == "complete_subtask":
+                    res = orchestrator.brain.goals.complete_current_subtask()
+                    if res.get("subtask_completed"):
+                        orchestrator.brain.mood.apply_stimulus("goal_milestone_completed")
+                        await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                    if res.get("goal_completed"):
+                        orchestrator.brain.mood.apply_stimulus("goal_all_completed")
+                        g_dict = res.get("goal", {})
+                        orchestrator.brain.episodic_memory.record_episode(
+                            title=f"Misi Selesai: {g_dict.get('title')}",
+                            content=f"Eve berhasil menyelesaikan target '{g_dict.get('title')}' secara mandiri!",
+                            episode_type="achievement",
+                            user="Stream",
+                            emotional_tag="happy",
+                            importance_score=0.9
+                        )
+                        await orchestrator.broadcast("goal_completed", res)
+                        await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
+                        await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                    await orchestrator.broadcast("goal_updated", orchestrator.brain.goals.get_state())
+                elif act == "replan_subtask":
+                    reason = data.get("reason", "Kendala tak terduga dalam eksekusi.")
+                    new_sub, speech = orchestrator.brain.goals.fail_and_replan_active_subtask(reason)
+                    orchestrator.brain.mood.apply_stimulus("goal_strategy_failed")
+                    await orchestrator.broadcast("strategy_adapted", {
+                        "new_subtask": new_sub.to_dict() if new_sub else None,
+                        "speech": speech,
+                        "reason": reason
+                    })
+                    await orchestrator.broadcast("goal_updated", orchestrator.brain.goals.get_state())
+                    await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                elif act == "autonomous_select":
+                    chosen, speech = orchestrator.brain.goals.autonomous_select_next_activity(orchestrator.brain.mood.dimensions)
+                    await orchestrator.broadcast("goal_updated", orchestrator.brain.goals.get_state())
+                elif act == "get_agenda":
+                    p = Path("data/goals/agenda.md")
+                    agenda_text = p.read_text(encoding="utf-8") if p.exists() else ""
+                    await websocket.send_json({"type": "goal_agenda_data", "data": {"markdown": agenda_text}})
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:
