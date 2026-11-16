@@ -78,6 +78,14 @@ async def get_goals_agenda_markdown():
         return {"markdown": p.read_text(encoding="utf-8")}
     return {"markdown": "# No agenda yet."}
 
+@app.get("/api/relationships")
+async def get_relationships_state():
+    return orchestrator.brain.relationships.get_state()
+
+@app.get("/api/relationships/{username}")
+async def get_user_relationship(username: str):
+    return orchestrator.brain.relationships.get_relationship(username).to_dict()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -132,6 +140,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "goal_updated",
         "data": orchestrator.brain.goals.get_state()
+    })
+
+    # Send initial relationship states
+    await websocket.send_json({
+        "type": "relationship_updated",
+        "data": orchestrator.brain.relationships.get_state()
     })
 
     try:
@@ -210,16 +224,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         await orchestrator.minecraft.player_attacked_bot(target)
                         orchestrator.brain.episodic_memory.on_minecraft_attack(target)
                         orchestrator.brain.mood.apply_stimulus("minecraft_attacked")
+                        orchestrator.brain.relationships.record_gaming_event(target, "minecraft", "attack", {})
                         await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
                         await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                        await orchestrator.broadcast("relationship_updated", orchestrator.brain.relationships.get_state())
                     elif event_name == "gift":
                         item_name = data.get("item", "Diamond")
                         await orchestrator.minecraft.player_gave_gift(target, item_name)
                         orchestrator.brain.episodic_memory.on_minecraft_gift(target, item_name)
                         orchestrator.brain.mood.apply_stimulus("minecraft_gift")
+                        orchestrator.brain.relationships.record_gaming_event(target, "minecraft", "gift", {"item": item_name})
                         await orchestrator.evaluate_goal_event("minecraft_item_collected", {"item": item_name, "count": 1})
                         await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
                         await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                        await orchestrator.broadcast("relationship_updated", orchestrator.brain.relationships.get_state())
                     elif event_name == "crouch":
                         await orchestrator.minecraft.player_crouched(target)
                     elif event_name == "guard_threat":
@@ -236,9 +254,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         await orchestrator.minecraft.emit_commentary(comment)
                         await orchestrator.minecraft.emit_state()
                         orchestrator.brain.episodic_memory.on_minecraft_guard_incident(target, mob)
+                        orchestrator.brain.relationships.record_gaming_event(target, "minecraft", "guard_kill", {"mob": mob})
                         await orchestrator.evaluate_goal_event("minecraft_guard_victory", {"mob": mob, "target": target})
                         await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
                         await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                        await orchestrator.broadcast("relationship_updated", orchestrator.brain.relationships.get_state())
             elif data.get("type") == "chess_action":
                 act = data.get("action")
                 if act == "start_game":
@@ -369,6 +389,30 @@ async def websocket_endpoint(websocket: WebSocket):
                     p = Path("data/goals/agenda.md")
                     agenda_text = p.read_text(encoding="utf-8") if p.exists() else ""
                     await websocket.send_json({"type": "goal_agenda_data", "data": {"markdown": agenda_text}})
+            elif data.get("type") == "relationship_action":
+                act = data.get("action")
+                if act == "add_inside_joke":
+                    uname = data.get("username", "Chatter")
+                    topic = data.get("topic", "Inside Joke")
+                    punchline = data.get("punchline", "")
+                    ctx_str = data.get("context", "web")
+                    orchestrator.brain.relationships.add_inside_joke_to_user(uname, topic, punchline, ctx_str)
+                    await orchestrator.broadcast("relationship_updated", orchestrator.brain.relationships.get_state())
+                elif act == "set_tier":
+                    uname = data.get("username", "Chatter")
+                    tier = data.get("tier", "new_friend")
+                    p = orchestrator.brain.relationships.get_relationship(uname)
+                    p.tier = tier
+                    orchestrator.brain.relationships.save()
+                    orchestrator.brain.relationships.sync_to_markdown(uname)
+                    await orchestrator.broadcast("relationship_updated", orchestrator.brain.relationships.get_state())
+                elif act == "simulate_event":
+                    uname = data.get("username", "Chatter")
+                    game = data.get("game", "minecraft")
+                    ev = data.get("event", "gift")
+                    det = data.get("details", {})
+                    orchestrator.brain.relationships.record_gaming_event(uname, game, ev, det)
+                    await orchestrator.broadcast("relationship_updated", orchestrator.brain.relationships.get_state())
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:

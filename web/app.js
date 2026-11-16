@@ -117,6 +117,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateMoodUi(msg.data);
     } else if (msg.type === "goal_updated") {
       updateGoalUi(msg.data);
+    } else if (msg.type === "relationship_updated") {
+      updateRelationshipUi(msg.data);
     } else if (msg.type === "goal_completed") {
       showGoalCompletedAlert(msg.data);
     } else if (msg.type === "strategy_adapted") {
@@ -1582,6 +1584,238 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("Goal baru berhasil ditambahkan dan didekomposisi menjadi subtask!");
     });
   }
+
+  // --- Relationship System & Social Intelligence Elements ---
+  const relCurrentBadge = document.getElementById("rel-current-badge");
+  const relStatsBadge = document.getElementById("rel-stats-badge");
+  const relUserSelect = document.getElementById("relUserSelect");
+  const relUserName = document.getElementById("rel-user-name");
+  const relUserNickname = document.getElementById("rel-user-nickname");
+  const relTierBadge = document.getElementById("rel-tier-badge");
+  const relInteractionCount = document.getElementById("rel-interaction-count");
+  const relFamVal = document.getElementById("rel-fam-val");
+  const relFamBar = document.getElementById("rel-fam-bar");
+  const relTrustVal = document.getElementById("rel-trust-val");
+  const relTrustBar = document.getElementById("rel-trust-bar");
+  const relRivalryVal = document.getElementById("rel-rivalry-val");
+  const relRivalryBar = document.getElementById("rel-rivalry-bar");
+  const relGamingVal = document.getElementById("rel-gaming-val");
+  const relGamingBar = document.getElementById("rel-gaming-bar");
+  const relJokesList = document.getElementById("rel-jokes-list");
+  const btnToggleAddJoke = document.getElementById("btn-toggle-add-joke");
+  const addJokeForm = document.getElementById("addJokeForm");
+  const btnCancelJoke = document.getElementById("btn-cancel-joke");
+  const relExperiencesList = document.getElementById("rel-experiences-list");
+
+  let currentRelData = null;
+  let selectedRelUser = "Creator";
+
+  function sendRelationshipAction(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "relationship_action",
+        ...payload
+      }));
+    }
+  }
+
+  function updateRelationshipUi(data) {
+    if (!data) return;
+    currentRelData = data;
+
+    const profiles = data.profiles || {};
+    const totalCount = data.total_relationships || Object.keys(profiles).length;
+
+    if (relStatsBadge) {
+      relStatsBadge.textContent = `Profiles: ${totalCount}`;
+    }
+
+    // Populate or sync User Dropdown
+    if (relUserSelect) {
+      const currentSelected = selectedRelUser || relUserSelect.value || "Creator";
+      const existingOptions = Array.from(relUserSelect.options).map(o => o.value);
+      const userKeys = Object.keys(profiles);
+
+      if (JSON.stringify(existingOptions.sort()) !== JSON.stringify(userKeys.sort())) {
+        relUserSelect.innerHTML = "";
+        userKeys.forEach(u => {
+          const opt = document.createElement("option");
+          opt.value = u;
+          opt.textContent = `${u} (${(profiles[u].tier || "").replace("_", " ")})`;
+          if (u === currentSelected) opt.selected = true;
+          relUserSelect.appendChild(opt);
+        });
+      }
+    }
+
+    renderSelectedProfile();
+  }
+
+  function renderSelectedProfile() {
+    if (!currentRelData || !currentRelData.profiles) return;
+    const profiles = currentRelData.profiles;
+    const profile = profiles[selectedRelUser] || profiles["Creator"] || Object.values(profiles)[0];
+    if (!profile) return;
+
+    const username = profile.username || selectedRelUser;
+
+    if (relCurrentBadge) relCurrentBadge.textContent = `Viewer: ${username}`;
+    if (relUserName) relUserName.textContent = username;
+    if (relUserNickname) relUserNickname.textContent = `Title: ${profile.nickname || 'Kawan Stream'}`;
+
+    if (relTierBadge) {
+      const tier = profile.tier || "new_friend";
+      const tierLabels = {
+        "new_friend": "New Friend 🌱",
+        "regular_viewer": "Regular Viewer ☕",
+        "gaming_partner": "Gaming Partner 🎮",
+        "rival": "Rival / Rivalitas ⚔️",
+        "trusted_friend": "Trusted Friend 💖"
+      };
+      relTierBadge.textContent = tierLabels[tier] || tier;
+
+      if (tier === "trusted_friend") {
+        relTierBadge.className = "badge badge-online";
+      } else if (tier === "rival") {
+        relTierBadge.className = "badge badge-danger";
+      } else if (tier === "gaming_partner") {
+        relTierBadge.className = "badge badge-accent";
+      } else if (tier === "regular_viewer") {
+        relTierBadge.className = "badge";
+      } else {
+        relTierBadge.className = "badge";
+      }
+    }
+
+    if (relInteractionCount) {
+      relInteractionCount.textContent = `${profile.interaction_count || 0} interaksi`;
+    }
+
+    // Gauges
+    const setGauge = (bar, valElem, val) => {
+      const pct = Math.round(Math.min(1.0, Math.max(0.0, val || 0)) * 100);
+      if (bar) bar.style.width = `${pct}%`;
+      if (valElem) valElem.textContent = `${pct}%`;
+    };
+
+    setGauge(relFamBar, relFamVal, profile.familiarity);
+    setGauge(relTrustBar, relTrustVal, profile.trust);
+    setGauge(relRivalryBar, relRivalryVal, profile.rivalry);
+    setGauge(relGamingBar, relGamingVal, profile.gaming_affinity);
+
+    // Render inside jokes
+    if (relJokesList) {
+      relJokesList.innerHTML = "";
+      const jokes = profile.inside_jokes || [];
+      if (jokes.length === 0) {
+        relJokesList.innerHTML = "<div class='subtasks-hint' style='font-style: italic;'>Belum ada candaan internal unik bersama penonton ini.</div>";
+      } else {
+        jokes.forEach(j => {
+          const jokeEl = document.createElement("div");
+          jokeEl.className = "rel-joke-pill";
+          jokeEl.innerHTML = `
+            <span class="rel-joke-topic">🎭 ${escapeHtml(j.topic || 'Joke')}</span>
+            <span class="rel-joke-punchline">"${escapeHtml(j.punchline || '')}"</span>
+          `;
+          relJokesList.appendChild(jokeEl);
+        });
+      }
+    }
+
+    // Render shared experiences
+    if (relExperiencesList) {
+      relExperiencesList.innerHTML = "";
+      const exps = profile.shared_experiences || [];
+      if (exps.length === 0) {
+        relExperiencesList.innerHTML = "<div class='subtasks-hint' style='font-style: italic;'>Belum ada riwayat momen spesial tercatat.</div>";
+      } else {
+        exps.slice().reverse().forEach(exp => {
+          const item = document.createElement("div");
+          item.className = "rel-exp-item";
+          item.innerHTML = `
+            <span class="badge badge-sm">${escapeHtml(exp.category || 'chat')}</span>
+            <span class="rel-exp-summary">${escapeHtml(exp.summary || '')}</span>
+            <span class="rel-exp-time">${escapeHtml(exp.timestamp ? exp.timestamp.substring(11, 16) : '')}</span>
+          `;
+          relExperiencesList.appendChild(item);
+        });
+      }
+    }
+  }
+
+  // Dropdown change listener
+  if (relUserSelect) {
+    relUserSelect.addEventListener("change", () => {
+      selectedRelUser = relUserSelect.value;
+      renderSelectedProfile();
+    });
+  }
+
+  // Quick pills listener
+  document.querySelectorAll(".rel-quick-pill").forEach(pill => {
+    pill.addEventListener("click", () => {
+      const u = pill.dataset.user;
+      if (u) {
+        selectedRelUser = u;
+        if (relUserSelect) relUserSelect.value = u;
+        document.querySelectorAll(".rel-quick-pill").forEach(p => p.classList.remove("active"));
+        pill.classList.add("active");
+        renderSelectedProfile();
+      }
+    });
+  });
+
+  // Toggle joke form
+  if (btnToggleAddJoke && addJokeForm) {
+    btnToggleAddJoke.addEventListener("click", () => {
+      addJokeForm.style.display = addJokeForm.style.display === "none" ? "flex" : "none";
+    });
+  }
+
+  if (btnCancelJoke && addJokeForm) {
+    btnCancelJoke.addEventListener("click", () => {
+      addJokeForm.style.display = "none";
+    });
+  }
+
+  if (addJokeForm) {
+    addJokeForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const topic = document.getElementById("jokeNewTopic").value.trim();
+      const punchline = document.getElementById("jokeNewPunchline").value.trim();
+      const context = document.getElementById("jokeNewContext").value.trim();
+
+      if (!topic || !punchline) return;
+
+      sendRelationshipAction({
+        action: "add_inside_joke",
+        username: selectedRelUser,
+        topic: topic,
+        punchline: punchline,
+        context: context
+      });
+
+      addJokeForm.reset();
+      addJokeForm.style.display = "none";
+    });
+  }
+
+  // Relationship simulator buttons
+  document.querySelectorAll(".btn-rel-sim").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const eventType = btn.dataset.event;
+      const game = btn.dataset.game || "general";
+      if (eventType) {
+        sendRelationshipAction({
+          action: "simulate_event",
+          username: selectedRelUser,
+          event_type: eventType,
+          game: game,
+          details: { stimulated_by: "dashboard_sim" }
+        });
+      }
+    });
+  });
 
   // --- 2D Animated Avatar Renderer ---
   function render() {

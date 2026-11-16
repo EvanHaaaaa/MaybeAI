@@ -513,6 +513,144 @@
       </div>
     </section>
 
+    <!-- Relationship System & Social Intelligence -->
+    <section class="card rel-card" id="relCard">
+      <div class="card-header">
+        <div class="rel-title">
+          <span class="rel-icon">👥</span>
+          <div>
+            <h2>Relationship System & Social Intelligence</h2>
+            <small class="rel-subtitle">Dynamic Archetypes, Multi-Metric Affinity & Shared Inside Jokes</small>
+          </div>
+        </div>
+        <div class="rel-status-bar">
+          <span id="rel-current-badge" class="badge badge-accent">Viewer: Creator</span>
+          <span id="rel-stats-badge" class="badge">Profiles: 4</span>
+        </div>
+      </div>
+
+      <div class="rel-content">
+        <!-- User Selection & Archetype Bar -->
+        <div class="rel-selector-row">
+          <div class="rel-select-wrap">
+            <label for="relUserSelect">Pilih Penonton / Pemain:</label>
+            <select id="relUserSelect" class="select-server">
+              <!-- Dynamically populated -->
+            </select>
+          </div>
+          <div class="rel-quick-pills">
+            <button type="button" class="pill pill-sm rel-quick-pill" data-user="Creator">👑 Creator</button>
+            <button type="button" class="pill pill-sm rel-quick-pill" data-user="DiamondHunter">🎮 DiamondHunter</button>
+            <button type="button" class="pill pill-sm rel-quick-pill" data-user="GrandmasterGarry">⚔️ GrandmasterGarry</button>
+            <button type="button" class="pill pill-sm rel-quick-pill" data-user="Steve">☕ Steve</button>
+          </div>
+        </div>
+
+        <!-- Spotlight Profile Card -->
+        <div class="rel-profile-card">
+          <div class="rel-profile-header">
+            <div class="rel-user-info">
+              <span class="rel-avatar-icon">👤</span>
+              <div>
+                <h3 id="rel-user-name">Creator</h3>
+                <small id="rel-user-nickname" class="rel-nickname">Title: Creator Tercinta</small>
+              </div>
+            </div>
+            <div class="rel-badge-wrap">
+              <span id="rel-tier-badge" class="badge badge-online">Trusted Friend 💖</span>
+              <span id="rel-interaction-count" class="badge badge-sm">50 pesan</span>
+            </div>
+          </div>
+
+          <!-- Affinity Gauges -->
+          <div class="rel-gauges-grid">
+            <div class="rel-gauge-item">
+              <div class="gauge-label-wrap">
+                <span class="gauge-name">☕ Familiarity (Keakraban)</span>
+                <span id="rel-fam-val" class="gauge-value">95%</span>
+              </div>
+              <div class="gauge-bar-track">
+                <div id="rel-fam-bar" class="gauge-bar-fill gauge-fill-happy" style="width: 95%;"></div>
+              </div>
+            </div>
+
+            <div class="rel-gauge-item">
+              <div class="gauge-label-wrap">
+                <span class="gauge-name">💖 Trust & Rapport (Kepercayaan)</span>
+                <span id="rel-trust-val" class="gauge-value">90%</span>
+              </div>
+              <div class="gauge-bar-track">
+                <div id="rel-trust-bar" class="gauge-bar-fill gauge-fill-curious" style="width: 90%;"></div>
+              </div>
+            </div>
+
+            <div class="rel-gauge-item">
+              <div class="gauge-label-wrap">
+                <span class="gauge-name">⚔️ Rivalry (Rivalitas & Ejekan)</span>
+                <span id="rel-rivalry-val" class="gauge-value">10%</span>
+              </div>
+              <div class="gauge-bar-track">
+                <div id="rel-rivalry-bar" class="gauge-bar-fill gauge-fill-annoy" style="width: 10%;"></div>
+              </div>
+            </div>
+
+            <div class="rel-gauge-item">
+              <div class="gauge-label-wrap">
+                <span class="gauge-name">🎮 Gaming Synergy (Mabar / Co-op)</span>
+                <span id="rel-gaming-val" class="gauge-value">60%</span>
+              </div>
+              <div class="gauge-bar-track">
+                <div id="rel-gaming-bar" class="gauge-bar-fill gauge-fill-competitive" style="width: 60%;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Shared Inside Jokes -->
+          <div class="rel-jokes-section">
+            <div class="jokes-header">
+              <span class="section-title">🎭 Candaan Internal (Shared Inside Jokes):</span>
+              <button type="button" id="btn-toggle-add-joke" class="btn btn-secondary btn-sm">➕ Tambah Inside Joke</button>
+            </div>
+            <div id="rel-jokes-list" class="rel-jokes-list">
+              <!-- Dynamically populated inside jokes -->
+            </div>
+
+            <!-- Form Add Inside Joke -->
+            <form id="addJokeForm" class="add-joke-form" style="display: none;">
+              <div class="form-grid">
+                <input type="text" id="jokeNewTopic" placeholder="Topik Candaan (misal: 'Pajak Diamond')" required>
+                <input type="text" id="jokeNewPunchline" placeholder="Punchline / Candaan (misal: 'Pajak 50% buat streamer')" required>
+                <input type="text" id="jokeNewContext" placeholder="Konteks (misal: 'Minecraft mining')">
+              </div>
+              <div class="form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">Simpan Inside Joke</button>
+                <button type="button" id="btn-cancel-joke" class="btn btn-secondary btn-sm">Batal</button>
+              </div>
+            </form>
+          </div>
+
+          <!-- Shared Experiences Timeline -->
+          <div class="rel-experiences-section">
+            <span class="section-title">📜 Riwayat Pengalaman Bersama:</span>
+            <div id="rel-experiences-list" class="rel-experiences-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Interactive Relationship Simulator -->
+          <div class="rel-simulator-bar">
+            <span class="sim-label">Simulasi Interaksi Sosial:</span>
+            <div class="rel-sim-buttons">
+              <button type="button" class="btn-rel-sim pill" data-event="gift" data-game="minecraft">💎 Hadiah Diamond (+Gaming, +Trust)</button>
+              <button type="button" class="btn-rel-sim pill" data-event="guard_kill" data-game="minecraft">🛡️ Lindungi dari Mob (+Gaming)</button>
+              <button type="button" class="btn-rel-sim pill" data-event="queen_captured" data-game="chess">♟️ Makan Ratu Catur (+Rivalry)</button>
+              <button type="button" class="btn-rel-sim pill" data-event="attack" data-game="minecraft">🗡️ Pukul Eve (+Rivalry)</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">

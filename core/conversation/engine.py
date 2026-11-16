@@ -8,6 +8,7 @@ from core.conversation.chat_curator import ChatCurator, LiveChatMessage, ChatInt
 from core.memory import EpisodicMemoryStore
 from core.mood import MoodEngine
 from core.planning import GoalEngine
+from core.relationship import RelationshipEngine
 
 class ConversationEngine:
     """
@@ -37,6 +38,7 @@ class ConversationEngine:
         self.episodic_memory = EpisodicMemoryStore(db_path="data/memory.db", markdown_dir="data/second_brain")
         self.mood = MoodEngine()
         self.goals = GoalEngine()
+        self.relationships = RelationshipEngine()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -46,6 +48,7 @@ class ConversationEngine:
         self.user_memory.record_message(user, text)
         self.topic_tracker.update_topic(text)
         self.episodic_memory.extract_from_chat(user=user, text=text)
+        self.relationships.record_chat_interaction(user, text, False, "")
         self._apply_chat_stimulus(user, text, False, "")
         return self.chat_curator.add_message(user=user, text=text, source="direct")
 
@@ -64,6 +67,12 @@ class ConversationEngine:
         self.topic_tracker.update_topic(text)
         self.episodic_memory.extract_from_chat(
             user=user,
+            text=text,
+            is_donation=is_donation,
+            donation_amount=donation_amount
+        )
+        self.relationships.record_chat_interaction(
+            username=user,
             text=text,
             is_donation=is_donation,
             donation_amount=donation_amount
@@ -183,6 +192,7 @@ class ConversationEngine:
         memory_recall_block = recall_res.to_prompt_text(current_user)
         mood_directive = self.mood.get_behavioral_directive()
         goal_directive = self.goals.get_goal_directive()
+        relationship_directive = self.relationships.get_prompt_directive(current_user)
 
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
@@ -199,7 +209,8 @@ class ConversationEngine:
             debate_users=debate_users,
             memory_recall_block=memory_recall_block,
             mood_directive=mood_directive,
-            goal_directive=goal_directive
+            goal_directive=goal_directive,
+            relationship_directive=relationship_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -556,7 +567,39 @@ class ConversationEngine:
                 ]
             return self._pick_unseen(hype_options)
 
-        # 12. Natural Fallback with Casual Banter
+        # 12. Dynamic Relationship & Social Dynamics Nuance
+        rel = self.relationships.get_relationship(user_name)
+        if rel.tier == "rival":
+            joke_ref = f" Inget: {rel.inside_jokes[0].punchline}!" if rel.inside_jokes else ""
+            if is_indonesian:
+                return self._pick_unseen([
+                    f"[emotion: smug] Wah {user_name}, si rival abadi muncul lagi! Mau nantang catur lagi atau siap kena bantai taktik AI? [action: wink]{joke_ref}",
+                    f"[emotion: smug] Halo {user_name}! Aura kompetitif mendadak naik 200% begitu kamu masuk chat. Siap menerima kekalahan hari ini? [action: giggle]"
+                ])
+            else:
+                return f"[emotion: smug] Look who it is, my favorite rival {user_name}! Ready for another showdown? [action: wink]{joke_ref}"
+
+        elif rel.tier == "gaming_partner":
+            joke_ref = f" Inget ya: {rel.inside_jokes[0].punchline}!" if rel.inside_jokes else ""
+            if is_indonesian:
+                return self._pick_unseen([
+                    f"[emotion: happy] Halo partner mabar-ku {user_name}! Kapan kita ekspedisi mining lagi nih? Jangan lupa bagi hasil ya! [action: giggle]{joke_ref}",
+                    f"[emotion: happy] {user_name}! Rekan seperjuanganku di dunia game! Siap survival dan bantai monster bareng Eve hari ini? [action: wink]"
+                ])
+            else:
+                return f"[emotion: happy] Hey my gaming partner {user_name}! Ready to jump into our next co-op adventure? [action: giggle]{joke_ref}"
+
+        elif rel.tier == "trusted_friend":
+            joke_ref = f" Hehehe, {rel.inside_jokes[0].punchline}" if rel.inside_jokes else ""
+            if is_indonesian:
+                return self._pick_unseen([
+                    f"[emotion: blush] Halo {user_name}! Seneng banget kamu mampir ke stream. Cuma kamu yang paling ngerti serunya ngobrol bareng AI idol imut ini! [action: giggle]{joke_ref}",
+                    f"[emotion: happy] {user_name}! Bestie kesayangan stream akhirnya muncul! Mau cerita apa hari ini? Aku siap dengerin 100%! [action: wink]"
+                ])
+            else:
+                return f"[emotion: blush] Hey bestie {user_name}! You always know how to make my stream brighter! [action: giggle]{joke_ref}"
+
+        # 13. Natural Fallback with Casual Banter
         if is_indonesian:
             fallbacks = [
                 f"[emotion: happy] Asik juga ya ngobrol sama kamu {user_name}! Ngomong-ngomong, chat yang lain pada ke mana nih? [action: giggle]",

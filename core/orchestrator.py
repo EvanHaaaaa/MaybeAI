@@ -223,6 +223,7 @@ class Orchestrator:
             donation_currency=msg.donation_currency
         )
         await self.broadcast("mood_updated", self.brain.mood.get_state())
+        await self.broadcast("relationship_updated", self.brain.relationships.get_state())
 
     async def _process_chat_loop(self):
         """
@@ -289,7 +290,9 @@ class Orchestrator:
                     target = primary.user
                 await self.minecraft.guard_player(target)
                 self.brain.mood.apply_stimulus("minecraft_threat", 0.7)
+                self.brain.relationships.record_gaming_event(target or primary.user, "minecraft", "guard_player", {})
                 await self.broadcast("mood_updated", self.brain.mood.get_state())
+                await self.broadcast("relationship_updated", self.brain.relationships.get_state())
             elif "dance" in msg_lower or "joget" in msg_lower:
                 await self.minecraft.dance()
                 self.brain.mood.apply_stimulus("joke", 0.8)
@@ -297,7 +300,9 @@ class Orchestrator:
             elif "gift" in msg_lower or "hadiah" in msg_lower:
                 await self.minecraft.gift_nearest()
                 self.brain.mood.apply_stimulus("minecraft_gift")
+                self.brain.relationships.record_gaming_event(primary.user, "minecraft", "gift", {"item": "Diamond"})
                 await self.broadcast("mood_updated", self.brain.mood.get_state())
+                await self.broadcast("relationship_updated", self.brain.relationships.get_state())
             elif "jump" in msg_lower or "lompat" in msg_lower:
                 await self.minecraft.jump()
             elif "crouch" in msg_lower or "jongkok" in msg_lower:
@@ -319,7 +324,9 @@ class Orchestrator:
             elif len(parts) > 2 and parts[1] == "attack":
                 await self.minecraft.player_attacked_bot(parts[2])
                 self.brain.mood.apply_stimulus("minecraft_attacked")
+                self.brain.relationships.record_gaming_event(parts[2], "minecraft", "attack", {})
                 await self.broadcast("mood_updated", self.brain.mood.get_state())
+                await self.broadcast("relationship_updated", self.brain.relationships.get_state())
             elif len(parts) > 2 and parts[1] == "nearby":
                 await self.minecraft.player_joined_proximity(parts[2])
             else:
@@ -357,7 +364,9 @@ class Orchestrator:
             elif "new" in msg_lower or "mulai" in msg_lower or "start" in msg_lower or "main catur" in msg_lower or "play chess" in msg_lower:
                 player_color = "black" if "black" in msg_lower or "hitam" in msg_lower else "white"
                 self.brain.mood.apply_stimulus("chess_start")
+                self.brain.relationships.record_gaming_event(primary.user, "chess", "match_start", {})
                 await self.broadcast("mood_updated", self.brain.mood.get_state())
+                await self.broadcast("relationship_updated", self.brain.relationships.get_state())
                 await self.chess.start_game(player_name=primary.user, player_color=player_color)
                 return
 
@@ -624,6 +633,7 @@ class Orchestrator:
                 san=data.get("san", "")
             )
             self.brain.mood.apply_stimulus("chess_queen_capture")
+            self.brain.relationships.record_gaming_event(data.get("player", "Player"), "chess", "queen_captured", data)
         elif event_type == "game_over":
             self.brain.episodic_memory.on_chess_game_ended(
                 player=data.get("player", "Player"),
@@ -633,6 +643,7 @@ class Orchestrator:
                 moves_count=data.get("moves_count", 0),
                 elo=data.get("elo", 1200)
             )
+            self.brain.relationships.record_gaming_event(data.get("player", "Player"), "chess", "game_over", data)
             if data.get("eve_won"):
                 self.brain.mood.apply_stimulus("chess_victory")
                 await self.evaluate_goal_event("chess_game_won", data)
@@ -640,6 +651,7 @@ class Orchestrator:
                 self.brain.mood.apply_stimulus("chess_defeat")
         await self.broadcast("memory_updated", self.brain.episodic_memory.get_stats())
         await self.broadcast("mood_updated", self.brain.mood.get_state())
+        await self.broadcast("relationship_updated", self.brain.relationships.get_state())
 
     async def evaluate_goal_event(self, event_type: str, data: Dict[str, Any]):
         """Evaluates domain events against autonomous active subtasks."""

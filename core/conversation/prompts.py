@@ -35,7 +35,8 @@ class MasterPromptBuilder:
         debate_users: Optional[List[str]] = None,
         memory_recall_block: str = "",
         mood_directive: str = "",
-        goal_directive: str = ""
+        goal_directive: str = "",
+        relationship_directive: str = ""
     ) -> str:
         name = character.get("name", "Eve Maybe")
         nickname = character.get("nickname", "Eve")
@@ -105,6 +106,8 @@ CURRENT STREAM SITUATION & CONTEXT:
 {mood_directive if mood_directive else ""}
 
 {goal_directive if goal_directive else ""}
+
+{relationship_directive if relationship_directive else ""}
 
 CORE CHARACTER LORE:
 {lore}
