@@ -9,6 +9,7 @@ import websockets
 from core.minecraft.casual_agent import CasualAgent
 from core.minecraft.speedrun_agent import SpeedrunAgent, PHASE_NAMES, SpeedrunPhase
 from core.minecraft.guard_agent import GuardAgent
+from core.minecraft.multiplayer import MultiplayerSocialEngine
 
 class MinecraftController:
     """
@@ -31,6 +32,7 @@ class MinecraftController:
         self.speedrun_agent = SpeedrunAgent(bot_name=bot_name)
         self.guard_agent = GuardAgent(bot_name=bot_name)
         self.guard_target: Optional[str] = None
+        self.multiplayer = MultiplayerSocialEngine()
 
         # Multi-Server List
         self.servers: List[Dict[str, Any]] = []
@@ -125,7 +127,8 @@ class MinecraftController:
                 "target": self.guard_target,
                 "kills": self.guard_agent.kills_count
             },
-            "nearby_players": self.nearby_players
+            "nearby_players": self.nearby_players,
+            "multiplayer": self.multiplayer.get_state()
         }
 
     async def _ensure_bridge_running(self):
@@ -440,6 +443,13 @@ class MinecraftController:
                 await self.emit_commentary(reaction)
 
     async def player_sent_chat(self, sender: str, message: str):
+        # 1. Process in multiplayer social engine
+        reaction = self.multiplayer.process_in_game_chat(sender, message)
+        if reaction:
+            await self.emit_commentary(reaction)
+            return
+
+        # 2. Fallback to casual agent
         if self.current_mode == "santai":
             reaction = self.casual_agent.on_player_chat(sender, message)
             if reaction:
@@ -447,6 +457,8 @@ class MinecraftController:
 
     async def player_attacked_bot(self, attacker: str):
         self.health = max(1, self.health - 2)
+        self.multiplayer.ledger.record_pvp(attacker, 2.0)
+        self.multiplayer.save()
         if self.current_mode == "santai":
             reaction = self.casual_agent.on_player_attack(attacker)
         elif self.current_mode == "guard":
@@ -457,6 +469,8 @@ class MinecraftController:
         await self.emit_state()
 
     async def player_gave_gift(self, giver: str, item_name: str):
+        self.multiplayer.ledger.record_donation(giver, item_name, 1)
+        self.multiplayer.save()
         if self.current_mode == "santai":
             reaction = self.casual_agent.on_player_gift(giver, item_name)
             await self.emit_commentary(reaction)

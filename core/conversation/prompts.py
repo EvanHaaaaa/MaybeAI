@@ -37,7 +37,8 @@ class MasterPromptBuilder:
         mood_directive: str = "",
         goal_directive: str = "",
         relationship_directive: str = "",
-        visual_directive: str = ""
+        visual_directive: str = "",
+        multiplayer_directive: str = ""
     ) -> str:
         name = character.get("name", "Eve Maybe")
         nickname = character.get("nickname", "Eve")
@@ -111,6 +112,8 @@ CURRENT STREAM SITUATION & CONTEXT:
 {relationship_directive if relationship_directive else ""}
 
 {visual_directive if visual_directive else ""}
+
+{multiplayer_directive if multiplayer_directive else ""}
 
 CORE CHARACTER LORE:
 {lore}

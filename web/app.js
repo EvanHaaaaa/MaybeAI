@@ -121,6 +121,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateRelationshipUi(msg.data);
     } else if (msg.type === "vision_updated") {
       updateVisionUi(msg.data);
+    } else if (msg.type === "multiplayer_updated") {
+      updateMultiplayerUi(msg.data);
     } else if (msg.type === "goal_completed") {
       showGoalCompletedAlert(msg.data);
     } else if (msg.type === "strategy_adapted") {
@@ -1949,6 +1951,335 @@ document.addEventListener("DOMContentLoaded", () => {
       const scene = btn.dataset.scene;
       if (scene) {
         sendVisionAction({ action: "perceive_now", simulated_scene: scene });
+      }
+    });
+  });
+
+  // =========================================================================
+  // --- Minecraft Multiplayer Social Intelligence UI ---
+  // =========================================================================
+  const mpSquadBadge = document.getElementById("mp-squad-badge");
+  const mpPartnerBadge = document.getElementById("mp-partner-badge");
+  const mpContributorsBadge = document.getElementById("mp-contributors-badge");
+  const mpSquadName = document.getElementById("mpSquadName");
+  const mpSquadMotto = document.getElementById("mpSquadMotto");
+  const mpMembersList = document.getElementById("mpMembersList");
+  const mpTreasuryItems = document.getElementById("mpTreasuryItems");
+
+  const mpPartnerFitnessBadge = document.getElementById("mpPartnerFitnessBadge");
+  const mpPartnerName = document.getElementById("mpPartnerName");
+  const mpPartnerMission = document.getElementById("mpPartnerMission");
+  const mpPartnerSpeech = document.getElementById("mpPartnerSpeech");
+  const selectPartnerMission = document.getElementById("selectPartnerMission");
+  const btnSelectPartner = document.getElementById("btn-select-partner");
+
+  const mpContributorsList = document.getElementById("mpContributorsList");
+  const mpBarterHistory = document.getElementById("mpBarterHistory");
+  const mpTradeForm = document.getElementById("mpTradeForm");
+  const tradeProposer = document.getElementById("tradeProposer");
+  const tradeOffering = document.getElementById("tradeOffering");
+  const tradeRequesting = document.getElementById("tradeRequesting");
+  const btnTradeRipoffSim = document.getElementById("btn-trade-ripoff-sim");
+  const mpGroupChatHistory = document.getElementById("mpGroupChatHistory");
+
+  function sendMultiplayerAction(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "multiplayer_action",
+        ...payload
+      }));
+    }
+  }
+
+  function parseItemInput(str) {
+    if (!str) return {};
+    str = str.trim();
+    if (str.startsWith("{")) {
+      try { return JSON.parse(str); } catch (e) {}
+    }
+    const result = {};
+    const parts = str.split(",");
+    for (const p of parts) {
+      const match = p.trim().match(/^(\d+)\s+([a-zA-Z0-9_]+)$/);
+      if (match) {
+        result[match[2].toLowerCase()] = parseInt(match[1], 10);
+      } else {
+        const itemMatch = p.trim().match(/^([a-zA-Z0-9_]+)$/);
+        if (itemMatch) {
+          result[itemMatch[1].toLowerCase()] = 1;
+        }
+      }
+    }
+    return result;
+  }
+
+  function updateMultiplayerUi(data) {
+    if (!data) return;
+
+    // Badges
+    if (mpSquadBadge && data.active_team) {
+      mpSquadBadge.textContent = data.active_team.name || "Squad Maybe ✨";
+    }
+    if (mpPartnerBadge && data.selected_partner) {
+      mpPartnerBadge.textContent = `Partner: ${data.selected_partner}`;
+    }
+    if (mpContributorsBadge && data.ledger) {
+      mpContributorsBadge.textContent = `Tracked Players: ${data.ledger.length}`;
+    }
+
+    // Active Squad Box
+    if (data.active_team) {
+      if (mpSquadName) mpSquadName.textContent = data.active_team.name;
+      if (mpSquadMotto) mpSquadMotto.textContent = `"${data.active_team.motto}"`;
+
+      if (mpMembersList && data.active_team.members) {
+        mpMembersList.innerHTML = "";
+        data.active_team.members.forEach(mem => {
+          const role = (data.active_team.member_roles && data.active_team.member_roles[mem]) || "member";
+          const pill = document.createElement("div");
+          const isLeader = (data.active_team.leader === mem);
+          pill.className = `mp-member-pill ${isLeader ? "leader" : ""}`;
+
+          const roleClass = `role-${role.toLowerCase()}`;
+          pill.innerHTML = `
+            <span class="member-name">${mem === "Eve" ? "👑 Eve" : mem}</span>
+            <span class="role-badge ${roleClass}">${role}</span>
+          `;
+          mpMembersList.appendChild(pill);
+        });
+      }
+
+      if (mpTreasuryItems && data.active_team.treasury) {
+        mpTreasuryItems.innerHTML = "";
+        const iconMap = {
+          diamond: "💎",
+          iron: "🧱",
+          iron_ingot: "🧱",
+          gold: "🪙",
+          gold_ingot: "🪙",
+          bread: "🍞",
+          apple: "🍎",
+          torch: "🕯️",
+          netherite: "🛡️"
+        };
+        for (const [item, count] of Object.entries(data.active_team.treasury)) {
+          const icon = iconMap[item.toLowerCase()] || "📦";
+          const tag = document.createElement("span");
+          tag.className = "treasury-tag";
+          tag.textContent = `${icon} ${count} ${item.replace('_', ' ')}`;
+          mpTreasuryItems.appendChild(tag);
+        }
+      }
+    }
+
+    // Partner Spotlight
+    if (data.selected_partner) {
+      if (mpPartnerName) mpPartnerName.textContent = data.selected_partner;
+      if (mpPartnerMission) mpPartnerMission.textContent = `Misi: ${(data.partner_mission || "mining").toUpperCase()}`;
+      if (mpPartnerFitnessBadge) {
+        const score = Math.round(data.partner_score || 95);
+        mpPartnerFitnessBadge.textContent = `Fitness: ${score}%`;
+      }
+      if (mpPartnerSpeech && data.partner_speech) {
+        mpPartnerSpeech.textContent = `"${data.partner_speech}"`;
+      }
+      if (selectPartnerMission && data.partner_mission) {
+        selectPartnerMission.value = data.partner_mission;
+      }
+    }
+
+    // Contributors List
+    if (mpContributorsList && data.ledger) {
+      mpContributorsList.innerHTML = "";
+      data.ledger.forEach(p => {
+        const card = document.createElement("div");
+        card.className = "contributor-card";
+
+        let repClass = "rep-neutral";
+        let repLabel = "Neutral";
+        if (p.reputation >= 85) {
+          repClass = "rep-hero";
+          repLabel = "Hero ⭐";
+        } else if (p.reputation >= 60) {
+          repClass = "rep-trusted";
+          repLabel = "Trusted";
+        } else if (p.reputation < 30) {
+          repClass = "rep-villain";
+          repLabel = "Troublemaker ⚠️";
+        }
+
+        const donList = [];
+        if (p.items_donated) {
+          for (const [k, v] of Object.entries(p.items_donated)) {
+            donList.push(`${v} ${k}`);
+          }
+        }
+        const donStr = donList.length > 0 ? donList.join(", ") : "Belum ada";
+
+        card.innerHTML = `
+          <div class="contributor-header">
+            <span class="contributor-name">👤 ${p.player_name} <small style="color:var(--text-muted); font-weight:normal;">(${p.role_specialty || "General"})</small></span>
+            <span class="reputation-badge ${repClass}">Rep: ${Math.round(p.reputation)}/100 (${repLabel})</span>
+          </div>
+          <div class="contributor-stats">
+            <span class="stat-pill">🎁 Donasi: ${donStr}</span>
+            <span class="stat-pill">⚔️ Mob: ${p.mobs_killed_for_team || 0}</span>
+            <span class="stat-pill">🏡 Bangun: ${p.structures_built || 0}</span>
+            ${p.times_attacked_eve > 0 ? `<span class="stat-pill" style="color:#f87171;">⚠️ Serang Eve: ${p.times_attacked_eve}x</span>` : ""}
+          </div>
+          ${p.notes && p.notes.length > 0 ? `<div class="stat-notes">Catatan: "${p.notes[p.notes.length - 1]}"</div>` : ""}
+        `;
+        mpContributorsList.appendChild(card);
+      });
+    }
+
+    // Barter History
+    if (mpBarterHistory && data.recent_trades) {
+      mpBarterHistory.innerHTML = "";
+      if (data.recent_trades.length === 0) {
+        mpBarterHistory.innerHTML = `<div class="trade-comment" style="color:var(--text-muted);">Belum ada riwayat tawaran barter.</div>`;
+      } else {
+        data.recent_trades.slice().reverse().forEach(tr => {
+          const tCard = document.createElement("div");
+          tCard.className = "trade-card";
+
+          let vClass = "verdict-rejected";
+          let vText = "Ditolak";
+          if (tr.status === "accepted") {
+            vClass = "verdict-accepted";
+            vText = "Diterima ✅";
+          } else if (tr.status === "counter") {
+            vClass = "verdict-counter";
+            vText = "Counter-Offer 🔄";
+          } else {
+            vText = "Ditolak ❌";
+          }
+
+          const offStr = Object.entries(tr.offering || {}).map(([k, v]) => `${v} ${k}`).join(", ");
+          const reqStr = Object.entries(tr.requesting || {}).map(([k, v]) => `${v} ${k}`).join(", ");
+
+          tCard.innerHTML = `
+            <div class="trade-header">
+              <span class="trade-proposer">⚖️ ${tr.proposer}</span>
+              <span class="trade-verdict-badge ${vClass}">${vText}</span>
+            </div>
+            <div class="trade-items-row">
+              <span>Tawarkan: ${offStr || "Kosong"}</span>
+              <span class="trade-arrow">➔</span>
+              <span>Minta: ${reqStr || "Kosong"}</span>
+            </div>
+            ${tr.eve_verdict ? `<p class="trade-comment">"${tr.eve_verdict}"</p>` : ""}
+          `;
+          mpBarterHistory.appendChild(tCard);
+        });
+      }
+    }
+
+    // Multi-Speaker Group Chat
+    if (mpGroupChatHistory && data.group_chat) {
+      mpGroupChatHistory.innerHTML = "";
+      data.group_chat.forEach(turn => {
+        const turnDiv = document.createElement("div");
+        const spkKey = turn.speaker.toLowerCase().replace(/[^a-z0-9]/g, "");
+        turnDiv.className = `mp-chat-turn turn-${spkKey}`;
+
+        let avatar = "💬";
+        if (spkKey.includes("eve")) avatar = "✨";
+        else if (spkKey.includes("diamond")) avatar = "⛏️";
+        else if (spkKey.includes("alex")) avatar = "🛡️";
+        else if (spkKey.includes("steve")) avatar = "🏡";
+        else if (spkKey.includes("garry")) avatar = "😈";
+
+        const timeStr = turn.timestamp ? new Date(turn.timestamp * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : "";
+
+        turnDiv.innerHTML = `
+          <span class="speaker-avatar">${avatar}</span>
+          <div class="turn-content">
+            <span class="speaker-name">${turn.speaker} <span class="turn-time">${timeStr}</span></span>
+            <span class="turn-msg">${turn.message}</span>
+          </div>
+        `;
+        mpGroupChatHistory.appendChild(turnDiv);
+      });
+      mpGroupChatHistory.scrollTop = mpGroupChatHistory.scrollHeight;
+    }
+  }
+
+  // Partner Selector button
+  if (btnSelectPartner && selectPartnerMission) {
+    btnSelectPartner.addEventListener("click", () => {
+      const mission = selectPartnerMission.value;
+      sendMultiplayerAction({
+        action: "choose_partner",
+        mission_type: mission
+      });
+    });
+  }
+
+  // Trade form submit
+  if (mpTradeForm) {
+    mpTradeForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const pName = (tradeProposer && tradeProposer.value.trim()) || "Player";
+      const offObj = parseItemInput(tradeOffering ? tradeOffering.value : "");
+      const reqObj = parseItemInput(tradeRequesting ? tradeRequesting.value : "");
+      sendMultiplayerAction({
+        action: "propose_trade",
+        player_name: pName,
+        offering: offObj,
+        requesting: reqObj
+      });
+    });
+  }
+
+  // Ripoff trade sim button
+  if (btnTradeRipoffSim) {
+    btnTradeRipoffSim.addEventListener("click", () => {
+      sendMultiplayerAction({
+        action: "propose_trade",
+        player_name: "GrieferGarry",
+        offering: { "dirt": 1 },
+        requesting: { "diamond": 5 }
+      });
+    });
+  }
+
+  // Community action simulation buttons
+  document.querySelectorAll(".btn-mp-sim").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const act = btn.dataset.action;
+      if (act === "donate_diamond") {
+        sendMultiplayerAction({
+          action: "record_donation",
+          player_name: "DiamondHunter",
+          item: "diamond",
+          count: 3
+        });
+      } else if (act === "combat_aid") {
+        sendMultiplayerAction({
+          action: "record_combat",
+          player_name: "Alex",
+          mob: "Creeper"
+        });
+      } else if (act === "build_help") {
+        sendMultiplayerAction({
+          action: "record_build",
+          player_name: "Steve",
+          task: "Konstruksi Dinding Base"
+        });
+      } else if (act === "group_nether") {
+        sendMultiplayerAction({
+          action: "in_game_chat",
+          sender: "Alex",
+          message: "Ayo kawan-kawan kita serbu Nether cari Blaze rod bareng!"
+        });
+        setTimeout(() => {
+          sendMultiplayerAction({
+            action: "in_game_chat",
+            sender: "Steve",
+            message: "Siap, aku bawa 10 obsidian sama perlengkapan potion fire resistance!"
+          });
+        }, 800);
       }
     });
   });

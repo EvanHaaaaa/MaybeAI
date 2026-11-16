@@ -1,0 +1,112 @@
+{
+  "ledger": {
+    "diamondhunter": {
+      "player_name": "DiamondHunter",
+      "reputation": 96.0,
+      "role_specialty": "miner",
+      "items_donated": {
+        "diamond": 14,
+        "iron_ingot": 64,
+        "coal": 32
+      },
+      "mobs_killed_for_team": 8,
+      "structures_built": 0,
+      "times_saved_eve": 2,
+      "times_attacked_eve": 0,
+      "notes": [
+        "Sering membagi hasil tambang diamond ke kas Eve",
+        "Pandai menemukan celah gua Y=-58"
+      ],
+      "last_active_str": "21:50:58"
+    },
+    "alex": {
+      "player_name": "Alex",
+      "reputation": 92.0,
+      "role_specialty": "vanguard",
+      "items_donated": {
+        "golden_apple": 2,
+        "iron_sword": 1,
+        "cooked_beef": 20
+      },
+      "mobs_killed_for_team": 24,
+      "structures_built": 0,
+      "times_saved_eve": 4,
+      "times_attacked_eve": 0,
+      "notes": [
+        "Selalu berada di garis depan saat diserbu creeper",
+        "Perisai andalan saat ekspedisi gua malam hari"
+      ],
+      "last_active_str": "21:50:58"
+    },
+    "steve": {
+      "player_name": "Steve",
+      "reputation": 88.0,
+      "role_specialty": "builder",
+      "items_donated": {
+        "oak_log": 96,
+        "glass": 48,
+        "cobblestone": 128
+      },
+      "mobs_killed_for_team": 0,
+      "structures_built": 5,
+      "times_saved_eve": 0,
+      "times_attacked_eve": 0,
+      "notes": [
+        "Membangun dinding pelindung base dan atap kaca",
+        "Menyediakan stok kayu tak terbatas"
+      ],
+      "last_active_str": "21:50:58"
+    },
+    "griefergarry": {
+      "player_name": "GrieferGarry",
+      "reputation": 38.0,
+      "role_specialty": "scout",
+      "items_donated": {
+        "dirt": 16
+      },
+      "mobs_killed_for_team": 0,
+      "structures_built": 0,
+      "times_saved_eve": 0,
+      "times_attacked_eve": 3,
+      "notes": [
+        "Pernah memukul Eve di dekat jurang",
+        "Suka barter tidak masuk akal (1 dirt minta 5 diamond)"
+      ],
+      "last_active_str": "21:50:58"
+    }
+  },
+  "teams": {
+    "active_team_id": "team_squad_maybe",
+    "teams": [
+      {
+        "id": "team_squad_maybe",
+        "name": "Squad Maybe \u2728",
+        "motto": "Satu server, satu impian, bagi hasil diamond 50%!",
+        "leader": "EveMaybe",
+        "members": [
+          "EveMaybe",
+          "DiamondHunter",
+          "Alex",
+          "Steve"
+        ],
+        "member_roles": {
+          "EveMaybe": "commander",
+          "DiamondHunter": "miner",
+          "Alex": "vanguard",
+          "Steve": "builder"
+        },
+        "treasury": {
+          "diamond": 8,
+          "iron_ingot": 45,
+          "bread": 28,
+          "torch": 64
+        },
+        "active_mission": "Ekspedisi Tambang Gua Y=-58 & Proyek Rumah Kaca",
+        "created_at": 1794840278.8683033
+      }
+    ]
+  },
+  "selected_partner": "DiamondHunter",
+  "partner_mission": "mining",
+  "partner_score": 96.0
+}

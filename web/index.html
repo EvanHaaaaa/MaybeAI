@@ -201,6 +201,145 @@
       </div>
     </section>
 
+    <!-- Minecraft Multiplayer Social Intelligence & Community Squad -->
+    <section class="card mc-multiplayer-card" id="mcMultiplayerCard">
+      <div class="card-header">
+        <div class="mc-title">
+          <span>🏰</span>
+          <div>
+            <h2>Multiplayer Social Intelligence & Community Squad</h2>
+            <small class="mc-subtitle">Squad Roster, Partner Selection, Community Contributions & Barter Desk</small>
+          </div>
+        </div>
+        <div class="multiplayer-status-bar">
+          <span id="mp-squad-badge" class="badge badge-accent">Squad Maybe ✨</span>
+          <span id="mp-partner-badge" class="badge badge-online">Partner: DiamondHunter</span>
+          <span id="mp-contributors-badge" class="badge">Tracked Players: 4</span>
+        </div>
+      </div>
+
+      <div class="mc-multiplayer-content">
+        <!-- Row 1: Active Squad Roster & Selected Partner Spotlight -->
+        <div class="mp-grid-row">
+          <!-- Active Squad Box -->
+          <div class="mp-box mp-squad-box">
+            <div class="mp-box-header">
+              <span class="mp-box-title">🛡️ Squad / Faksi Aktif</span>
+              <span id="mpSquadName" class="badge badge-sm">Squad Maybe ✨</span>
+            </div>
+            <p id="mpSquadMotto" class="mp-motto">"Satu server, satu impian, bagi hasil diamond 50%!"</p>
+            
+            <div class="mp-members-list" id="mpMembersList">
+              <!-- Dynamically populated member pills with roles -->
+            </div>
+
+            <div class="mp-treasury-bar">
+              <span class="treasury-label">💎 Kas Bersama Squad:</span>
+              <div id="mpTreasuryItems" class="treasury-items">
+                <span class="treasury-tag">💎 8 Diamond</span>
+                <span class="treasury-tag">🧱 45 Iron</span>
+                <span class="treasury-tag">🍞 28 Bread</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Partner Spotlight Box -->
+          <div class="mp-box mp-partner-box">
+            <div class="mp-box-header">
+              <span class="mp-box-title">🤝 Partner Ekspedisi Terpilih</span>
+              <span id="mpPartnerFitnessBadge" class="badge badge-online">Fitness: 96%</span>
+            </div>
+            <div class="mp-partner-info">
+              <span class="partner-avatar">⛏️</span>
+              <div class="partner-meta">
+                <h3 id="mpPartnerName">DiamondHunter</h3>
+                <span id="mpPartnerMission" class="partner-mission-tag">Misi: MINING EKSPEDISI</span>
+              </div>
+            </div>
+            <p id="mpPartnerSpeech" class="partner-speech">
+              "DiamondHunter! Kamu partner mining paling hoki di squad. Ayo kawal aku ke celah gua Y=-58 buat panen diamond!"
+            </p>
+            <div class="mp-partner-selector-bar">
+              <label for="selectPartnerMission">Ganti Misi Partner:</label>
+              <select id="selectPartnerMission" class="select-server">
+                <option value="mining">⛏️ Mining Gua Dalam (Diamond & Iron)</option>
+                <option value="nether">🔥 Ekspedisi Nether & Raid Mobs</option>
+                <option value="building">🏡 Pembangunan Markas & Konstruksi</option>
+                <option value="scouting">🧭 Penjelajahan Bioma & Dungeon</option>
+              </select>
+              <button type="button" id="btn-select-partner" class="btn btn-primary btn-sm">🤖 Pilih Partner Terbaik</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 2: Player Contribution Ledger & Community Barter Desk -->
+        <div class="mp-grid-row">
+          <!-- Contribution Ledger -->
+          <div class="mp-box mp-ledger-box">
+            <div class="mp-box-header">
+              <span class="mp-box-title">📊 Buku Kontribusi & Reputasi Server</span>
+              <small class="subtasks-hint">Mencatat donasi loot, bantuan pertarungan & pembangunan.</small>
+            </div>
+            <div id="mpContributorsList" class="mp-contributors-list">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <!-- Barter & Negotiation Desk -->
+          <div class="mp-box mp-barter-box">
+            <div class="mp-box-header">
+              <span class="mp-box-title">⚖️ Meja Barter & Negosiasi Komunitas</span>
+              <small class="subtasks-hint">Eve mengevaluasi barter adil vs penipuan loot.</small>
+            </div>
+            
+            <div class="mp-barter-history" id="mpBarterHistory">
+              <!-- Dynamically populated trade history -->
+            </div>
+
+            <!-- Trade Simulator Form -->
+            <form id="mpTradeForm" class="mp-trade-form">
+              <div class="trade-form-grid">
+                <div>
+                  <label>Player:</label>
+                  <input type="text" id="tradeProposer" value="Steve" required>
+                </div>
+                <div>
+                  <label>Barang Ditawarkan:</label>
+                  <input type="text" id="tradeOffering" placeholder="misal: 16 iron_ingot" value="16 iron_ingot" required>
+                </div>
+                <div>
+                  <label>Barang Diminta:</label>
+                  <input type="text" id="tradeRequesting" placeholder="misal: 2 diamond" value="2 diamond" required>
+                </div>
+              </div>
+              <div class="trade-form-actions">
+                <button type="submit" class="btn btn-primary btn-sm">⚖️ Ajukan Barter ke Eve</button>
+                <button type="button" id="btn-trade-ripoff-sim" class="btn btn-danger btn-sm">💥 Simulasi Tawaran Penipuan (1 Dirt = 5 Diamond)</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <!-- Row 3: Multi-Speaker Group Chat Stream Tracker -->
+        <div class="mp-box mp-group-chat-box">
+          <div class="mp-box-header">
+            <span class="mp-box-title">🗣️ Percakapan Kelompok & Konsensus Komunitas</span>
+            <span class="subtasks-hint">Eve mendengarkan banyak pemain sekaligus dan mengambil sikap musyawarah.</span>
+          </div>
+          <div class="mp-chat-history" id="mpGroupChatHistory">
+            <!-- Dynamically populated group chat turns -->
+          </div>
+          <div class="mp-sim-community-actions">
+            <span class="sim-label">Simulasi Aksi Komunitas:</span>
+            <button type="button" class="btn-mp-sim pill" data-action="donate_diamond">💎 DiamondHunter Donasi 3 Diamond</button>
+            <button type="button" class="btn-mp-sim pill" data-action="combat_aid">🛡️ Alex Lindungi dari Serbuan Creeper</button>
+            <button type="button" class="btn-mp-sim pill" data-action="build_help">🏡 Steve Selesaikan Konstruksi Dinding Base</button>
+            <button type="button" class="btn-mp-sim pill" data-action="group_nether">🔥 Diskusi Rombongan: Serbu Nether Bareng</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Chess Live Arena (Play with Eve) -->
     <section class="card chess-card" id="chessCard">
       <div class="card-header">

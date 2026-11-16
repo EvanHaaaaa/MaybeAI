@@ -686,6 +686,11 @@ class Orchestrator:
         if "plays on server" not in prof.known_facts:
             prof.known_facts.append("plays on server")
         await self.evaluate_goal_event("player_greeted", {"player": sender})
+
+        # Process in multiplayer social engine and broadcast
+        self.brain.multiplayer.process_in_game_chat(sender, message)
+        await self.broadcast("multiplayer_updated", self.brain.multiplayer.get_state())
+
         await self.chat.put_message(user=sender, text=message, source="minecraft")
 
     async def _on_chess_commentary(self, speech_raw: str):

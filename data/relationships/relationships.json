@@ -2,14 +2,14 @@
   "profiles": [
     {
       "username": "Creator",
-      "tier": "trusted_friend",
-      "tier_label": "Trusted Friend \ud83d\udc96",
-      "familiarity": 0.95,
+      "tier": "gaming_partner",
+      "tier_label": "Gaming Partner \ud83c\udfae",
+      "familiarity": 0.97,
       "trust": 0.9,
       "rivalry": 0.1,
       "gaming_affinity": 0.6,
       "affection": 0.9,
-      "interaction_count": 50,
+      "interaction_count": 51,
       "special_nickname": "Creator Tercinta",
       "inside_jokes": [
         {
@@ -37,16 +37,16 @@
         }
       ],
       "first_seen": 1794837990.626659,
-      "last_seen": 1794837990.626659
+      "last_seen": 1794840658.2540317
     },
     {
       "username": "DiamondHunter",
       "tier": "gaming_partner",
       "tier_label": "Gaming Partner \ud83c\udfae",
-      "familiarity": 0.75,
+      "familiarity": 0.8,
       "trust": 0.7,
       "rivalry": 0.2,
-      "gaming_affinity": 0.88,
+      "gaming_affinity": 1.0,
       "affection": 0.65,
       "interaction_count": 32,
       "special_nickname": "Partner Mining VIP",
@@ -76,7 +76,7 @@
         }
       ],
       "first_seen": 1794837990.626659,
-      "last_seen": 1794837990.626659
+      "last_seen": 1794840657.4941492
     },
     {
       "username": "GrandmasterGarry",
@@ -140,6 +140,102 @@
       "shared_experiences": [],
       "first_seen": 1794837990.626659,
       "last_seen": 1794837990.626659
+    },
+    {
+      "username": "Chat",
+      "tier": "new_friend",
+      "tier_label": "New Friend \ud83c\udf1f",
+      "familiarity": 0.1,
+      "trust": 0.2,
+      "rivalry": 0.05,
+      "gaming_affinity": 0.05,
+      "affection": 0.3,
+      "interaction_count": 0,
+      "special_nickname": null,
+      "inside_jokes": [],
+      "shared_experiences": [],
+      "first_seen": 1794840657.286526,
+      "last_seen": 1794840657.286526
+    },
+    {
+      "username": "Admin",
+      "tier": "new_friend",
+      "tier_label": "New Friend \ud83c\udf1f",
+      "familiarity": 0.22,
+      "trust": 0.2,
+      "rivalry": 0.28,
+      "gaming_affinity": 0.05,
+      "affection": 0.3,
+      "interaction_count": 3,
+      "special_nickname": null,
+      "inside_jokes": [],
+      "shared_experiences": [],
+      "first_seen": 1794840657.3044043,
+      "last_seen": 1794840657.3064249
+    },
+    {
+      "username": "Alice",
+      "tier": "new_friend",
+      "tier_label": "New Friend \ud83c\udf1f",
+      "familiarity": 0.12,
+      "trust": 0.24,
+      "rivalry": 0.05,
+      "gaming_affinity": 0.05,
+      "affection": 0.35,
+      "interaction_count": 1,
+      "special_nickname": null,
+      "inside_jokes": [],
+      "shared_experiences": [],
+      "first_seen": 1794840657.8652763,
+      "last_seen": 1794840657.8652763
+    },
+    {
+      "username": "Troll",
+      "tier": "new_friend",
+      "tier_label": "New Friend \ud83c\udf1f",
+      "familiarity": 0.12,
+      "trust": 0.2,
+      "rivalry": 0.13,
+      "gaming_affinity": 0.05,
+      "affection": 0.3,
+      "interaction_count": 1,
+      "special_nickname": null,
+      "inside_jokes": [],
+      "shared_experiences": [],
+      "first_seen": 1794840657.8652763,
+      "last_seen": 1794840657.8652763
+    },
+    {
+      "username": "Chatter1",
+      "tier": "new_friend",
+      "tier_label": "New Friend \ud83c\udf1f",
+      "familiarity": 0.12,
+      "trust": 0.2,
+      "rivalry": 0.05,
+      "gaming_affinity": 0.05,
+      "affection": 0.3,
+      "interaction_count": 1,
+      "special_nickname": null,
+      "inside_jokes": [],
+      "shared_experiences": [],
+      "first_seen": 1794840658.2540317,
+      "last_seen": 1794840658.2540317
+    },
+    {
+      "username": "TestFan",
+      "tier": "new_friend",
+      "tier_label": "New Friend \ud83c\udf1f",
+      "familiarity": 0.12,
+      "trust": 0.2,
+      "rivalry": 0.05,
+      "gaming_affinity": 0.05,
+      "affection": 0.3,
+      "interaction_count": 1,
+      "special_nickname": null,
+      "inside_jokes": [],
+      "shared_experiences": [],
+      "first_seen": 1794840658.334166,
+      "last_seen": 1794840658.334166
     }
   ]
 }

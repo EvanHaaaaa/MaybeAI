@@ -10,6 +10,7 @@ from core.mood import MoodEngine
 from core.planning import GoalEngine
 from core.relationship import RelationshipEngine
 from core.vision import VisionEngine
+from core.minecraft.multiplayer import MultiplayerSocialEngine
 
 class ConversationEngine:
     """
@@ -41,6 +42,7 @@ class ConversationEngine:
         self.goals = GoalEngine()
         self.relationships = RelationshipEngine()
         self.vision = VisionEngine()
+        self.multiplayer = MultiplayerSocialEngine()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -207,6 +209,8 @@ Eve can literally see the user's screen in real time!
 - Eve's Immediate Visual Perception: {obs.eve_commentary if obs.eve_commentary else 'Looking attentively at the screen.'}
 Grounded Rule: If the user asks what is on screen, comments on their gameplay/death/diamond, or references a video, speak with direct visual awareness of what you see!"""
 
+        multiplayer_directive = self.multiplayer.get_prompt_directive() if self.multiplayer else ""
+
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
             active_topic=self.topic_tracker.current_topic,
@@ -224,7 +228,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             mood_directive=mood_directive,
             goal_directive=goal_directive,
             relationship_directive=relationship_directive,
-            visual_directive=visual_directive
+            visual_directive=visual_directive,
+            multiplayer_directive=multiplayer_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -367,6 +372,22 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
                 return obs.eve_commentary
             else:
                 return f"[emotion: happy] Mataku tertuju ke layarmu kok {user_name}! Aku ngeliat kamu lagi aktif di {obs.scene_label}. [action: wink]"
+
+        # Multiplayer Social & Community Coordination
+        is_multiplayer_query = any(w in msg_lower for w in [
+            "squad", "tim", "team", "partner", "rekan", "barter", "anggota squad", "anggota tim",
+            "mabar sama siapa", "siapa partner", "partner mining", "partner catur"
+        ])
+        if is_multiplayer_query and self.multiplayer:
+            team = self.multiplayer.team_mgr.get_active_team()
+            partner = self.multiplayer.selected_partner or "DiamondHunter"
+            if "partner" in msg_lower or "siapa" in msg_lower or "mabar" in msg_lower:
+                return f"[emotion: happy] Partner mabar andalanku saat ini adalah {partner}! Dia punya skor reputasi kontribusi {int(self.multiplayer.partner_score)}% buat misi {self.multiplayer.partner_mission}! [action: wink]"
+            elif "barter" in msg_lower or "tukar" in msg_lower:
+                return f"[emotion: smug] Mau barter sama Eve? Ingat ya, di Squad Maybe nilai 1 diamond setara 8 iron! Jangan coba-coba kasih dirt kalau mau barang bagus! [action: giggle]"
+            else:
+                m_str = ", ".join(team.members) if team else "Eve, DiamondHunter, Alex, Steve"
+                return f"[emotion: happy] Squad resmi kita namanya '{team.name if team else 'Squad Maybe ✨'}'! Anggotanya ada {m_str}. Masing-masing punya peran penting buat kejayaan base kita! [action: wink]"
 
         # Episodic Memory & Second Brain Callbacks
         recall_res = self.episodic_memory.recall(query=message, current_user=user_name, game_context=game_context)

@@ -49,6 +49,10 @@ class Brain:
     def vision(self):
         return self.conversation.vision
 
+    @property
+    def multiplayer(self):
+        return self.conversation.multiplayer
+
     def _load_json(self, path_str: str) -> Dict[str, Any]:
         p = Path(path_str)
         if p.exists():
@@ -82,7 +86,8 @@ class Brain:
             "mood": self.mood.get_state(),
             "goals": self.goals.get_state(),
             "relationships": self.relationships.get_state(),
-            "vision": self.vision.get_state()
+            "vision": self.vision.get_state(),
+            "multiplayer": self.multiplayer.get_state()
         }
 
     async def generate_response(

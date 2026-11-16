@@ -2727,6 +2727,557 @@ body {
   box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
 }
 
+/* --- Minecraft Multiplayer Social Intelligence & Community Squad --- */
+.mc-multiplayer-card {
+  grid-column: 1 / -1;
+  background: var(--card-bg);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 4px 20px rgba(245, 158, 11, 0.08);
+}
+
+.multiplayer-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mc-multiplayer-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.mp-grid-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 950px) {
+  .mp-grid-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+.mp-box {
+  background: #0c0f1c;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mp-box-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mp-box-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mp-motto {
+  margin: 0;
+  font-size: 12px;
+  color: #fbbf24;
+  font-style: italic;
+}
+
+/* Squad Members List */
+.mp-members-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mp-member-pill {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.mp-member-pill.leader {
+  border-color: rgba(245, 158, 11, 0.6);
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.mp-member-pill .member-name {
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.mp-member-pill .role-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.role-badge.role-commander {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.role-badge.role-miner {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.role-badge.role-vanguard {
+  background: rgba(234, 179, 8, 0.2);
+  color: #facc15;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+}
+
+.role-badge.role-builder {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.role-badge.role-scout {
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.4);
+}
+
+/* Squad Treasury Bar */
+.mp-treasury-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  padding: 8px 10px;
+  border: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.treasury-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.treasury-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.treasury-tag {
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  color: #93c5fd;
+  font-family: monospace;
+}
+
+/* Partner Spotlight */
+.mp-partner-box {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.08), rgba(59, 130, 246, 0.05));
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+.mp-partner-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.partner-avatar {
+  font-size: 28px;
+  background: rgba(245, 158, 11, 0.15);
+  border-radius: 50%;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(245, 158, 11, 0.4);
+}
+
+.partner-meta h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.partner-mission-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: #fbbf24;
+}
+
+.partner-speech {
+  margin: 0;
+  background: rgba(0, 0, 0, 0.25);
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #fef3c7;
+  font-style: italic;
+  line-height: 1.45;
+}
+
+.mp-partner-selector-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.mp-partner-selector-bar label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+/* Contribution Ledger */
+.mp-contributors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.contributor-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contributor-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.contributor-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reputation-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.reputation-badge.rep-hero {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.reputation-badge.rep-trusted {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.reputation-badge.rep-neutral {
+  background: rgba(148, 163, 184, 0.2);
+  color: #cbd5e1;
+  border: 1px solid rgba(148, 163, 184, 0.4);
+}
+
+.reputation-badge.rep-villain {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.contributor-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.stat-pill {
+  font-size: 11px;
+  color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.stat-notes {
+  font-size: 11px;
+  color: #94a3b8;
+  font-style: italic;
+}
+
+/* Barter Desk */
+.mp-barter-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.trade-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trade-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.trade-proposer {
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.trade-verdict-badge {
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.trade-verdict-badge.verdict-accepted {
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+}
+
+.trade-verdict-badge.verdict-counter {
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+}
+
+.trade-verdict-badge.verdict-rejected {
+  background: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+
+.trade-items-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #cbd5e1;
+  font-family: monospace;
+}
+
+.trade-arrow {
+  color: #94a3b8;
+}
+
+.trade-comment {
+  font-size: 11px;
+  color: #e2e8f0;
+  font-style: italic;
+  margin: 0;
+}
+
+/* Trade Form */
+.mp-trade-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.trade-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.3fr 1.3fr;
+  gap: 8px;
+}
+
+@media (max-width: 600px) {
+  .trade-form-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.trade-form-grid label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #94a3b8;
+  display: block;
+  margin-bottom: 2px;
+}
+
+.trade-form-grid input {
+  width: 100%;
+  background: #0f121d;
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+
+.trade-form-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Group Chat Tracker */
+.mp-group-chat-box {
+  background: #0c0f1c;
+}
+
+.mp-chat-history {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.mp-chat-turn {
+  display: flex;
+  gap: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 6px;
+  padding: 6px 10px;
+  border-left: 3px solid rgba(255, 255, 255, 0.1);
+}
+
+.mp-chat-turn.turn-eve {
+  border-left-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.06);
+}
+
+.mp-chat-turn.turn-diamondhunter {
+  border-left-color: #3b82f6;
+}
+
+.mp-chat-turn.turn-alex {
+  border-left-color: #eab308;
+}
+
+.mp-chat-turn.turn-steve {
+  border-left-color: #10b981;
+}
+
+.speaker-avatar {
+  font-size: 16px;
+  line-height: 1.4;
+}
+
+.turn-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.speaker-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.turn-time {
+  font-size: 10px;
+  color: #64748b;
+  margin-left: 6px;
+  font-weight: 400;
+}
+
+.turn-msg {
+  font-size: 12px;
+  color: #cbd5e1;
+  line-height: 1.35;
+}
+
+.consensus-banner {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+  color: #fef3c7;
+  font-weight: 600;
+}
+
+.mp-sim-community-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+}
+
+.btn-mp-sim {
+  cursor: pointer;
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: #fbbf24;
+  font-size: 11px;
+  transition: all 0.2s ease;
+}
+
+.btn-mp-sim:hover {
+  background: #f59e0b;
+  color: #000;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+
 
 
 

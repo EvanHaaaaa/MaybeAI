@@ -95,6 +95,10 @@ async def trigger_vision_perceive(simulated_scene: Optional[str] = None):
     obs = await orchestrator.perceive_screen_now(simulated_scene=simulated_scene)
     return obs.to_dict()
 
+@app.get("/api/minecraft/multiplayer")
+async def get_multiplayer_social_state():
+    return orchestrator.brain.multiplayer.get_state()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -161,6 +165,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "vision_updated",
         "data": orchestrator.brain.vision.get_state()
+    })
+
+    # Send initial multiplayer social intelligence state
+    await websocket.send_json({
+        "type": "multiplayer_updated",
+        "data": orchestrator.brain.multiplayer.get_state()
     })
 
     try:
@@ -441,6 +451,68 @@ async def websocket_endpoint(websocket: WebSocket):
                     sec = float(data.get("interval_sec", 5.0))
                     orchestrator.brain.vision.config.capture_interval_sec = max(1.0, min(60.0, sec))
                     await orchestrator.broadcast("vision_updated", orchestrator.brain.vision.get_state())
+            elif data.get("type") == "multiplayer_action":
+                act = data.get("action")
+                if act == "choose_partner":
+                    m_type = data.get("mission_type", "mining")
+                    res = orchestrator.brain.multiplayer.choose_partner(m_type)
+                    await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
+                    await orchestrator.broadcast("ai_response", {
+                        "user": "Eve (Squad Commander)",
+                        "raw": res["speech"],
+                        "speech": res["speech"],
+                        "emotions": ["happy"],
+                        "actions": ["wink"]
+                    })
+                elif act == "record_donation":
+                    p_name = data.get("player_name", "Steve")
+                    item = data.get("item", "diamond")
+                    cnt = int(data.get("count", 1))
+                    orchestrator.brain.multiplayer.ledger.record_donation(p_name, item, cnt)
+                    orchestrator.brain.multiplayer.save()
+                    orchestrator.brain.multiplayer.sync_to_second_brain()
+                    await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
+                elif act == "record_combat":
+                    p_name = data.get("player_name", "Alex")
+                    mob = data.get("mob", "Creeper")
+                    orchestrator.brain.multiplayer.ledger.record_combat_aid(p_name, mob)
+                    orchestrator.brain.multiplayer.save()
+                    orchestrator.brain.multiplayer.sync_to_second_brain()
+                    await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
+                elif act == "record_build":
+                    p_name = data.get("player_name", "Steve")
+                    task = data.get("task", "Konstruksi Dinding Base")
+                    orchestrator.brain.multiplayer.ledger.record_building_help(p_name, task)
+                    orchestrator.brain.multiplayer.save()
+                    orchestrator.brain.multiplayer.sync_to_second_brain()
+                    await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
+                elif act == "in_game_chat":
+                    sender = data.get("sender", "Alex")
+                    msg = data.get("message", "Ayo siap-siap ke Nether!")
+                    resp = orchestrator.brain.multiplayer.process_in_game_chat(sender, msg)
+                    await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
+                    if resp:
+                        await orchestrator.broadcast("ai_response", {
+                            "user": "Eve (Squad)",
+                            "raw": resp,
+                            "speech": resp,
+                            "emotions": ["excited"],
+                            "actions": ["nod"]
+                        })
+                elif act == "propose_trade":
+                    p_name = data.get("player_name", "Steve")
+                    offering = data.get("offering", {"iron_ingot": 8})
+                    requesting = data.get("requesting", {"diamond": 1})
+                    _, verdict, _ = orchestrator.brain.multiplayer.negotiation.evaluate_incoming_trade(p_name, offering, requesting)
+                    orchestrator.brain.multiplayer.save()
+                    await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
+                    await orchestrator.broadcast("ai_response", {
+                        "user": "Eve (Barter Desk)",
+                        "raw": verdict,
+                        "speech": verdict,
+                        "emotions": ["smug"],
+                        "actions": ["giggle"]
+                    })
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:
