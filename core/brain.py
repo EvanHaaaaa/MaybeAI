@@ -33,6 +33,10 @@ class Brain:
     def episodic_memory(self):
         return self.conversation.episodic_memory
 
+    @property
+    def mood(self):
+        return self.conversation.mood
+
     def _load_json(self, path_str: str) -> Dict[str, Any]:
         p = Path(path_str)
         if p.exists():
@@ -62,7 +66,8 @@ class Brain:
             "active_chatters": self.conversation.user_memory.get_active_chatters(),
             "total_chatters": len(self.conversation.user_memory.users),
             "memory_turns": len(self.conversation.context_memory.buffer),
-            "second_brain": self.conversation.episodic_memory.get_stats()
+            "second_brain": self.conversation.episodic_memory.get_stats(),
+            "mood": self.mood.get_state()
         }
 
     async def generate_response(

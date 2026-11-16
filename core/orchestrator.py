@@ -122,6 +122,8 @@ class Orchestrator:
             if idle_duration >= 40.0 and (now - last_banter_time) >= 45.0 and not self.is_busy:
                 last_banter_time = now
                 print(f"[Orchestrator] Chat idle for {idle_duration:.1f}s. Triggering spontaneous streamer banter!")
+                self.brain.mood.apply_stimulus("chat_idle")
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
                 await self.trigger_improv()
 
     async def trigger_improv(self):
@@ -178,6 +180,7 @@ class Orchestrator:
                 "emotion": "neutral"
             })
             await self.broadcast("conversation_state", self.brain.get_conversation_state())
+            await self.broadcast("mood_updated", self.brain.mood.get_state())
         except Exception as e:
             print(f"[Improv Error] {e}")
         finally:
@@ -214,6 +217,7 @@ class Orchestrator:
             donation_amount=msg.donation_amount,
             donation_currency=msg.donation_currency
         )
+        await self.broadcast("mood_updated", self.brain.mood.get_state())
 
     async def _process_chat_loop(self):
         """
@@ -279,10 +283,16 @@ class Orchestrator:
                 elif primary.source == "minecraft":
                     target = primary.user
                 await self.minecraft.guard_player(target)
+                self.brain.mood.apply_stimulus("minecraft_threat", 0.7)
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
             elif "dance" in msg_lower or "joget" in msg_lower:
                 await self.minecraft.dance()
+                self.brain.mood.apply_stimulus("joke", 0.8)
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
             elif "gift" in msg_lower or "hadiah" in msg_lower:
                 await self.minecraft.gift_nearest()
+                self.brain.mood.apply_stimulus("minecraft_gift")
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
             elif "jump" in msg_lower or "lompat" in msg_lower:
                 await self.minecraft.jump()
             elif "crouch" in msg_lower or "jongkok" in msg_lower:
@@ -295,10 +305,16 @@ class Orchestrator:
                 await self.minecraft.set_mode("santai")
             elif "kompe" in msg_lower or "speedrun" in msg_lower:
                 await self.minecraft.set_mode("kompe")
+                self.brain.mood.apply_stimulus("chess_start", 0.8)
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
             elif len(parts) > 1 and parts[1] == "next":
                 await self.minecraft.advance_speedrun()
+                self.brain.mood.apply_stimulus("minecraft_speedrun_advance")
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
             elif len(parts) > 2 and parts[1] == "attack":
                 await self.minecraft.player_attacked_bot(parts[2])
+                self.brain.mood.apply_stimulus("minecraft_attacked")
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
             elif len(parts) > 2 and parts[1] == "nearby":
                 await self.minecraft.player_joined_proximity(parts[2])
             else:
@@ -320,6 +336,8 @@ class Orchestrator:
                             pass
             elif "resign" in msg_lower or "menyerah" in msg_lower:
                 await self.chess.resign_game()
+                self.brain.mood.apply_stimulus("chess_opponent_resigned")
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
                 return
             elif "move" in msg_lower or "jalan" in msg_lower:
                 for idx, p in enumerate(parts):
@@ -327,10 +345,14 @@ class Orchestrator:
                         move_str = parts[idx + 1]
                         success, err = await self.chess.make_player_move(move_str)
                         if not success:
+                            self.brain.mood.apply_stimulus("roast_request", 0.5)
+                            await self.broadcast("mood_updated", self.brain.mood.get_state())
                             await self.chess.emit_commentary(f"[emotion: smug] Langkah '{move_str}' tidak valid, {primary.user}! Mau ngeceat di depan grandmaster ya? [action: pout]")
                         return
             elif "new" in msg_lower or "mulai" in msg_lower or "start" in msg_lower or "main catur" in msg_lower or "play chess" in msg_lower:
                 player_color = "black" if "black" in msg_lower or "hitam" in msg_lower else "white"
+                self.brain.mood.apply_stimulus("chess_start")
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
                 await self.chess.start_game(player_name=primary.user, player_color=player_color)
                 return
 
@@ -427,6 +449,7 @@ class Orchestrator:
             "emotion": "neutral"
         })
         await self.broadcast("conversation_state", self.brain.get_conversation_state())
+        await self.broadcast("mood_updated", self.brain.mood.get_state())
 
     async def perform_song(self, song_id: str):
         song = self.singer.songs.get(song_id)
@@ -594,6 +617,7 @@ class Orchestrator:
                 eve_captured_player_queen=True,
                 san=data.get("san", "")
             )
+            self.brain.mood.apply_stimulus("chess_queen_capture")
         elif event_type == "game_over":
             self.brain.episodic_memory.on_chess_game_ended(
                 player=data.get("player", "Player"),
@@ -603,4 +627,9 @@ class Orchestrator:
                 moves_count=data.get("moves_count", 0),
                 elo=data.get("elo", 1200)
             )
+            if data.get("eve_won"):
+                self.brain.mood.apply_stimulus("chess_victory")
+            elif data.get("player_won"):
+                self.brain.mood.apply_stimulus("chess_defeat")
         await self.broadcast("memory_updated", self.brain.episodic_memory.get_stats())
+        await self.broadcast("mood_updated", self.brain.mood.get_state())

@@ -113,6 +113,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateMinecraftHud(msg.data);
     } else if (msg.type === "chess_state") {
       updateChessUi(msg.data);
+    } else if (msg.type === "mood_updated") {
+      updateMoodUi(msg.data);
     } else if (msg.type === "memory_updated") {
       updateMemoryStats(msg.data);
     } else if (msg.type === "memory_search_results") {
@@ -1219,6 +1221,88 @@ document.addEventListener("DOMContentLoaded", () => {
 
       addMemoryForm.reset();
       alert("Memori berhasil dicatat ke dalam Second Brain Eve!");
+    });
+  }
+
+  // --- Dynamic Mood & Personality Engine UI ---
+  const moodDominantBadge = document.getElementById("mood-dominant-badge");
+  const moodTempBadge = document.getElementById("mood-temp-badge");
+  const moodHappinessBar = document.getElementById("mood-happiness-bar");
+  const moodHappinessVal = document.getElementById("mood-happiness-val");
+  const moodAnnoyanceBar = document.getElementById("mood-annoyance-bar");
+  const moodAnnoyanceVal = document.getElementById("mood-annoyance-val");
+  const moodCuriosityBar = document.getElementById("mood-curiosity-bar");
+  const moodCuriosityVal = document.getElementById("mood-curiosity-val");
+  const moodExcitementBar = document.getElementById("mood-excitement-bar");
+  const moodExcitementVal = document.getElementById("mood-excitement-val");
+  const moodCompetitiveBar = document.getElementById("mood-competitive-bar");
+  const moodCompetitiveVal = document.getElementById("mood-competitive-val");
+  const moodDirectiveText = document.getElementById("mood-directive-text");
+  const btnMoodReset = document.getElementById("btn-mood-reset");
+
+  function updateMoodUi(data) {
+    if (!data) return;
+    const dims = data.dimensions || {};
+    const dom = data.dominant_mood || "CHILL_NEUTRAL";
+    const tempMod = data.temperature_modifier || 0.0;
+    const directive = data.behavioral_directive || "";
+
+    if (moodDominantBadge) {
+      moodDominantBadge.textContent = `Mood: ${dom}`;
+      if (dom.includes("HAPPY") || dom.includes("PLAYFUL")) {
+        moodDominantBadge.className = "badge badge-online";
+      } else if (dom.includes("ANNOYED") || dom.includes("POUTY")) {
+        moodDominantBadge.className = "badge badge-danger";
+      } else if (dom.includes("COMPETITIVE") || dom.includes("HYPE")) {
+        moodDominantBadge.className = "badge badge-accent";
+      } else {
+        moodDominantBadge.className = "badge";
+      }
+    }
+
+    if (moodTempBadge) {
+      const sign = tempMod >= 0 ? "+" : "";
+      moodTempBadge.textContent = `Temp Mod: ${sign}${tempMod.toFixed(2)}`;
+    }
+
+    const setGauge = (bar, valElem, val) => {
+      const pct = Math.round((val || 0) * 100);
+      if (bar) bar.style.width = `${pct}%`;
+      if (valElem) valElem.textContent = `${pct}%`;
+    };
+
+    setGauge(moodHappinessBar, moodHappinessVal, dims.happiness);
+    setGauge(moodAnnoyanceBar, moodAnnoyanceVal, dims.annoyance);
+    setGauge(moodCuriosityBar, moodCuriosityVal, dims.curiosity);
+    setGauge(moodExcitementBar, moodExcitementVal, dims.excitement);
+    setGauge(moodCompetitiveBar, moodCompetitiveVal, dims.competitiveness);
+
+    if (moodDirectiveText && directive) {
+      moodDirectiveText.textContent = directive;
+    }
+  }
+
+  function sendMoodAction(actionPayload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "mood_action",
+        ...actionPayload
+      }));
+    }
+  }
+
+  document.querySelectorAll(".btn-stimulus").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const stim = btn.dataset.stimulus;
+      if (stim) {
+        sendMoodAction({ action: "apply_stimulus", stimulus: stim, intensity: 1.0 });
+      }
+    });
+  });
+
+  if (btnMoodReset) {
+    btnMoodReset.addEventListener("click", () => {
+      sendMoodAction({ action: "reset" });
     });
   }
 

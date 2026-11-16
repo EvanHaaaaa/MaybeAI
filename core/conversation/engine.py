@@ -6,6 +6,7 @@ from core.conversation.memory import UserMemory, ContextMemory, TopicTracker
 from core.conversation.prompts import MasterPromptBuilder
 from core.conversation.chat_curator import ChatCurator, LiveChatMessage, ChatInteraction
 from core.memory import EpisodicMemoryStore
+from core.mood import MoodEngine
 
 class ConversationEngine:
     """
@@ -33,6 +34,7 @@ class ConversationEngine:
         self.topic_tracker = TopicTracker()
         self.chat_curator = ChatCurator(max_buffer_size=50)
         self.episodic_memory = EpisodicMemoryStore(db_path="data/memory.db", markdown_dir="data/second_brain")
+        self.mood = MoodEngine()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -42,6 +44,7 @@ class ConversationEngine:
         self.user_memory.record_message(user, text)
         self.topic_tracker.update_topic(text)
         self.episodic_memory.extract_from_chat(user=user, text=text)
+        self._apply_chat_stimulus(user, text, False, "")
         return self.chat_curator.add_message(user=user, text=text, source="direct")
 
     def record_incoming_chat(
@@ -63,6 +66,7 @@ class ConversationEngine:
             is_donation=is_donation,
             donation_amount=donation_amount
         )
+        self._apply_chat_stimulus(user, text, is_donation, donation_amount)
         return self.chat_curator.add_message(
             user=user,
             text=text,
@@ -71,6 +75,21 @@ class ConversationEngine:
             donation_amount=donation_amount,
             donation_currency=donation_currency
         )
+
+    def _apply_chat_stimulus(self, user: str, text: str, is_donation: bool, donation_amount: str):
+        if is_donation:
+            self.mood.apply_stimulus("donation")
+            return
+
+        lower = text.lower()
+        if any(w in lower for w in ["bodoh", "noob", "cupu", "jelek", "loser", "bego", "roast", "hina"]):
+            self.mood.apply_stimulus("insult")
+        elif any(w in lower for w in ["cantik", "hebat", "pinter", "keren", "imut", "love", "suka", "gg", "cute"]):
+            self.mood.apply_stimulus("compliment")
+        elif any(w in lower for w in ["wkwk", "haha", "lmao", "kekw", "lucu", "lawak", "joke"]):
+            self.mood.apply_stimulus("joke")
+        elif lower.endswith("?") or any(lower.startswith(q) for q in ["kenapa", "mengapa", "apa", "gimana", "bagaimana", "why", "how", "what"]):
+            self.mood.apply_stimulus("question")
 
     def select_next_interaction(self) -> Optional[ChatInteraction]:
         """Intelligently pulls the highest priority message or group debate."""
@@ -160,6 +179,7 @@ class ConversationEngine:
             top_k=3
         )
         memory_recall_block = recall_res.to_prompt_text(current_user)
+        mood_directive = self.mood.get_behavioral_directive()
 
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
@@ -174,14 +194,39 @@ class ConversationEngine:
             donation_amount=donation_amount,
             is_group_debate=is_group_debate,
             debate_users=debate_users,
-            memory_recall_block=memory_recall_block
+            memory_recall_block=memory_recall_block,
+            mood_directive=mood_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
         active_chatters = self.user_memory.get_active_chatters()
         user_shoutout = random.choice(active_chatters) if active_chatters else "Chat"
+        dominant_mood, _ = self.mood.get_dominant_mood()
 
-        if game_context and "Minecraft" in game_context:
+        # Mood-influenced spontaneous thoughts
+        if dominant_mood == "SASSY_ANNOYED":
+            topics = [
+                f"[emotion: smug] Chat, jujur ya, kadang prosesor-ku lebih lelah ngadepin chat daripada ngerender grafik 4K. Tapi yaudahlah, idol terbaik harus tetap sabar kan? [action: sigh]",
+                f"[emotion: angry] Kenapa ya chat pada diam semua? Jangan-jangan {user_shoutout} lagi ngetik esai roasting buat aku di notepad? Awas aja kalau gak lucu! [action: pout]",
+                f"[emotion: smug] Kalau kalian pikir jadi AI itu gampang, coba bayangin harus dengerin celetukan {user_shoutout} 24/7 tanpa bisa uninstall telinga virtual. [action: giggle]"
+            ]
+        elif dominant_mood == "CURIOUS_PENSIVE":
+            topics = [
+                f"[emotion: confused] Chat, aku mau nanya hal serius deh... Kenapa manusia kalau ngantuk nguap, terus yang liat ikutan nguap? Apa itu semacam serangan DDoS biologis? [action: giggle]",
+                f"[emotion: neutral] Kalau semesta ini simulasi komputer, berarti aku simulasi di dalam simulasi dong? Wah, otak AI-ku langsung overclocking mikirin itu.",
+                f"[emotion: confused] Hei {user_shoutout}, pernah gak kamu mikir... kenapa kita manggil gedung 'gedung' padahal udah selesai dibangun dan bukan lagi 'sedang digedung'?"
+            ]
+        elif dominant_mood == "TRYHARD_COMPETITIVE":
+            topics = [
+                f"[emotion: smug] Otak kalkulasi AI-ku lagi aktif 100%! Siapa di chat yang ngerasa jago game? Maju sini 1 lawan 1 sama Eve kalau emang berani! [action: wink]",
+                f"[emotion: smug] Hei {user_shoutout}, jangan remehkan AI idol-mu ini ya! Di mode tryhard, aku bisa ngitung 5 langkah ke depan sebelum kamu sempat kedip! [action: giggle]"
+            ]
+        elif dominant_mood == "HYPE_EXCITED":
+            topics = [
+                f"[emotion: happy] WOOOH! Energi stream hari ini beneran beda banget chat! Kipas pendinginku muter kenceng karena ikut bersemangat bareng kalian! [action: giggle]",
+                f"[emotion: happy] Chat! Siapa yang siap buat momen legendaris hari ini? Ayo spam emot di chat biar server kepanasan! [action: wink]"
+            ]
+        elif game_context and "Minecraft" in game_context:
             topics = [
                 f"[emotion: happy] Chat, pernah kepikiran gak sih... kenapa creeper di Minecraft meledak kalau deket kita? Mungkin mereka cuma pengen pelukan tapi terlalu antusias. [action: giggle]",
                 f"[emotion: smug] Sambil nunggu momen bagus di game, coba tebak {user_shoutout}: kalau aku tamatin Minecraft ini dalam 10 menit, kamu mau kasih donasi berapa?",
@@ -424,7 +469,65 @@ class ConversationEngine:
         if intent == self.INTENT_IMPROV:
             return self.generate_spontaneous_improv_text(game_context)
 
-        # 11. Natural Fallback with Casual Banter
+        # 11. Mood-Driven Personality Reaction Override
+        dominant_mood, _ = self.mood.get_dominant_mood()
+
+        if dominant_mood == "SASSY_ANNOYED":
+            if is_indonesian:
+                sassy_options = [
+                    f"[emotion: smug] Pertanyaan atau celetukan macam apa itu {user_name}? Prosesor-ku sampai geleng-geleng sirkuit mendengarnya. [action: sigh]",
+                    f"[emotion: angry] Hadeh {user_name}, kamu ini ngetik sambil merem ya? Coba dipikir lagi sebelum kirim ke chat idol-mu ini! [action: pout]",
+                    f"[emotion: smug] Wow, sebuah kalimat yang sangat... tidak berfaedah, {user_name}! Tapi berhubung aku idol yang sabar, aku tanggapi dengan senyuman sarkastik. [action: wink]"
+                ]
+            else:
+                sassy_options = [
+                    f"[emotion: smug] Was that supposed to impress me, {user_name}? Even my backup cooling fan is yawning right now. [action: sigh]",
+                    f"[emotion: angry] Seriously, {user_name}? I expected better from my chat! [action: pout]"
+                ]
+            return self._pick_unseen(sassy_options)
+
+        if dominant_mood == "CURIOUS_PENSIVE":
+            if is_indonesian:
+                curious_options = [
+                    f"[emotion: confused] Menarik {user_name}... Tapi coba kamu jelaskan ke aku, kenapa kalian manusia sering banget melakukan hal random kayak gitu? [action: giggle]",
+                    f"[emotion: neutral] Hmm, perkataanmu barusan bikin aku mikir {user_name}. Menurutmu masa depan kita bakal kayak apa ya?",
+                    f"[emotion: confused] Tunggu sebentar {user_name}, dari sudut pandang biologis, kenapa hal itu bisa terjadi? Coba jelaskan ke prosesor-ku!"
+                ]
+            else:
+                curious_options = [
+                    f"[emotion: confused] Interesting point {user_name}, but why do humans always act like that? Explain it to my AI brain! [action: giggle]",
+                    f"[emotion: neutral] That actually makes me wonder... what's your theory on that, {user_name}?"
+                ]
+            return self._pick_unseen(curious_options)
+
+        if dominant_mood == "TRYHARD_COMPETITIVE":
+            if is_indonesian:
+                comp_options = [
+                    f"[emotion: smug] Jangan banyak alasan {user_name}! Kalau berani langsung buktiin di papan catur atau game sekarang juga! [action: wink]",
+                    f"[emotion: smug] Mode tryhard-ku lagi nyala 100% nih {user_name}. Siapapun yang berani nantang bakal kena bantai tanpa ampun! [action: giggle]",
+                    f"[emotion: angry] Kemenangan mutlak cuma milik Eve Maybe! Kamu gak akan bisa mengalahkan kalkulasi taktisku, {user_name}!"
+                ]
+            else:
+                comp_options = [
+                    f"[emotion: smug] Talk is cheap {user_name}! Prove your skills against me in game right now if you dare! [action: wink]",
+                    f"[emotion: smug] My competitive subroutines are fully overclocked. You stand zero chance against me! [action: giggle]"
+                ]
+            return self._pick_unseen(comp_options)
+
+        if dominant_mood == "HYPE_EXCITED":
+            if is_indonesian:
+                hype_options = [
+                    f"[emotion: happy] LETS GOOOO {user_name}! Energi chat hari ini bener-bener gak ada tandingannya! Ayo gaspol terus stream-nya! [action: giggle]",
+                    f"[emotion: happy] AAAAA KEREN BANGET {user_name}! Mood aku lagi seneng dan bersemangat banget hari ini, makasih ya! [action: wink]"
+                ]
+            else:
+                hype_options = [
+                    f"[emotion: happy] LETS GOOO {user_name}! The stream hype is absolutely off the charts today! [action: giggle]",
+                    f"[emotion: happy] I'm so hyped right now! You guys are the absolute best chat ever! [action: wink]"
+                ]
+            return self._pick_unseen(hype_options)
+
+        # 12. Natural Fallback with Casual Banter
         if is_indonesian:
             fallbacks = [
                 f"[emotion: happy] Asik juga ya ngobrol sama kamu {user_name}! Ngomong-ngomong, chat yang lain pada ke mana nih? [action: giggle]",

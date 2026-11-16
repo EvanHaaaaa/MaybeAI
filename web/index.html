@@ -288,6 +288,104 @@
       </div>
     </section>
 
+    <!-- Dynamic Mood & Emotional State (Personality Engine) -->
+    <section class="card mood-card" id="moodCard">
+      <div class="card-header">
+        <div class="mood-title">
+          <span class="mood-icon">🎭</span>
+          <div>
+            <h2>Dynamic Mood & Emotional State</h2>
+            <small class="mood-subtitle">Multi-Dimensional Personality Engine & Exponential Baseline Decay</small>
+          </div>
+        </div>
+        <div class="mood-status-bar">
+          <span id="mood-dominant-badge" class="badge badge-accent">Mood: CHILL_NEUTRAL</span>
+          <span id="mood-temp-badge" class="badge">Temp Mod: +0.00</span>
+        </div>
+      </div>
+
+      <div class="mood-content">
+        <!-- Telemetry Gauges Grid -->
+        <div class="mood-gauges-grid">
+          <div class="mood-gauge-row">
+            <div class="gauge-label-wrap">
+              <span class="gauge-name">😊 Happiness (Ceria & Ramah)</span>
+              <span id="mood-happiness-val" class="gauge-value">60%</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="mood-happiness-bar" class="gauge-bar-fill gauge-fill-happy" style="width: 60%;"></div>
+            </div>
+          </div>
+
+          <div class="mood-gauge-row">
+            <div class="gauge-label-wrap">
+              <span class="gauge-name">😒 Annoyance (Sarkastis & Tsundere)</span>
+              <span id="mood-annoyance-val" class="gauge-value">10%</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="mood-annoyance-bar" class="gauge-bar-fill gauge-fill-annoy" style="width: 10%;"></div>
+            </div>
+          </div>
+
+          <div class="mood-gauge-row">
+            <div class="gauge-label-wrap">
+              <span class="gauge-name">🤔 Curiosity (Kepo & Filosofis)</span>
+              <span id="mood-curiosity-val" class="gauge-value">50%</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="mood-curiosity-bar" class="gauge-bar-fill gauge-fill-curious" style="width: 50%;"></div>
+            </div>
+          </div>
+
+          <div class="mood-gauge-row">
+            <div class="gauge-label-wrap">
+              <span class="gauge-name">⚡ Excitement (Hype & Bersemangat)</span>
+              <span id="mood-excitement-val" class="gauge-value">40%</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="mood-excitement-bar" class="gauge-bar-fill gauge-fill-excited" style="width: 40%;"></div>
+            </div>
+          </div>
+
+          <div class="mood-gauge-row">
+            <div class="gauge-label-wrap">
+              <span class="gauge-name">🏆 Competitiveness (Serius & Tryhard)</span>
+              <span id="mood-competitive-val" class="gauge-value">30%</span>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="mood-competitive-bar" class="gauge-bar-fill gauge-fill-competitive" style="width: 30%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Behavioral Directive Preview -->
+        <div class="mood-directive-box">
+          <div class="directive-header">
+            <span>🧠 Active Behavioral Directive (Injected into System Prompt):</span>
+          </div>
+          <div id="mood-directive-text" class="directive-text">
+            [MOOD: CHILL_NEUTRAL | Relaxed, casual, friendly VTuber vibes. Balanced witty personality.]
+          </div>
+        </div>
+
+        <!-- Stimulus Trigger Simulator -->
+        <div class="mood-stimulus-panel">
+          <span class="sim-label">Uji Pengaruh Emosi (Trigger Stimuli):</span>
+          <div class="mood-buttons-grid">
+            <button type="button" class="btn-stimulus pill" data-stimulus="donation">🎁 Saweran (Hype)</button>
+            <button type="button" class="btn-stimulus pill" data-stimulus="compliment">❤️ Pujian (Happy)</button>
+            <button type="button" class="btn-stimulus pill" data-stimulus="insult">😒 Ejekan (Annoyed)</button>
+            <button type="button" class="btn-stimulus pill" data-stimulus="philosophical_query">🤔 Pertanyaan Dalam (Curious)</button>
+            <button type="button" class="btn-stimulus pill" data-stimulus="chess_start">🔥 Mode Catur (Tryhard)</button>
+            <button type="button" class="btn-stimulus pill" data-stimulus="chess_queen_capture">👑 Makan Ratu Lawan (+Excitement)</button>
+            <button type="button" class="btn-stimulus pill" data-stimulus="chess_defeat">💀 Skakmat Kalah (+Annoyed)</button>
+            <button type="button" class="btn-stimulus pill" data-stimulus="minecraft_gift">💎 Dikasih Diamond (+Happy)</button>
+            <button type="button" class="btn-stimulus pill pill-danger" id="btn-mood-reset">🔄 Reset ke Baseline</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">

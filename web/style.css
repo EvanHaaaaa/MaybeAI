@@ -1587,3 +1587,164 @@ body {
   box-shadow: 0 0 8px rgba(168, 85, 247, 0.5) !important;
 }
 
+/* =========================================================================
+   Dynamic Mood & Emotional State
+   ========================================================================= */
+.mood-card {
+  border-color: #8b5cf6;
+  background: linear-gradient(180deg, #131127 0%, #161926 100%);
+  margin-top: 18px;
+}
+
+.mood-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mood-icon {
+  font-size: 24px;
+}
+
+.mood-subtitle {
+  color: #a78bfa;
+  font-size: 11px;
+}
+
+.mood-status-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.mood-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* Mood Gauges Grid */
+.mood-gauges-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px 20px;
+}
+
+.mood-gauge-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.gauge-label-wrap {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.gauge-name {
+  color: #e2e8f0;
+}
+
+.gauge-value {
+  font-family: monospace;
+  font-weight: 700;
+  color: #a78bfa;
+}
+
+.gauge-bar-track {
+  width: 100%;
+  height: 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+}
+
+.gauge-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease, background-color 0.35s ease;
+}
+
+.gauge-fill-happy {
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+  box-shadow: 0 0 8px rgba(34, 197, 94, 0.5);
+}
+
+.gauge-fill-annoy {
+  background: linear-gradient(90deg, #ef4444, #f87171);
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+.gauge-fill-curious {
+  background: linear-gradient(90deg, #06b6d4, #22d3ee);
+  box-shadow: 0 0 8px rgba(6, 182, 212, 0.5);
+}
+
+.gauge-fill-excited {
+  background: linear-gradient(90deg, #eab308, #facc15);
+  box-shadow: 0 0 8px rgba(234, 179, 8, 0.5);
+}
+
+.gauge-fill-competitive {
+  background: linear-gradient(90deg, #8b5cf6, #c084fc);
+  box-shadow: 0 0 8px rgba(139, 92, 246, 0.5);
+}
+
+/* Directive Box */
+.mood-directive-box {
+  background: #0d0f1b;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.directive-header {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #a78bfa;
+  font-weight: 600;
+}
+
+.directive-text {
+  font-size: 13px;
+  color: #f1f5f9;
+  line-height: 1.45;
+  font-style: italic;
+}
+
+/* Stimulus Trigger Panel */
+.mood-stimulus-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mood-buttons-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.btn-stimulus {
+  background: rgba(139, 92, 246, 0.15);
+  border: 1px solid rgba(139, 92, 246, 0.4);
+  color: #d8b4fe;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-stimulus:hover {
+  background: rgba(139, 92, 246, 0.3);
+  border-color: #c084fc;
+  box-shadow: 0 0 10px rgba(139, 92, 246, 0.4);
+  color: #fff;
+}
+

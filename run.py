@@ -63,6 +63,10 @@ async def get_memory_journal():
 async def get_recent_memories(limit: int = 15):
     return orchestrator.brain.episodic_memory.db.get_recent_memories(limit=limit)
 
+@app.get("/api/mood")
+async def get_mood_state():
+    return orchestrator.brain.mood.get_state()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -105,6 +109,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "memory_updated",
         "data": orchestrator.brain.episodic_memory.get_stats()
+    })
+
+    # Send initial mood state
+    await websocket.send_json({
+        "type": "mood_updated",
+        "data": orchestrator.brain.mood.get_state()
     })
 
     try:
@@ -181,26 +191,34 @@ async def websocket_endpoint(websocket: WebSocket):
                     elif event_name == "attack":
                         await orchestrator.minecraft.player_attacked_bot(target)
                         orchestrator.brain.episodic_memory.on_minecraft_attack(target)
+                        orchestrator.brain.mood.apply_stimulus("minecraft_attacked")
                         await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
+                        await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
                     elif event_name == "gift":
                         item_name = data.get("item", "Diamond")
                         await orchestrator.minecraft.player_gave_gift(target, item_name)
                         orchestrator.brain.episodic_memory.on_minecraft_gift(target, item_name)
+                        orchestrator.brain.mood.apply_stimulus("minecraft_gift")
                         await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
+                        await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
                     elif event_name == "crouch":
                         await orchestrator.minecraft.player_crouched(target)
                     elif event_name == "guard_threat":
                         mob = data.get("mob", "Zombie")
                         comment = orchestrator.minecraft.guard_agent.on_threat_detected(mob, target, is_creeper=(mob.lower() == "creeper"))
+                        orchestrator.brain.mood.apply_stimulus("minecraft_threat", 0.7)
                         await orchestrator.minecraft.emit_commentary(comment)
                         await orchestrator.minecraft.emit_state()
+                        await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
                     elif event_name == "guard_kill":
                         mob = data.get("mob", "Zombie")
                         comment = orchestrator.minecraft.guard_agent.on_mob_eliminated(mob, target)
+                        orchestrator.brain.mood.apply_stimulus("minecraft_guard_victory")
                         await orchestrator.minecraft.emit_commentary(comment)
                         await orchestrator.minecraft.emit_state()
                         orchestrator.brain.episodic_memory.on_minecraft_guard_incident(target, mob)
                         await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
+                        await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
             elif data.get("type") == "chess_action":
                 act = data.get("action")
                 if act == "start_game":
@@ -241,6 +259,21 @@ async def websocket_endpoint(websocket: WebSocket):
                         game_context=data.get("game_context", "")
                     )
                     await orchestrator.broadcast("memory_updated", orchestrator.brain.episodic_memory.get_stats())
+            elif data.get("type") == "mood_action":
+                act = data.get("action")
+                if act == "apply_stimulus":
+                    stim = data.get("stimulus", "")
+                    intensity = float(data.get("intensity", 1.0))
+                    orchestrator.brain.mood.apply_stimulus(stim, intensity)
+                    await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                elif act == "set_dimension":
+                    dim = data.get("dimension", "")
+                    val = float(data.get("value", 0.5))
+                    orchestrator.brain.mood.set_dimension(dim, val)
+                    await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                elif act == "reset":
+                    orchestrator.brain.mood.reset_to_baseline()
+                    await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:
