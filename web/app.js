@@ -248,8 +248,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const mcHpBadge = document.getElementById("mc-hp-badge");
   const mcPhaseDesc = document.getElementById("mcPhaseDesc");
   const btnMcSantai = document.getElementById("btn-mc-santai");
+  const btnMcGuard = document.getElementById("btn-mc-guard");
   const btnMcKompe = document.getElementById("btn-mc-kompe");
   const btnMcNext = document.getElementById("btn-mc-next");
+  const mcGuardBadge = document.getElementById("mc-guard-badge");
 
   // Server Manager Elements
   const mcServerSelect = document.getElementById("mcServerSelect");
@@ -281,14 +283,32 @@ document.addEventListener("DOMContentLoaded", () => {
       mcModeBadge.className = "badge badge-online";
       btnMcNext.style.display = "none";
       btnMcSantai.classList.add("active");
+      if (btnMcGuard) btnMcGuard.classList.remove("active");
       btnMcKompe.classList.remove("active");
+      if (mcGuardBadge) mcGuardBadge.style.display = "none";
       mcPhaseDesc.textContent = "Status: Exploring peacefully & socializing with players.";
+    } else if (state.mode === "guard") {
+      mcModeBadge.textContent = "Mode: Guard (Bodyguard)";
+      mcModeBadge.className = "badge badge-accent";
+      btnMcNext.style.display = "none";
+      if (btnMcGuard) btnMcGuard.classList.add("active");
+      btnMcSantai.classList.remove("active");
+      btnMcKompe.classList.remove("active");
+      const targetPlayer = (state.guard && state.guard.target) || "Nearest Player";
+      const killCount = (state.guard && state.guard.kills) || 0;
+      if (mcGuardBadge) {
+        mcGuardBadge.style.display = "inline-block";
+        mcGuardBadge.textContent = `🛡️ Guarding: ${targetPlayer} (Kills: ${killCount})`;
+      }
+      mcPhaseDesc.textContent = `Bodyguard Active: Protecting ${targetPlayer} from all hostiles!`;
     } else if (state.mode === "kompe") {
       mcModeBadge.textContent = "Mode: Kompe (Speedrun)";
       mcModeBadge.className = "badge badge-accent";
       btnMcNext.style.display = "inline-block";
       btnMcKompe.classList.add("active");
       btnMcSantai.classList.remove("active");
+      if (btnMcGuard) btnMcGuard.classList.remove("active");
+      if (mcGuardBadge) mcGuardBadge.style.display = "none";
       if (state.speedrun) {
         mcTimerBadge.textContent = `⏱️ ${state.speedrun.split_time || "00:00"}`;
         mcPhaseDesc.textContent = `Target: ${state.speedrun.phase_name || "Speedrun"}`;
@@ -406,6 +426,12 @@ document.addEventListener("DOMContentLoaded", () => {
     sendMinecraftAction({ action: "set_mode", mode: "santai" });
   });
 
+  if (btnMcGuard) {
+    btnMcGuard.addEventListener("click", () => {
+      sendMinecraftAction({ action: "set_mode", mode: "guard" });
+    });
+  }
+
   btnMcKompe.addEventListener("click", () => {
     sendMinecraftAction({ action: "set_mode", mode: "kompe" });
   });
@@ -450,6 +476,20 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("sim-gift").addEventListener("click", () => {
     sendMinecraftAction({ action: "simulate_event", event: "gift", target: "Viewer42", item: "Diamond" });
   });
+
+  const simThreat = document.getElementById("sim-threat");
+  if (simThreat) {
+    simThreat.addEventListener("click", () => {
+      sendMinecraftAction({ action: "simulate_event", event: "guard_threat", mob: "Zombie", target: "Steve" });
+    });
+  }
+
+  const simCreeper = document.getElementById("sim-creeper");
+  if (simCreeper) {
+    simCreeper.addEventListener("click", () => {
+      sendMinecraftAction({ action: "simulate_event", event: "guard_threat", mob: "Creeper", target: "Steve" });
+    });
+  }
 
   // --- 2D Animated Avatar Renderer ---
   function render() {

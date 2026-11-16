@@ -100,6 +100,7 @@
         </div>
         <div class="mc-status-bar">
           <span id="mc-mode-badge" class="badge badge-accent">Mode: Standby</span>
+          <span id="mc-guard-badge" class="badge" style="display: none;">🛡️ Guarding: Player</span>
           <span id="mc-timer-badge" class="badge">⏱️ 00:00</span>
           <span id="mc-hp-badge" class="badge">❤️ 20/20</span>
         </div>
@@ -107,6 +108,7 @@
       <div class="mc-content">
         <div class="mc-modes">
           <button id="btn-mc-santai" class="btn btn-mc-mode">🌿 Mode Santai (Casual / Social)</button>
+          <button id="btn-mc-guard" class="btn btn-mc-mode">🛡️ Mode Guard (Bodyguard)</button>
           <button id="btn-mc-kompe" class="btn btn-mc-mode">⚡ Mode Kompe (Speedrun)</button>
           <button id="btn-mc-next" class="btn btn-primary" style="display: none;">⏩ Next Milestone</button>
         </div>
@@ -156,6 +158,8 @@
             <button class="pill" id="sim-nearby">👤 Player Nearby</button>
             <button class="pill" id="sim-attack">🗡️ Hit Eve</button>
             <button class="pill" id="sim-gift">💎 Give Diamond</button>
+            <button class="pill" id="sim-threat">🧟 Spawn Threat</button>
+            <button class="pill" id="sim-creeper">💥 Creeper Alert</button>
           </div>
         </div>
       </div>
@@ -192,6 +196,7 @@
         <span class="prompt-category">⚡ Live Chat & In-Game Interaction:</span>
         <button class="pill pill-donation" id="btn-quick-donation-usd">🎁 $10 Superchat</button>
         <button class="pill pill-donation" id="btn-quick-donation-idr">🎁 Saweran Rp 50.000</button>
+        <button class="pill pill-mc-action" data-msg="!mc guard">🛡️ !mc guard (Lindungi Aku)</button>
         <button class="pill pill-mc-action" data-msg="!mc dance">💃 Joget In-Game</button>
         <button class="pill pill-mc-action" data-msg="!mc gift">🎁 Bagi Hadiah ke Player</button>
         <button class="pill pill-mc-action" data-msg="!mc follow">🏃 Ikuti Player Terdekat</button>

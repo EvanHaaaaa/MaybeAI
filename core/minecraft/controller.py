@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional, Callable, List
 import websockets
 from core.minecraft.casual_agent import CasualAgent
 from core.minecraft.speedrun_agent import SpeedrunAgent, PHASE_NAMES, SpeedrunPhase
+from core.minecraft.guard_agent import GuardAgent
 
 class MinecraftController:
     """
@@ -28,6 +29,8 @@ class MinecraftController:
 
         self.casual_agent = CasualAgent(bot_name=bot_name)
         self.speedrun_agent = SpeedrunAgent(bot_name=bot_name)
+        self.guard_agent = GuardAgent(bot_name=bot_name)
+        self.guard_target: Optional[str] = None
 
         # Multi-Server List
         self.servers: List[Dict[str, Any]] = []
@@ -117,6 +120,10 @@ class MinecraftController:
                 "phase": phase,
                 "phase_name": phase_title,
                 "split_time": self.speedrun_agent.get_elapsed_time_str()
+            },
+            "guard": {
+                "target": self.guard_target,
+                "kills": self.guard_agent.kills_count
             },
             "nearby_players": self.nearby_players
         }
@@ -213,6 +220,36 @@ class MinecraftController:
                 elif event_type == "speedrun_phase_completed":
                     next_p = data.get("nextPhase")
                     phase, comment = self.speedrun_agent.advance_phase(direct_phase=next_p)
+                    await self.emit_commentary(comment)
+                    await self.emit_state()
+
+                elif event_type in ["guard_started", "guard_mode_activated"]:
+                    tgt = data.get("target") or "Player"
+                    self.current_mode = "guard"
+                    self.guard_target = tgt
+                    comment = self.guard_agent.on_guard_started(tgt)
+                    await self.emit_commentary(comment)
+                    await self.emit_state()
+
+                elif event_type == "guard_threat_detected":
+                    mob = data.get("mob", "monster")
+                    tgt = data.get("targetPlayer", self.guard_target)
+                    is_creeper = data.get("isCreeper", False)
+                    comment = self.guard_agent.on_threat_detected(mob, tgt, is_creeper=is_creeper)
+                    await self.emit_commentary(comment)
+                    await self.emit_state()
+
+                elif event_type == "guard_mob_eliminated":
+                    mob = data.get("mob", "monster")
+                    tgt = data.get("targetPlayer", self.guard_target)
+                    comment = self.guard_agent.on_mob_eliminated(mob, tgt)
+                    await self.emit_commentary(comment)
+                    await self.emit_state()
+
+                elif event_type == "guard_player_hurt":
+                    attacker = data.get("attacker", "hostile")
+                    tgt = data.get("target", self.guard_target)
+                    comment = self.guard_agent.on_player_hurt(attacker, tgt)
                     await self.emit_commentary(comment)
                     await self.emit_state()
 
@@ -353,23 +390,39 @@ class MinecraftController:
             if asyncio.iscoroutine(res):
                 await res
 
-    async def set_mode(self, new_mode: str) -> str:
-        """Switch between 'santai' (Casual) and 'kompe' (Speedrun)."""
+    async def set_mode(self, new_mode: str, target: Optional[str] = None) -> str:
+        """Switch between 'santai' (Casual), 'kompe' (Speedrun), and 'guard' (Bodyguard)."""
         new_mode = new_mode.lower()
-        if new_mode not in ["santai", "kompe"]:
-            return "Mode must be 'santai' or 'kompe'."
+        if new_mode not in ["santai", "kompe", "guard"]:
+            return "Mode must be 'santai', 'kompe', or 'guard'."
 
         self.current_mode = new_mode
         self.is_active = True
+        if target:
+            self.guard_target = target
 
-        # Send command to Mineflayer bridge so it starts/stops speedrun behavior
-        await self.send_bridge_cmd("set_mode", mode=new_mode)
+        # Send command to Mineflayer bridge so it starts/stops appropriate behavior
+        await self.send_bridge_cmd("set_mode", mode=new_mode, target=self.guard_target)
 
         if new_mode == "santai":
             speech = "[emotion: happy] Switching to Mode Santai! Time to chill, explore, and hang out with everyone on the server! [action: wink]"
+        elif new_mode == "guard":
+            speech = self.guard_agent.on_guard_started(self.guard_target)
         else:
             speech = self.speedrun_agent.start_run()
 
+        await self.emit_commentary(speech)
+        await self.emit_state()
+        return speech
+
+    async def guard_player(self, player_name: Optional[str] = None) -> str:
+        """Explicitly switch to Mode Guard for a player."""
+        self.current_mode = "guard"
+        self.guard_target = player_name
+        self.is_active = True
+
+        await self.send_bridge_cmd("guard_player", target=player_name)
+        speech = self.guard_agent.on_guard_started(player_name)
         await self.emit_commentary(speech)
         await self.emit_state()
         return speech
@@ -391,6 +444,8 @@ class MinecraftController:
         self.health = max(1, self.health - 2)
         if self.current_mode == "santai":
             reaction = self.casual_agent.on_player_attack(attacker)
+        elif self.current_mode == "guard":
+            reaction = self.guard_agent.on_player_hurt(attacker, self.guard_target or "Eve")
         else:
             reaction = self.speedrun_agent.on_damage_taken(attacker, self.health)
         await self.emit_commentary(reaction)

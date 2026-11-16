@@ -600,6 +600,20 @@ body {
   box-shadow: 0 0 8px rgba(74, 222, 128, 0.3);
 }
 
+#btn-mc-guard.active {
+  background: #3b2816;
+  border-color: #f59e0b;
+  color: #fef3c7;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.4);
+}
+
+#mc-guard-badge {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: #f59e0b;
+  color: #fef08a;
+  font-weight: 600;
+}
+
 .mc-hud {
   background: rgba(14, 18, 25, 0.7);
   border: 1px solid var(--border);

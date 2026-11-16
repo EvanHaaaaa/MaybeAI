@@ -111,7 +111,9 @@ async def websocket_endpoint(websocket: WebSocket):
             elif data.get("type") == "minecraft_action":
                 act = data.get("action")
                 if act == "set_mode":
-                    await orchestrator.minecraft.set_mode(data.get("mode", "santai"))
+                    await orchestrator.minecraft.set_mode(data.get("mode", "santai"), target=data.get("target"))
+                elif act == "guard_player":
+                    await orchestrator.minecraft.guard_player(data.get("target"))
                 elif act == "advance_speedrun":
                     await orchestrator.minecraft.advance_speedrun()
                 elif act == "connect_server":
@@ -151,6 +153,16 @@ async def websocket_endpoint(websocket: WebSocket):
                         await orchestrator.minecraft.player_gave_gift(target, data.get("item", "Diamond"))
                     elif event_name == "crouch":
                         await orchestrator.minecraft.player_crouched(target)
+                    elif event_name == "guard_threat":
+                        mob = data.get("mob", "Zombie")
+                        comment = orchestrator.minecraft.guard_agent.on_threat_detected(mob, target, is_creeper=(mob.lower() == "creeper"))
+                        await orchestrator.minecraft.emit_commentary(comment)
+                        await orchestrator.minecraft.emit_state()
+                    elif event_name == "guard_kill":
+                        mob = data.get("mob", "Zombie")
+                        comment = orchestrator.minecraft.guard_agent.on_mob_eliminated(mob, target)
+                        await orchestrator.minecraft.emit_commentary(comment)
+                        await orchestrator.minecraft.emit_state()
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:

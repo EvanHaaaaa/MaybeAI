@@ -14,6 +14,7 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const SpeedrunRunner = require('./speedrun');
 const CasualRunner = require('./casual');
+const GuardRunner = require('./guard');
 
 // Provide lightweight canvas fallback for prismarine-viewer (avoids native C++ build requirements on Windows)
 try {
@@ -55,6 +56,8 @@ let isWandering = true;
 let autonomyInterval = null;
 let speedrunRunner = null;
 let casualRunner = null;
+let guardRunner = null;
+let guardTarget = null;
 
 // Initialize WebSocket Bridge Server for Python on 25566
 const wsServer = new WebSocket.Server({ port: config.bridge_ws_port });
@@ -226,12 +229,19 @@ function createBot(host, port, username, version, mode) {
 
     speedrunRunner = new SpeedrunRunner(bot, sendToPython);
     casualRunner = new CasualRunner(bot, sendToPython);
+    guardRunner = new GuardRunner(bot, sendToPython);
 
     if (currentMode === 'kompe') {
       casualRunner.stop();
+      guardRunner.stop();
       speedrunRunner.start();
+    } else if (currentMode === 'guard') {
+      casualRunner.stop();
+      speedrunRunner.stop();
+      guardRunner.start(guardTarget);
     } else {
       speedrunRunner.stop();
+      guardRunner.stop();
       casualRunner.start();
     }
 
@@ -255,8 +265,19 @@ function createBot(host, port, username, version, mode) {
 
     const lower = message.toLowerCase();
 
-    // Player invites Eve to follow
-    if (lower.includes('sini') || lower.includes('follow') || lower.includes('ikut')) {
+    // Player asks Eve to guard / protect them
+    if (lower.includes('guard me') || lower.includes('lindungi aku') || lower.includes('jaga aku') || lower.startsWith('!guard') || lower === 'guard') {
+      currentMode = 'guard';
+      guardTarget = sender;
+      followingTarget = null;
+      if (speedrunRunner) speedrunRunner.stop();
+      if (casualRunner) casualRunner.stop();
+      if (guardRunner) {
+        guardRunner.start(sender);
+      }
+      bot.chat(`Mode Guard aktif! Siap jadi perisai imutmu, ${sender}! 🛡️✨`);
+      sendToPython('guard_mode_activated', { target: sender, activated_by: sender });
+    } else if (lower.includes('sini') || lower.includes('follow') || lower.includes('ikut')) {
       followingTarget = sender;
       bot.chat(`Otw ke kamu, ${sender}! ✨`);
       const player = bot.players[sender];
@@ -287,6 +308,15 @@ function createBot(host, port, username, version, mode) {
         health: bot.health,
         source: 'damage'
       });
+    } else if (guardRunner && guardRunner.active && entity && entity.type === 'player' && entity.username) {
+      const gTarget = guardRunner.targetPlayerName;
+      if (!gTarget || entity.username.toLowerCase() === gTarget.toLowerCase()) {
+        const threats = guardRunner.findNearbyThreats(entity);
+        const attacker = threats.length > 0 ? threats[0].entity : null;
+        if (attacker) {
+          guardRunner.onGuardedPlayerHurt(attacker, entity.username);
+        }
+      }
     }
   });
 
@@ -313,6 +343,7 @@ function createBot(host, port, username, version, mode) {
     if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
     if (speedrunRunner) speedrunRunner.stop();
     if (casualRunner) casualRunner.stop();
+    if (guardRunner) guardRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     const reasonStr = typeof reason === 'object' ? JSON.stringify(reason) : String(reason);
     sendToPython('bot_kicked', { reason: reasonStr });
@@ -328,6 +359,7 @@ function createBot(host, port, username, version, mode) {
     if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
     if (speedrunRunner) speedrunRunner.stop();
     if (casualRunner) casualRunner.stop();
+    if (guardRunner) guardRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     sendToPython('bot_disconnected', { reason: String(reason) });
   });
@@ -344,6 +376,7 @@ function handlePythonCommand(cmd) {
     if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
     if (speedrunRunner) speedrunRunner.stop();
     if (casualRunner) casualRunner.stop();
+    if (guardRunner) guardRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
     if (bot) {
       try { bot.quit(); } catch (e) {}
@@ -363,6 +396,7 @@ function handlePythonCommand(cmd) {
     if (currentMode === 'kompe') {
       followingTarget = null;
       if (casualRunner) casualRunner.stop();
+      if (guardRunner) guardRunner.stop();
       if (autonomyInterval) {
         clearInterval(autonomyInterval);
         autonomyInterval = null;
@@ -373,9 +407,27 @@ function handlePythonCommand(cmd) {
       if (speedrunRunner) {
         speedrunRunner.start();
       }
+    } else if (currentMode === 'guard') {
+      followingTarget = null;
+      if (cmd.target) guardTarget = cmd.target;
+      if (speedrunRunner) speedrunRunner.stop();
+      if (casualRunner) casualRunner.stop();
+      if (autonomyInterval) {
+        clearInterval(autonomyInterval);
+        autonomyInterval = null;
+      }
+      if (bot && bot.pathfinder && bot.pathfinder.movements) {
+        bot.pathfinder.movements.canDig = false;
+      }
+      if (guardRunner) {
+        guardRunner.start(guardTarget);
+      }
     } else {
       if (speedrunRunner) {
         speedrunRunner.stop();
+      }
+      if (guardRunner) {
+        guardRunner.stop();
       }
       if (bot && bot.pathfinder && bot.pathfinder.movements) {
         bot.pathfinder.movements.canDig = true;
@@ -383,6 +435,20 @@ function handlePythonCommand(cmd) {
       if (casualRunner) {
         casualRunner.start();
       }
+    }
+  } else if (cmd.action === 'guard_player') {
+    currentMode = 'guard';
+    guardTarget = cmd.target || null;
+    followingTarget = null;
+    if (speedrunRunner) speedrunRunner.stop();
+    if (casualRunner) casualRunner.stop();
+    if (guardRunner) {
+      guardRunner.start(guardTarget);
+    }
+  } else if (cmd.action === 'set_guard_target') {
+    guardTarget = cmd.target || null;
+    if (guardRunner) {
+      guardRunner.setTarget(guardTarget);
     }
   } else if (cmd.action === 'advance_speedrun') {
     if (speedrunRunner) {

@@ -124,7 +124,10 @@ class Orchestrator:
             game_context = ""
             if self.minecraft.connection_status == "connected":
                 srv = self.minecraft.active_server.get("name", "Minecraft") if self.minecraft.active_server else "Minecraft"
-                game_context = f"Playing in Minecraft ({srv}, mode={self.minecraft.current_mode})"
+                mode_desc = f"mode={self.minecraft.current_mode}"
+                if self.minecraft.current_mode == "guard":
+                    mode_desc += f", guarding {self.minecraft.guard_target or 'player'}"
+                game_context = f"Playing in Minecraft ({srv}, {mode_desc})"
 
             raw_thought = self.brain.generate_spontaneous_banter(game_context=game_context)
             _, clean_response = self.moderator.clean_text(raw_thought)
@@ -253,9 +256,18 @@ class Orchestrator:
             return
 
         # Check for Minecraft command / request
-        if msg_lower.startswith("!mc") or "main minecraft" in msg_lower or "speedrun minecraft" in msg_lower:
+        if msg_lower.startswith("!mc") or "main minecraft" in msg_lower or "speedrun minecraft" in msg_lower or "guard me" in msg_lower or "lindungi aku" in msg_lower:
             parts = clean_input.split()
-            if "dance" in msg_lower or "joget" in msg_lower:
+            if "guard" in msg_lower or "lindungi" in msg_lower or "jaga" in msg_lower:
+                target = None
+                if len(parts) > 2 and parts[1].lower() == "guard":
+                    target = parts[2]
+                elif len(parts) > 1 and parts[0].lower() == "!mc" and parts[1].lower() == "guard" and len(parts) > 2:
+                    target = parts[2]
+                elif primary.source == "minecraft":
+                    target = primary.user
+                await self.minecraft.guard_player(target)
+            elif "dance" in msg_lower or "joget" in msg_lower:
                 await self.minecraft.dance()
             elif "gift" in msg_lower or "hadiah" in msg_lower:
                 await self.minecraft.gift_nearest()
@@ -285,7 +297,10 @@ class Orchestrator:
         game_context = ""
         if self.minecraft.connection_status == "connected":
             srv = self.minecraft.active_server.get("name", "Minecraft Server") if self.minecraft.active_server else "Minecraft"
-            game_context = f"Playing in Minecraft ({srv}, mode={self.minecraft.current_mode}, health={self.minecraft.health}/20)"
+            mode_desc = f"mode={self.minecraft.current_mode}"
+            if self.minecraft.current_mode == "guard":
+                mode_desc += f", bodyguarding {self.minecraft.guard_target or 'player'}"
+            game_context = f"Playing in Minecraft ({srv}, {mode_desc}, health={self.minecraft.health}/20)"
 
         is_donation = (interaction.interaction_type == "donation")
         is_group_debate = (interaction.interaction_type == "group_debate")
