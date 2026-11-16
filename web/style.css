@@ -385,6 +385,58 @@ body {
   box-shadow: 0 0 10px rgba(255, 77, 141, 0.4);
 }
 
+.pill-improv {
+  background: rgba(255, 193, 7, 0.15);
+  border-color: #ffc107;
+  color: #ffe082;
+  font-weight: 600;
+}
+
+.pill-improv:hover {
+  background: rgba(255, 193, 7, 0.3);
+  box-shadow: 0 0 10px rgba(255, 193, 7, 0.3);
+  color: #fff;
+}
+
+.pill-roast {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: #ef4444;
+  color: #fca5a5;
+  font-weight: 600;
+}
+
+.pill-roast:hover {
+  background: rgba(239, 68, 68, 0.3);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+  color: #fff;
+}
+
+.pill-conv {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: rgba(0, 240, 255, 0.4);
+  color: #80f7ff;
+}
+
+.pill-conv:hover {
+  background: rgba(0, 240, 255, 0.25);
+  box-shadow: 0 0 10px rgba(0, 240, 255, 0.3);
+  color: #fff;
+}
+
+.prompt-category {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+}
+
+.chat-header-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* Minecraft Control Panel */
 .mc-card {
   border-color: #2e6b38;

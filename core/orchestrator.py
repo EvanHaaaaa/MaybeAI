@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from typing import Dict, Any, Optional, Set, Callable
 from core.brain import Brain
 from core.tts import TTSEngine
@@ -93,6 +94,78 @@ class Orchestrator:
 
         # Start master processing loop
         asyncio.create_task(self._process_chat_loop())
+        # Start spontaneous banter / idle stream thoughts loop
+        asyncio.create_task(self._idle_banter_loop())
+
+    async def _idle_banter_loop(self):
+        """
+        Periodically checks for stream dead-air (quiet chat) and triggers
+        spontaneous streamer thoughts, engagement questions, or banter.
+        """
+        last_banter_time = time.time()
+        while self.is_running:
+            await asyncio.sleep(5)
+            now = time.time()
+            idle_duration = now - self.brain.conversation.last_interaction_time
+
+            # If chat is silent for >= 40 seconds and Eve hasn't made spontaneous banter in 45s
+            if idle_duration >= 40.0 and (now - last_banter_time) >= 45.0 and not self.is_busy:
+                last_banter_time = now
+                print(f"[Orchestrator] Chat idle for {idle_duration:.1f}s. Triggering spontaneous streamer banter!")
+                await self.trigger_improv()
+
+    async def trigger_improv(self):
+        """Triggers an unprompted spontaneous monologue or engaging streamer thought."""
+        if self.is_busy:
+            return
+        self.is_busy = True
+        try:
+            game_context = ""
+            if self.minecraft.connection_status == "connected":
+                srv = self.minecraft.active_server.get("name", "Minecraft") if self.minecraft.active_server else "Minecraft"
+                game_context = f"Playing in Minecraft ({srv}, mode={self.minecraft.current_mode})"
+
+            raw_thought = self.brain.generate_spontaneous_banter(game_context=game_context)
+            _, clean_response = self.moderator.clean_text(raw_thought)
+            speech_text, emotions, actions = ActionParser.parse(clean_response)
+            primary_emotion = emotions[0] if emotions else "happy"
+
+            await self.broadcast("ai_response", {
+                "user": "Eve (Spontaneous)",
+                "raw": clean_response,
+                "speech": speech_text,
+                "emotions": emotions,
+                "actions": actions,
+                "source": "improv"
+            })
+
+            if self.vts.connected:
+                await self.vts.trigger_expression(primary_emotion)
+
+            async def on_mouth_update(val: float):
+                if self.vts.connected:
+                    await self.vts.update_mouth(val)
+                await self.broadcast("avatar_state", {
+                    "mouth_open": val,
+                    "emotion": primary_emotion
+                })
+
+            print(f"[AI Improv] [{primary_emotion}] {speech_text}")
+            await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+
+            if self.vts.connected:
+                await self.vts.trigger_expression("neutral")
+                await self.vts.update_mouth(0.0)
+
+            await self.broadcast("avatar_state", {
+                "mouth_open": 0.0,
+                "emotion": "neutral"
+            })
+            await self.broadcast("conversation_state", self.brain.get_conversation_state())
+        except Exception as e:
+            print(f"[Improv Error] {e}")
+        finally:
+            self.is_busy = False
 
     async def _process_chat_loop(self):
         """
@@ -127,6 +200,11 @@ class Orchestrator:
             "source": msg.source
         })
 
+        # Check for spontaneous improv command
+        if msg_lower.startswith("!improv"):
+            await self.trigger_improv()
+            return
+
         # Check for sing command / request
         msg_lower = clean_input.lower()
         if msg_lower.startswith("!sing") or "sing a song" in msg_lower or "nyanyi" in msg_lower or "coba nyanyi" in msg_lower:
@@ -160,12 +238,17 @@ class Orchestrator:
             return
 
         # 2. Brain generates response
+        game_context = ""
+        if self.minecraft.connection_status == "connected":
+            srv = self.minecraft.active_server.get("name", "Minecraft Server") if self.minecraft.active_server else "Minecraft"
+            game_context = f"Playing in Minecraft ({srv}, mode={self.minecraft.current_mode}, health={self.minecraft.health}/20)"
+
         if msg.source == "minecraft":
             llm_input = f"[Minecraft In-Game Chat from {msg.user}]: {clean_input}\n(You are currently inside Minecraft playing with them! Respond directly to {msg.user} in 1-2 witty sentences)"
         else:
             llm_input = clean_input
 
-        raw_response = await self.brain.generate_response(msg.user, llm_input)
+        raw_response = await self.brain.generate_response(msg.user, llm_input, game_context=game_context)
 
         # Filter AI response just in case
         _, clean_response = self.moderator.clean_text(raw_response)
@@ -214,6 +297,9 @@ class Orchestrator:
             "mouth_open": 0.0,
             "emotion": "neutral"
         })
+
+        # Broadcast updated conversation state & active context
+        await self.broadcast("conversation_state", self.brain.get_conversation_state())
 
     async def perform_song(self, song_id: str):
         song = self.singer.songs.get(song_id)

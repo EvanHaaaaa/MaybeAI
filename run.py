@@ -71,6 +71,12 @@ async def websocket_endpoint(websocket: WebSocket):
         }
     })
 
+    # Send initial conversation state
+    await websocket.send_json({
+        "type": "conversation_state",
+        "data": orchestrator.brain.get_conversation_state()
+    })
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -83,6 +89,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 active_prov = orchestrator.brain.set_provider(prov)
                 print(f"[Orchestrator] LLM provider switched to: {active_prov}")
                 await orchestrator.broadcast("llm_provider_changed", {"provider": active_prov})
+            elif data.get("type") == "trigger_improv":
+                await orchestrator.trigger_improv()
             elif data.get("type") == "minecraft_action":
                 act = data.get("action")
                 if act == "set_mode":

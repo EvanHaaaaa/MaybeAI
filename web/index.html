@@ -58,7 +58,11 @@
       <section class="card chat-card">
         <div class="card-header">
           <h2>Live Stream Chat</h2>
-          <span class="user-count">Twitch / Web</span>
+          <div class="chat-header-tags">
+            <span id="conv-topic-badge" class="badge">Topic: Chat</span>
+            <span id="conv-roleplay-badge" class="badge badge-accent" style="display: none;">🎭 Roleplay</span>
+            <span class="user-count">Twitch / Web</span>
+          </div>
         </div>
         
         <div class="chat-history" id="chatHistory">
@@ -173,11 +177,16 @@
     <!-- Quick Actions Panel -->
     <footer class="controls-footer">
       <div class="quick-prompts">
-        <span>Quick Tests:</span>
+        <span class="prompt-category">⚡ Conversational Tests:</span>
         <button class="pill" data-msg="Hi Eve! How are you feeling today?">👋 Say Hi</button>
-        <button class="pill pill-karaoke" data-msg="!sing digital_world">🎵 Sing "Digital World" (Karaoke)</button>
-        <button class="pill" data-msg="Are you smarter than your creator?">🧠 Who is Smarter?</button>
-        <button class="pill" data-msg="Chat says you have no legs, is that true?">🦵 Legs Question</button>
+        <button class="pill pill-karaoke" data-msg="!sing digital_world">🎵 Sing (Karaoke)</button>
+        <button class="pill pill-improv" id="btn-quick-improv" data-msg="!improv">💡 Spontaneous Thought</button>
+        <button class="pill pill-roast" data-msg="!roast aku dong Eve">😈 Roast Me</button>
+        <button class="pill pill-conv" data-msg="!story Ceritakan petualangan absurd di Nether">📖 Storytelling</button>
+        <button class="pill pill-conv" data-msg="!opinion Pizza nanas vs bubur diaduk?">🔥 Hot Take</button>
+        <button class="pill pill-conv" data-msg="!roleplay Detektif Pintar">🎭 Roleplay</button>
+        <button class="pill pill-conv" data-msg="!roleplay stop">🛑 Reset Role</button>
+        <button class="pill pill-conv" data-msg="Eve, coba bandingkan pendapat penonton di chat!">👥 Multi-User Banter</button>
       </div>
     </footer>
   </div>

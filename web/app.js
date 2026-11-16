@@ -12,6 +12,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const wsStatus = document.getElementById("ws-status");
   const llmStatus = document.getElementById("llm-status");
   const llmProviderSelect = document.getElementById("llmProviderSelect");
+  const convTopicBadge = document.getElementById("conv-topic-badge");
+  const convRoleplayBadge = document.getElementById("conv-roleplay-badge");
 
   // State
   let mouthOpen = 0.0;
@@ -75,6 +77,8 @@ document.addEventListener("DOMContentLoaded", () => {
       isSinging = false;
     } else if (msg.type === "minecraft_state") {
       updateMinecraftHud(msg.data);
+    } else if (msg.type === "conversation_state") {
+      updateConversationState(msg.data);
     } else if (msg.type === "llm_provider_changed") {
       const prov = (msg.data.provider || "gemini").toLowerCase();
       if (llmProviderSelect) {
@@ -146,6 +150,21 @@ document.addEventListener("DOMContentLoaded", () => {
   function sendMessage(user, text) {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "user_message", user: user, text: text }));
+    }
+  }
+
+  function updateConversationState(state) {
+    if (!state) return;
+    if (convTopicBadge && state.current_topic) {
+      convTopicBadge.textContent = `Topic: ${state.current_topic}`;
+    }
+    if (convRoleplayBadge) {
+      if (state.active_roleplay) {
+        convRoleplayBadge.textContent = `🎭 ${state.active_roleplay}`;
+        convRoleplayBadge.style.display = "inline-block";
+      } else {
+        convRoleplayBadge.style.display = "none";
+      }
     }
   }
 
