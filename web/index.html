@@ -288,6 +288,116 @@
       </div>
     </section>
 
+    <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
+    <section class="card memory-card" id="memoryCard">
+      <div class="card-header">
+        <div class="memory-title">
+          <span class="memory-icon">🧠</span>
+          <div>
+            <h2>Second Brain & Episodic Memory</h2>
+            <small class="memory-subtitle">Long-Term Memory & Markdown BrainMap (Karpathy Style)</small>
+          </div>
+        </div>
+        <div class="memory-status-bar">
+          <span id="mem-count-badge" class="badge badge-accent">Memories: 0</span>
+          <span id="mem-users-badge" class="badge">Viewers: 0</span>
+          <span id="mem-promises-badge" class="badge">Promises: 0</span>
+        </div>
+      </div>
+
+      <div class="memory-content">
+        <!-- Navigation Tabs -->
+        <div class="memory-tabs">
+          <button type="button" class="mem-tab active" data-tab="tab-search">🔍 Semantic Search</button>
+          <button type="button" class="mem-tab" data-tab="tab-recent">⚡ Recent Episodes</button>
+          <button type="button" class="mem-tab" data-tab="tab-journal">📓 Daily Journal (.md)</button>
+          <button type="button" class="mem-tab" data-tab="tab-dossier">👤 Viewer Dossier</button>
+          <button type="button" class="mem-tab" data-tab="tab-add">➕ Add Memory</button>
+        </div>
+
+        <!-- Tab 1: Semantic & Vector Search -->
+        <div id="tab-search" class="mem-tab-panel active">
+          <div class="mem-search-bar">
+            <input type="text" id="memSearchInput" placeholder="Cari memori (misal: 'diamond', 'catur blunder', 'Steve', 'janji', 'martabak')...">
+            <button type="button" id="btn-mem-search" class="btn btn-primary">🔍 Search</button>
+          </div>
+          <div class="mem-search-quick-tags">
+            <span class="quick-tag-label">Pencarian Cepat:</span>
+            <button type="button" class="pill pill-sm" data-search="diamond">💎 Diamond</button>
+            <button type="button" class="pill pill-sm" data-search="catur">♟️ Catur</button>
+            <button type="button" class="pill pill-sm" data-search="creeper">💥 Creeper</button>
+            <button type="button" class="pill pill-sm" data-search="janji">🤝 Janji</button>
+            <button type="button" class="pill pill-sm" data-search="superchat">🎁 Saweran</button>
+          </div>
+          <div id="memSearchResults" class="mem-cards-grid">
+            <div class="mem-empty-hint">Ketik kata kunci untuk mencari memori jangka panjang dengan Hybrid Vector Search.</div>
+          </div>
+        </div>
+
+        <!-- Tab 2: Recent Episodes -->
+        <div id="tab-recent" class="mem-tab-panel">
+          <div class="tab-panel-header">
+            <h3>Memori Episodik Terbaru</h3>
+            <button type="button" id="btn-refresh-recent" class="btn btn-secondary btn-sm">🔄 Refresh</button>
+          </div>
+          <div id="memRecentResults" class="mem-cards-grid">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Tab 3: Daily Journal (Markdown) -->
+        <div id="tab-journal" class="mem-tab-panel">
+          <div class="tab-panel-header">
+            <h3>Jurnal Harian Stream (data/second_brain/journals/*.md)</h3>
+            <button type="button" id="btn-refresh-journal" class="btn btn-secondary btn-sm">🔄 Reload Journal</button>
+          </div>
+          <pre id="memJournalContent" class="markdown-journal-viewer">Loading journal markdown...</pre>
+        </div>
+
+        <!-- Tab 4: Viewer Dossier -->
+        <div id="tab-dossier" class="mem-tab-panel">
+          <div class="dossier-search-bar">
+            <input type="text" id="dossierUsernameInput" placeholder="Masukkan Username Penonton (misal: Steve, Creator, SultanLokal)...">
+            <button type="button" id="btn-load-dossier" class="btn btn-primary">Lihat Dossier</button>
+          </div>
+          <div id="dossierDisplay" class="dossier-card" style="display: none;">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- Tab 5: Ingest Memory Form -->
+        <div id="tab-add" class="mem-tab-panel">
+          <form id="addMemoryForm" class="add-memory-form">
+            <div class="form-grid">
+              <input type="text" id="memNewTitle" placeholder="Judul Memori (misal: Steve ngasih diamond di goa)" required>
+              <input type="text" id="memNewUser" placeholder="Nama Penonton / Player (misal: Steve)" value="Creator">
+              <select id="memNewType" class="select-mem-type">
+                <option value="minecraft_gift">🎁 Minecraft Gift</option>
+                <option value="minecraft_guard">🛡️ Minecraft Bodyguard</option>
+                <option value="chess_match">♟️ Chess Match</option>
+                <option value="donation">💰 Donation / Saweran</option>
+                <option value="promise">🤝 Janji / Challenge</option>
+                <option value="funny_moment">😂 Kejadian Lucu</option>
+                <option value="general" selected>📝 Catatan Umum</option>
+              </select>
+              <select id="memNewEmotion" class="select-mem-type">
+                <option value="happy">😊 Happy</option>
+                <option value="smug">😏 Smug</option>
+                <option value="blush">😳 Blush</option>
+                <option value="angry">😠 Angry</option>
+                <option value="surprised">😲 Surprised</option>
+                <option value="neutral" selected>😐 Neutral</option>
+              </select>
+            </div>
+            <textarea id="memNewContent" placeholder="Deskripsi kejadian detail yang ingin diingat Eve..." rows="3" required></textarea>
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">💾 Simpan ke Second Brain</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
     <!-- Quick Actions Panel -->
     <footer class="controls-footer">
       <div class="quick-prompts">
@@ -317,6 +427,12 @@
         <button class="pill pill-chess" data-msg="!chess elo 1000">♟️ Set ELO 1000 (Casual)</button>
         <button class="pill pill-chess" data-msg="!chess elo 1800">♟️ Set ELO 1800 (Sweaty)</button>
         <button class="pill pill-chess" data-msg="!chess resign">🏳️ !chess resign</button>
+
+        <span class="prompt-category">🧠 Second Brain & Episodic Recall:</span>
+        <button class="pill pill-memory" data-msg="Eve, kamu masih ingat aku gak?">🧠 "Kamu masih ingat aku gak?"</button>
+        <button class="pill pill-memory" data-msg="Inget gak kemarin siapa yang ngasih kamu diamond di Minecraft?">💎 "Inget siapa yang ngasih diamond?"</button>
+        <button class="pill pill-memory" data-msg="Aku janji besok bakal bawain martabak manis keju buat kamu!">🤝 Buat Janji: "Bawain Martabak Manis"</button>
+        <button class="pill pill-memory" data-msg="Aku suka banget makan martabak keju dan bikin redstone di Minecraft!">🍕 Suka Martabak & Redstone</button>
       </div>
     </footer>
   </div>

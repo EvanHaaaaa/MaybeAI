@@ -32,7 +32,8 @@ class MasterPromptBuilder:
         is_donation: bool = False,
         donation_amount: str = "",
         is_group_debate: bool = False,
-        debate_users: Optional[List[str]] = None
+        debate_users: Optional[List[str]] = None,
+        memory_recall_block: str = ""
     ) -> str:
         name = character.get("name", "Eve Maybe")
         nickname = character.get("nickname", "Eve")
@@ -96,6 +97,8 @@ Bio: {bio}
 
 CURRENT STREAM SITUATION & CONTEXT:
 {context_block}
+
+{memory_recall_block if memory_recall_block else ""}
 
 CORE CHARACTER LORE:
 {lore}

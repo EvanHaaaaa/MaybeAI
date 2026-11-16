@@ -5,6 +5,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from core.conversation.memory import UserMemory, ContextMemory, TopicTracker
 from core.conversation.prompts import MasterPromptBuilder
 from core.conversation.chat_curator import ChatCurator, LiveChatMessage, ChatInteraction
+from core.memory import EpisodicMemoryStore
 
 class ConversationEngine:
     """
@@ -31,6 +32,7 @@ class ConversationEngine:
         self.context_memory = ContextMemory(max_buffer_turns=16)
         self.topic_tracker = TopicTracker()
         self.chat_curator = ChatCurator(max_buffer_size=50)
+        self.episodic_memory = EpisodicMemoryStore(db_path="data/memory.db", markdown_dir="data/second_brain")
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -39,6 +41,7 @@ class ConversationEngine:
         self.last_interaction_time = time.time()
         self.user_memory.record_message(user, text)
         self.topic_tracker.update_topic(text)
+        self.episodic_memory.extract_from_chat(user=user, text=text)
         return self.chat_curator.add_message(user=user, text=text, source="direct")
 
     def record_incoming_chat(
@@ -54,6 +57,12 @@ class ConversationEngine:
         self.last_interaction_time = time.time()
         self.user_memory.record_message(user, text)
         self.topic_tracker.update_topic(text)
+        self.episodic_memory.extract_from_chat(
+            user=user,
+            text=text,
+            is_donation=is_donation,
+            donation_amount=donation_amount
+        )
         return self.chat_curator.add_message(
             user=user,
             text=text,
@@ -139,10 +148,19 @@ class ConversationEngine:
         is_donation: bool = False,
         donation_amount: str = "",
         is_group_debate: bool = False,
-        debate_users: Optional[List[str]] = None
+        debate_users: Optional[List[str]] = None,
+        current_message: str = ""
     ) -> str:
         social_context = self.user_memory.get_social_context(current_user)
         chat_digest = self.chat_curator.get_chat_digest()
+        recall_res = self.episodic_memory.recall(
+            query=current_message,
+            current_user=current_user,
+            game_context=game_context,
+            top_k=3
+        )
+        memory_recall_block = recall_res.to_prompt_text(current_user)
+
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
             active_topic=self.topic_tracker.current_topic,
@@ -155,7 +173,8 @@ class ConversationEngine:
             is_donation=is_donation,
             donation_amount=donation_amount,
             is_group_debate=is_group_debate,
-            debate_users=debate_users
+            debate_users=debate_users,
+            memory_recall_block=memory_recall_block
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -242,6 +261,31 @@ class ConversationEngine:
                     f"[emotion: smug] Heard you in server chat, {user_name}! Just make sure you don't lead a creeper toward me!"
                 ]
             return self._pick_unseen(mc_chat_options)
+
+        # Episodic Memory & Second Brain Callbacks
+        recall_res = self.episodic_memory.recall(query=message, current_user=user_name, game_context=game_context)
+        is_memory_query = any(k in msg_lower for k in ["ingat", "inget", "remember", "kemarin", "yesterday", "janji", "pernah", "dulu", "kenal"])
+
+        if recall_res.episodes or recall_res.promises:
+            should_callback = is_memory_query or (random.random() < 0.35 and user_name not in ("Chat", "System", "User"))
+            if should_callback:
+                for ep in recall_res.episodes:
+                    ep_type = ep.get("episode_type", "")
+                    title = ep.get("title", "")
+                    content = ep.get("content", "")
+                    if ep_type == "minecraft_gift":
+                        item = title.split("Hadiah")[-1].strip() if "Hadiah" in title else "diamond"
+                        return f"[emotion: happy] Eh, {user_name}! Kamu yang kemarin ngasih aku {item} di Minecraft kan? Masih kusimpan baik-baik di inventory-ku lho! [action: giggle]"
+                    elif ep_type in ("chess_match", "chess_highlight"):
+                        return f"[emotion: smug] Masa aku lupa sama {user_name}! Kamu kan yang kemarin tanding catur lawan aku? Ratu kamu masih trauma gak tuh? [action: wink]"
+                    elif ep_type == "funny_moment" and "mukul" in content.lower():
+                        return f"[emotion: angry] Tentu aja ingat! Kamu kan yang kemarin jahil mukul aku di Minecraft? Masih kucatat di daftar pembalasanku ya {user_name}! [action: pout]"
+                    elif ep_type == "donation":
+                        return f"[emotion: blush] Halo {user_name}! Tentu ingat dong, kamu kan yang waktu itu ngirim donasi baik banget buat aku? Makasih ya! [action: giggle]"
+
+                if recall_res.promises:
+                    prom = recall_res.promises[0]
+                    return f"[emotion: smug] Jelas aku ingat dong {user_name}! Aku masih inget janji kita loh: '{prom.get('text', '')}'! Kapan mau ditepati nih? [action: wink]"
 
         # 2. SPECIAL EVENT: Live Chat Debate / Group Discussion Commentary
         if is_group_debate and debate_users:

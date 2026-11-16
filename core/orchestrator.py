@@ -58,7 +58,8 @@ class Orchestrator:
         self.chess = ChessController(bot_name="EveMaybe")
         self.chess.set_callbacks(
             on_commentary=self._on_chess_commentary,
-            on_state_change=self._on_chess_state_change
+            on_state_change=self._on_chess_state_change,
+            on_game_event=self._on_chess_game_event
         )
 
         self.chat = ChatReceiver()
@@ -585,3 +586,21 @@ class Orchestrator:
 
     async def _on_chess_state_change(self, state: Dict[str, Any]):
         await self.broadcast("chess_state", state)
+
+    async def _on_chess_game_event(self, event_type: str, data: Dict[str, Any]):
+        if event_type == "queen_captured":
+            self.brain.episodic_memory.on_chess_queen_capture(
+                player=data.get("player", "Player"),
+                eve_captured_player_queen=True,
+                san=data.get("san", "")
+            )
+        elif event_type == "game_over":
+            self.brain.episodic_memory.on_chess_game_ended(
+                player=data.get("player", "Player"),
+                eve_won=data.get("eve_won", False),
+                player_won=data.get("player_won", False),
+                result=data.get("result", "finished"),
+                moves_count=data.get("moves_count", 0),
+                elo=data.get("elo", 1200)
+            )
+        await self.broadcast("memory_updated", self.brain.episodic_memory.get_stats())

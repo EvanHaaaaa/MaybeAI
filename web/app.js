@@ -113,6 +113,16 @@ document.addEventListener("DOMContentLoaded", () => {
       updateMinecraftHud(msg.data);
     } else if (msg.type === "chess_state") {
       updateChessUi(msg.data);
+    } else if (msg.type === "memory_updated") {
+      updateMemoryStats(msg.data);
+    } else if (msg.type === "memory_search_results") {
+      renderMemoryCards(memSearchResults, msg.data);
+    } else if (msg.type === "memory_recent_data") {
+      renderMemoryCards(memRecentResults, msg.data);
+    } else if (msg.type === "memory_journal_data") {
+      if (memJournalContent) memJournalContent.textContent = msg.data.markdown || "No journal entries.";
+    } else if (msg.type === "memory_user_profile_data") {
+      renderDossierCard(msg.data);
     } else if (msg.type === "conversation_state") {
       updateConversationState(msg.data);
     } else if (msg.type === "llm_provider_changed") {
@@ -403,6 +413,9 @@ document.addEventListener("DOMContentLoaded", () => {
       } else {
         convRoleplayBadge.style.display = "none";
       }
+    }
+    if (state.second_brain) {
+      updateMemoryStats(state.second_brain);
     }
   }
 
@@ -977,6 +990,237 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Initial dummy board render
   renderChessBoard();
+
+  // --- Second Brain & Episodic Memory Controller (Andrej Karpathy Style) ---
+  const memCountBadge = document.getElementById("mem-count-badge");
+  const memUsersBadge = document.getElementById("mem-users-badge");
+  const memPromisesBadge = document.getElementById("mem-promises-badge");
+  const memTabs = document.querySelectorAll(".mem-tab");
+  const memTabPanels = document.querySelectorAll(".mem-tab-panel");
+  const memSearchInput = document.getElementById("memSearchInput");
+  const btnMemSearch = document.getElementById("btn-mem-search");
+  const memSearchResults = document.getElementById("memSearchResults");
+  const memRecentResults = document.getElementById("memRecentResults");
+  const btnRefreshRecent = document.getElementById("btn-refresh-recent");
+  const memJournalContent = document.getElementById("memJournalContent");
+  const btnRefreshJournal = document.getElementById("btn-refresh-journal");
+  const dossierUsernameInput = document.getElementById("dossierUsernameInput");
+  const btnLoadDossier = document.getElementById("btn-load-dossier");
+  const dossierDisplay = document.getElementById("dossierDisplay");
+  const addMemoryForm = document.getElementById("addMemoryForm");
+
+  function sendMemoryAction(actionData) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "memory_action", ...actionData }));
+    }
+  }
+
+  function updateMemoryStats(stats) {
+    if (!stats) return;
+    if (memCountBadge && stats.total_memories !== undefined) {
+      memCountBadge.textContent = `Memories: ${stats.total_memories}`;
+    }
+    if (memUsersBadge && stats.known_users !== undefined) {
+      memUsersBadge.textContent = `Viewers: ${stats.known_users}`;
+    }
+    if (memPromisesBadge && stats.pending_promises !== undefined) {
+      memPromisesBadge.textContent = `Promises: ${stats.pending_promises}`;
+    }
+  }
+
+  // Tab switching
+  memTabs.forEach(tab => {
+    tab.addEventListener("click", () => {
+      memTabs.forEach(t => t.classList.remove("active"));
+      memTabPanels.forEach(p => p.classList.remove("active"));
+      tab.classList.add("active");
+      const targetId = tab.dataset.tab;
+      const targetPanel = document.getElementById(targetId);
+      if (targetPanel) targetPanel.classList.add("active");
+
+      // Auto-load tab data
+      if (targetId === "tab-recent") {
+        sendMemoryAction({ action: "get_recent" });
+      } else if (targetId === "tab-journal") {
+        sendMemoryAction({ action: "get_journal" });
+      }
+    });
+  });
+
+  function getBadgeClassForType(epType) {
+    const t = (epType || "").toLowerCase();
+    if (t.includes("gift")) return "badge-gift";
+    if (t.includes("guard")) return "badge-guard";
+    if (t.includes("chess")) return "badge-chess";
+    if (t.includes("donation")) return "badge-donation";
+    if (t.includes("promise") || t.includes("challenge")) return "badge-promise";
+    return "badge-general";
+  }
+
+  function renderMemoryCards(container, memories) {
+    if (!container) return;
+    container.innerHTML = "";
+    if (!memories || memories.length === 0) {
+      container.innerHTML = `<div class="mem-empty-hint">Tidak ada memori ditemukan.</div>`;
+      return;
+    }
+
+    memories.forEach(mem => {
+      const card = document.createElement("div");
+      card.className = "mem-card-item";
+      const badgeCls = getBadgeClassForType(mem.episode_type || "general");
+      const dateStr = (mem.date_str || "").slice(0, 16);
+      const userStr = mem.user || "Chat";
+      const emotionStr = mem.emotional_tag || "neutral";
+
+      card.innerHTML = `
+        <div class="mem-card-header">
+          <span class="mem-card-title">${escapeHtml(mem.title || "Memori Episodik")}</span>
+          <span class="mem-card-badge ${badgeCls}">${escapeHtml(mem.episode_type || "general")}</span>
+        </div>
+        <div class="mem-card-body">"${escapeHtml(mem.content || "")}"</div>
+        <div class="mem-card-footer">
+          <span>👤 <strong>${escapeHtml(userStr)}</strong> (${emotionStr})</span>
+          <span>⏱️ ${dateStr}</span>
+        </div>
+      `;
+      container.appendChild(card);
+    });
+  }
+
+  function renderDossierCard(profile) {
+    if (!dossierDisplay) return;
+    if (!profile) {
+      dossierDisplay.style.display = "block";
+      dossierDisplay.innerHTML = `<div class="mem-empty-hint">Profil penonton tidak ditemukan.</div>`;
+      return;
+    }
+
+    dossierDisplay.style.display = "flex";
+    const tags = (profile.tags || []).join(", ") || "New Chatter";
+    const count = profile.interaction_count || 0;
+    const prefs = profile.preferences || {};
+    const notes = profile.notes || [];
+    const games = profile.games_played || {};
+    const winLoss = profile.win_loss || {};
+
+    let prefsHtml = "";
+    for (const [k, vals] of Object.entries(prefs)) {
+      if (Array.isArray(vals) && vals.length > 0) {
+        prefsHtml += `<li><strong>${escapeHtml(k)}:</strong> ${escapeHtml(vals.join(", "))}</li>`;
+      }
+    }
+    if (!prefsHtml) prefsHtml = "<li>Belum ada preferensi tercatat</li>";
+
+    let notesHtml = "";
+    notes.slice(-5).forEach(n => {
+      notesHtml += `<li>${escapeHtml(n)}</li>`;
+    });
+    if (!notesHtml) notesHtml = "<li>Belum ada catatan khusus</li>";
+
+    let gamesHtml = "";
+    for (const [g, cnt] of Object.entries(games)) {
+      gamesHtml += `<li><strong>${escapeHtml(g)}:</strong> ${cnt}x dimainkan</li>`;
+    }
+    for (const [k, cnt] of Object.entries(winLoss)) {
+      gamesHtml += `<li><strong>${escapeHtml(k)}:</strong> ${cnt}</li>`;
+    }
+    if (!gamesHtml) gamesHtml = "<li>Belum pernah main bareng</li>";
+
+    dossierDisplay.innerHTML = `
+      <div class="dossier-header">
+        <span class="dossier-user-name">👤 ${escapeHtml(profile.username)}</span>
+        <span class="badge badge-accent">${escapeHtml(tags)} (${count} interaksi)</span>
+      </div>
+      <div class="dossier-details">
+        <div class="dossier-section">
+          <h4>🌟 Preferensi Penonton:</h4>
+          <ul>${prefsHtml}</ul>
+        </div>
+        <div class="dossier-section">
+          <h4>🎮 Game & Mabar:</h4>
+          <ul>${gamesHtml}</ul>
+        </div>
+        <div class="dossier-section">
+          <h4>📌 Catatan Memori:</h4>
+          <ul>${notesHtml}</ul>
+        </div>
+      </div>
+    `;
+  }
+
+  // Search button
+  if (btnMemSearch) {
+    btnMemSearch.addEventListener("click", () => {
+      const q = memSearchInput ? memSearchInput.value.trim() : "";
+      if (q) {
+        sendMemoryAction({ action: "search", query: q });
+      }
+    });
+  }
+
+  if (memSearchInput) {
+    memSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const q = memSearchInput.value.trim();
+        if (q) sendMemoryAction({ action: "search", query: q });
+      }
+    });
+  }
+
+  // Quick tag search buttons
+  document.querySelectorAll(".mem-search-quick-tags .pill").forEach(p => {
+    p.addEventListener("click", () => {
+      const q = p.dataset.search;
+      if (memSearchInput) memSearchInput.value = q;
+      sendMemoryAction({ action: "search", query: q });
+    });
+  });
+
+  if (btnRefreshRecent) {
+    btnRefreshRecent.addEventListener("click", () => {
+      sendMemoryAction({ action: "get_recent" });
+    });
+  }
+
+  if (btnRefreshJournal) {
+    btnRefreshJournal.addEventListener("click", () => {
+      sendMemoryAction({ action: "get_journal" });
+    });
+  }
+
+  if (btnLoadDossier) {
+    btnLoadDossier.addEventListener("click", () => {
+      const uname = dossierUsernameInput ? dossierUsernameInput.value.trim() : "";
+      if (uname) {
+        sendMemoryAction({ action: "get_user_profile", username: uname });
+      }
+    });
+  }
+
+  if (addMemoryForm) {
+    addMemoryForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const title = document.getElementById("memNewTitle").value;
+      const user = document.getElementById("memNewUser").value;
+      const type = document.getElementById("memNewType").value;
+      const emotion = document.getElementById("memNewEmotion").value;
+      const content = document.getElementById("memNewContent").value;
+
+      sendMemoryAction({
+        action: "add_memory",
+        title: title,
+        user: user,
+        episode_type: type,
+        emotional_tag: emotion,
+        content: content
+      });
+
+      addMemoryForm.reset();
+      alert("Memori berhasil dicatat ke dalam Second Brain Eve!");
+    });
+  }
 
   // --- 2D Animated Avatar Renderer ---
   function render() {

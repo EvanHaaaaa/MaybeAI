@@ -26,14 +26,23 @@ class ChessController:
 
         self.on_commentary_callback: Optional[Callable[[str], Any]] = None
         self.on_state_change_callback: Optional[Callable[[Dict[str, Any]], Any]] = None
+        self.on_game_event_callback: Optional[Callable[[str, Dict[str, Any]], Any]] = None
 
     def set_callbacks(
         self,
         on_commentary: Callable[[str], Any],
-        on_state_change: Optional[Callable[[Dict[str, Any]], Any]] = None
+        on_state_change: Optional[Callable[[Dict[str, Any]], Any]] = None,
+        on_game_event: Optional[Callable[[str, Dict[str, Any]], Any]] = None
     ):
         self.on_commentary_callback = on_commentary
         self.on_state_change_callback = on_state_change
+        self.on_game_event_callback = on_game_event
+
+    async def emit_game_event(self, event_type: str, data: Dict[str, Any]):
+        if self.on_game_event_callback:
+            res = self.on_game_event_callback(event_type, data)
+            if asyncio.iscoroutine(res):
+                await res
 
     def get_status(self) -> Dict[str, Any]:
         game_state = self.engine.get_game_state()
@@ -161,6 +170,12 @@ class ChessController:
 
         is_check = self.engine.board.is_check()
 
+        if is_queen_capture:
+            await self.emit_game_event("queen_captured", {
+                "player": self.player_name,
+                "san": san
+            })
+
         bot_speech = self.agent.on_bot_move(
             san=san,
             is_check=is_check,
@@ -190,6 +205,15 @@ class ChessController:
                 player_won = (self.player_color == "black")
                 bot_won = (self.eve_color == "black")
 
+        await self.emit_game_event("game_over", {
+            "player": self.player_name,
+            "eve_won": bot_won,
+            "player_won": player_won,
+            "result": result,
+            "moves_count": len(self.engine.move_history),
+            "elo": self.engine.elo
+        })
+
         game_over_comment = self.agent.on_game_over(
             result=result,
             player_won=player_won,
@@ -202,6 +226,14 @@ class ChessController:
     async def resign_game(self) -> str:
         self.is_active = False
         speech = f"[emotion: smug] Menyerah ya {self.player_name}? Kemenangan mutlak lagi buat Eve Maybe! GG WP! [action: giggle]"
+        await self.emit_game_event("game_over", {
+            "player": self.player_name,
+            "eve_won": True,
+            "player_won": False,
+            "result": "player_resigned",
+            "moves_count": len(self.engine.move_history),
+            "elo": self.engine.elo
+        })
         await self.emit_commentary(speech)
         await self.emit_state()
         return speech

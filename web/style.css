@@ -1273,3 +1273,317 @@ body {
   box-shadow: 0 0 8px rgba(168, 85, 247, 0.5) !important;
 }
 
+/* --- Second Brain & Episodic Memory (Karpathy Style) --- */
+.memory-card {
+  grid-column: 1 / -1;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.memory-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.memory-icon {
+  font-size: 26px;
+}
+
+.memory-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.memory-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.memory-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.memory-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 10px;
+  overflow-x: auto;
+}
+
+.mem-tab {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  padding: 6px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.mem-tab:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.mem-tab.active {
+  background: rgba(0, 240, 255, 0.12);
+  border-color: rgba(0, 240, 255, 0.4);
+  color: var(--cyan);
+}
+
+.mem-tab-panel {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  animation: fadeIn 0.2s ease;
+}
+
+.mem-tab-panel.active {
+  display: flex;
+}
+
+.tab-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tab-panel-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.mem-search-bar, .dossier-search-bar {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+}
+
+.mem-search-bar input, .dossier-search-bar input {
+  flex: 1;
+  background: #0f121d;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.mem-search-bar input:focus, .dossier-search-bar input:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+
+.mem-search-quick-tags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.quick-tag-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.mem-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.mem-card-item {
+  background: #0f121d;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.mem-card-item:hover {
+  border-color: var(--cyan);
+  transform: translateY(-2px);
+}
+
+.mem-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.mem-card-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #f1f5f9;
+}
+
+.mem-card-badge {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.badge-gift { background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); }
+.badge-guard { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); }
+.badge-chess { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
+.badge-donation { background: rgba(234, 179, 8, 0.2); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); }
+.badge-promise { background: rgba(244, 63, 94, 0.2); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.4); }
+.badge-general { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.4); }
+
+.mem-card-body {
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+.mem-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: var(--text-muted);
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 6px;
+  margin-top: 4px;
+}
+
+.mem-empty-hint {
+  grid-column: 1 / -1;
+  color: var(--text-muted);
+  font-style: italic;
+  font-size: 13px;
+  padding: 16px 0;
+  text-align: center;
+}
+
+.markdown-journal-viewer {
+  background: #090c15;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  color: #e2e8f0;
+  max-height: 250px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.dossier-card {
+  background: #0f121d;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dossier-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 8px;
+}
+
+.dossier-user-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--cyan);
+}
+
+.dossier-details {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  font-size: 12px;
+}
+
+.dossier-section h4 {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.dossier-section ul {
+  list-style: square;
+  padding-left: 16px;
+  color: #cbd5e1;
+}
+
+.select-mem-type {
+  background: #0f121d;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.add-memory-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.add-memory-form textarea {
+  width: 100%;
+  background: #0f121d;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px;
+  border-radius: 8px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.add-memory-form textarea:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+
+.pill-memory {
+  background: rgba(0, 240, 255, 0.12) !important;
+  border: 1px solid rgba(0, 240, 255, 0.35) !important;
+  color: #67e8f9 !important;
+}
+
+.pill-memory:hover {
+  background: rgba(0, 240, 255, 0.25) !important;
+  box-shadow: 0 0 8px rgba(0, 240, 255, 0.5) !important;
+}
+
+.pill-chess:hover {
+  background: rgba(168, 85, 247, 0.3) !important;
+  box-shadow: 0 0 8px rgba(168, 85, 247, 0.5) !important;
+}
+

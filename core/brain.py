@@ -29,6 +29,10 @@ class Brain:
     def history(self, val: List[Dict[str, Any]]):
         self.conversation.context_memory.buffer = val
 
+    @property
+    def episodic_memory(self):
+        return self.conversation.episodic_memory
+
     def _load_json(self, path_str: str) -> Dict[str, Any]:
         p = Path(path_str)
         if p.exists():
@@ -57,7 +61,8 @@ class Brain:
             "active_roleplay": self.conversation.topic_tracker.active_roleplay,
             "active_chatters": self.conversation.user_memory.get_active_chatters(),
             "total_chatters": len(self.conversation.user_memory.users),
-            "memory_turns": len(self.conversation.context_memory.buffer)
+            "memory_turns": len(self.conversation.context_memory.buffer),
+            "second_brain": self.conversation.episodic_memory.get_stats()
         }
 
     async def generate_response(
@@ -79,7 +84,8 @@ class Brain:
             is_donation=is_donation,
             donation_amount=donation_amount,
             is_group_debate=is_group_debate,
-            debate_users=debate_users
+            debate_users=debate_users,
+            current_message=message
         )
 
         if provider == "openai":
