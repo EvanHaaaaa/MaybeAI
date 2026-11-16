@@ -11,6 +11,7 @@ from core.planning import GoalEngine
 from core.relationship import RelationshipEngine
 from core.vision import VisionEngine
 from core.minecraft.multiplayer import MultiplayerSocialEngine
+from core.desktop import DesktopCompanionEngine
 
 class ConversationEngine:
     """
@@ -43,6 +44,7 @@ class ConversationEngine:
         self.relationships = RelationshipEngine()
         self.vision = VisionEngine()
         self.multiplayer = MultiplayerSocialEngine()
+        self.desktop = DesktopCompanionEngine()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -210,6 +212,7 @@ Eve can literally see the user's screen in real time!
 Grounded Rule: If the user asks what is on screen, comments on their gameplay/death/diamond, or references a video, speak with direct visual awareness of what you see!"""
 
         multiplayer_directive = self.multiplayer.get_prompt_directive() if self.multiplayer else ""
+        desktop_directive = self.desktop.get_prompt_directive() if self.desktop else ""
 
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
@@ -229,7 +232,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             goal_directive=goal_directive,
             relationship_directive=relationship_directive,
             visual_directive=visual_directive,
-            multiplayer_directive=multiplayer_directive
+            multiplayer_directive=multiplayer_directive,
+            desktop_directive=desktop_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -388,6 +392,58 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             else:
                 m_str = ", ".join(team.members) if team else "Eve, DiamondHunter, Alex, Steve"
                 return f"[emotion: happy] Squad resmi kita namanya '{team.name if team else 'Squad Maybe ✨'}'! Anggotanya ada {m_str}. Masing-masing punya peran penting buat kejayaan base kita! [action: wink]"
+
+        # Desktop Companion & Computer Interaction
+        is_desktop_query = any(w in msg_lower for w in [
+            "volume", "suara", "kecilin", "besarin", "mute", "unmute",
+            "musik", "lagu", "media", "spotify", "next lagu", "ganti lagu",
+            "buka aplikasi", "buka notepad", "buka obs", "buka discord", "buka calc",
+            "desktop companion", "izin desktop", "notifikasi", "scene obs"
+        ])
+        if is_desktop_query and self.desktop:
+            # Volume
+            if any(k in msg_lower for k in ["kecilin volume", "turunin volume", "suara kekencengan"]):
+                _, msg = self.desktop.controller.adjust_volume(-10)
+                self.desktop.save()
+                return f"[emotion: happy] Siap! {msg} Udah lebih nyaman belum suaranya, {user_name}? [action: wink]"
+            elif any(k in msg_lower for k in ["besarin volume", "naikin volume", "suara kecil"]):
+                _, msg = self.desktop.controller.adjust_volume(10)
+                self.desktop.save()
+                return f"[emotion: happy] Beres! {msg} Awas jangan sampai tetangga sebelah keganggu ya! [action: wink]"
+            elif "mute" in msg_lower or "bisu" in msg_lower:
+                _, msg = self.desktop.controller.toggle_mute()
+                self.desktop.save()
+                return f"[emotion: happy] {msg} [action: wink]"
+            # Media Player
+            elif any(k in msg_lower for k in ["pause", "jeda", "stop lagu"]):
+                _, msg = self.desktop.controller.media_play_pause()
+                self.desktop.save()
+                return f"[emotion: happy] Media player udah Eve pause ya! [action: wink]"
+            elif any(k in msg_lower for k in ["play lagu", "puter lagu", "setel musik"]):
+                _, msg = self.desktop.controller.media_play_pause()
+                self.desktop.save()
+                return f"[emotion: happy] Memutar musik santai: '{self.desktop.config.current_track}'! [action: wink]"
+            elif any(k in msg_lower for k in ["next", "ganti lagu", "lagu berikutnya"]):
+                track, msg = self.desktop.controller.media_next_track()
+                self.desktop.save()
+                return f"[emotion: happy] Lagu diganti ke: '{track}'! Gimana, suka lagunya? [action: wink]"
+            # App launch
+            elif any(k in msg_lower for k in ["buka spotify", "buka notepad", "buka discord", "buka obs", "buka calc", "buka aplikasi"]):
+                app = "notepad.exe"
+                if "spotify" in msg_lower: app = "spotify.exe"
+                elif "discord" in msg_lower: app = "discord.exe"
+                elif "obs" in msg_lower: app = "obs64.exe"
+                elif "calc" in msg_lower: app = "calc.exe"
+                req, speech = self.desktop.request_action("app_launch", "launch_app", {"app_name": app})
+                return speech
+            # Notifications
+            elif "notifikasi" in msg_lower:
+                req, speech = self.desktop.request_action("notifications_read", "read_notification")
+                return speech
+            # General status
+            else:
+                st = "AKTIF" if self.desktop.config.master_enabled else "MATI"
+                return f"[emotion: happy] Mode Desktop Companion lagi {st}! Eve bisa bantu atur volume ({self.desktop.config.current_volume}%), kontrol musik, buka aplikasi, dan cek notifikasi sesuai izin kamu! [action: wink]"
 
         # Episodic Memory & Second Brain Callbacks
         recall_res = self.episodic_memory.recall(query=message, current_user=user_name, game_context=game_context)

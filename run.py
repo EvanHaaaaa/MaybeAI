@@ -99,6 +99,10 @@ async def trigger_vision_perceive(simulated_scene: Optional[str] = None):
 async def get_multiplayer_social_state():
     return orchestrator.brain.multiplayer.get_state()
 
+@app.get("/api/desktop/state")
+async def get_desktop_state():
+    return orchestrator.brain.desktop.get_state()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -171,6 +175,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "multiplayer_updated",
         "data": orchestrator.brain.multiplayer.get_state()
+    })
+
+    # Send initial desktop companion state
+    await websocket.send_json({
+        "type": "desktop_updated",
+        "data": orchestrator.brain.desktop.get_state()
     })
 
     try:
@@ -512,6 +522,56 @@ async def websocket_endpoint(websocket: WebSocket):
                         "speech": verdict,
                         "emotions": ["smug"],
                         "actions": ["giggle"]
+                    })
+            elif data.get("type") == "desktop_action":
+                act = data.get("action")
+                engine = orchestrator.brain.desktop
+                if act == "toggle_master":
+                    en = bool(data.get("enabled", True))
+                    engine.toggle_master(en)
+                    await orchestrator.broadcast("desktop_updated", engine.get_state())
+                elif act == "toggle_category":
+                    cat = data.get("category", "")
+                    en = bool(data.get("enabled", True))
+                    engine.toggle_category(cat, en)
+                    await orchestrator.broadcast("desktop_updated", engine.get_state())
+                elif act == "set_policy":
+                    req_high = bool(data.get("require_high", True))
+                    req_med = bool(data.get("require_medium", False))
+                    engine.set_confirmation_policy(req_high, req_med)
+                    await orchestrator.broadcast("desktop_updated", engine.get_state())
+                elif act == "add_app":
+                    app_name = data.get("app_name", "")
+                    engine.add_allowed_app(app_name)
+                    await orchestrator.broadcast("desktop_updated", engine.get_state())
+                elif act == "remove_app":
+                    app_name = data.get("app_name", "")
+                    engine.remove_allowed_app(app_name)
+                    await orchestrator.broadcast("desktop_updated", engine.get_state())
+                elif act == "request_action":
+                    cat = data.get("category", "volume_control")
+                    a_type = data.get("action_type", "adjust_volume")
+                    params = data.get("params", {})
+                    req, speech = engine.request_action(cat, a_type, params)
+                    await orchestrator.broadcast("desktop_updated", engine.get_state())
+                    await orchestrator.broadcast("ai_response", {
+                        "user": "Eve (Desktop Companion)",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["happy" if req.status == "executed" else "surprised"],
+                        "actions": ["wink"]
+                    })
+                elif act == "confirm_action":
+                    action_id = data.get("action_id", "")
+                    approved = bool(data.get("approved", True))
+                    req, speech = engine.confirm_action(action_id, approved)
+                    await orchestrator.broadcast("desktop_updated", engine.get_state())
+                    await orchestrator.broadcast("ai_response", {
+                        "user": "Eve (Desktop Companion)",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["happy" if approved else "neutral"],
+                        "actions": ["nod"]
                     })
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)

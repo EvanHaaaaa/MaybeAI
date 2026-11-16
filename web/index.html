@@ -896,6 +896,233 @@
       </div>
     </section>
 
+    <!-- Desktop Companion & Computer Interaction -->
+    <section class="card desktop-card" id="desktopCard">
+      <div class="card-header">
+        <div class="desktop-title">
+          <span class="desktop-icon">🖥️</span>
+          <div>
+            <h2>Desktop Companion & Computer Interaction</h2>
+            <small class="desktop-subtitle">Security Boundary, Granular Permission Toggles & Risky Action Confirmation</small>
+          </div>
+        </div>
+        <div class="desktop-status-bar">
+          <span id="dt-master-badge" class="badge badge-online">Companion: ACTIVE</span>
+          <span id="dt-volume-badge" class="badge">Vol: 50%</span>
+          <span id="dt-media-badge" class="badge">Media: PAUSED</span>
+          <span id="dt-pending-badge" class="badge badge-danger" style="display: none;">1 Pending Confirmation</span>
+        </div>
+      </div>
+
+      <div class="desktop-content">
+        <!-- Top Row: Master Toggle & Granular Category Toggles -->
+        <div class="dt-toggles-grid">
+          <!-- Master Switch Box -->
+          <div class="dt-box dt-master-box">
+            <div class="dt-box-header">
+              <span class="dt-box-title">⚡ Master Companion Switch</span>
+              <label class="dt-switch">
+                <input type="checkbox" id="dtMasterToggle" checked>
+                <span class="dt-slider"></span>
+              </label>
+            </div>
+            <p class="dt-box-desc">
+              Ketika dimatikan, seluruh kemampuan interaksi desktop Eve langsung diblokir secara total demi keamanan sistem.
+            </p>
+            <div class="dt-security-policy">
+              <span class="policy-label">Kebijakan Keamanan Tindakan Berisiko:</span>
+              <label class="dt-checkbox-label">
+                <input type="checkbox" id="dtRequireHighRisk" checked>
+                <span>Wajib konfirmasi manual untuk aksi risiko tinggi (High-Risk)</span>
+              </label>
+              <label class="dt-checkbox-label">
+                <input type="checkbox" id="dtRequireMediumRisk">
+                <span>Konfirmasi untuk aksi risiko menengah (Medium-Risk)</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Granular Permission Switches -->
+          <div class="dt-box dt-perms-box">
+            <div class="dt-box-header">
+              <span class="dt-box-title">🛡️ Izin Akses Granular (Permission Toggles)</span>
+              <small class="dt-hint">Atur apa saja yang boleh dikontrol Eve</small>
+            </div>
+            <div class="dt-perms-list">
+              <!-- App Launch -->
+              <div class="dt-perm-item">
+                <div class="perm-info">
+                  <span class="perm-icon">🚀</span>
+                  <div>
+                    <span class="perm-name">Buka Aplikasi Terdaftar</span>
+                    <small class="perm-sub">Membuka aplikasi dari whitelist (OBS, Spotify, Discord, dll.)</small>
+                  </div>
+                </div>
+                <label class="dt-switch dt-switch-sm">
+                  <input type="checkbox" class="dt-perm-toggle" data-category="app_launch" checked>
+                  <span class="dt-slider"></span>
+                </label>
+              </div>
+
+              <!-- Media Player Control -->
+              <div class="dt-perm-item">
+                <div class="perm-info">
+                  <span class="perm-icon">🎵</span>
+                  <div>
+                    <span class="perm-name">Kontrol Media Player</span>
+                    <small class="perm-sub">Play, pause, skip track musik pendukung stream</small>
+                  </div>
+                </div>
+                <label class="dt-switch dt-switch-sm">
+                  <input type="checkbox" class="dt-perm-toggle" data-category="media_control" checked>
+                  <span class="dt-slider"></span>
+                </label>
+              </div>
+
+              <!-- Volume Control -->
+              <div class="dt-perm-item">
+                <div class="perm-info">
+                  <span class="perm-icon">🔊</span>
+                  <div>
+                    <span class="perm-name">Atur Volume Suara Sistem</span>
+                    <small class="perm-sub">Menaikkan/menurunkan volume suara & mute sistem</small>
+                  </div>
+                </div>
+                <label class="dt-switch dt-switch-sm">
+                  <input type="checkbox" class="dt-perm-toggle" data-category="volume_control" checked>
+                  <span class="dt-slider"></span>
+                </label>
+              </div>
+
+              <!-- Notifications Read -->
+              <div class="dt-perm-item">
+                <div class="perm-info">
+                  <span class="perm-icon">🔔</span>
+                  <div>
+                    <span class="perm-name">Baca Notifikasi Desktop</span>
+                    <small class="perm-sub">Membaca notifikasi dari Discord, YouTube, atau OBS</small>
+                  </div>
+                </div>
+                <label class="dt-switch dt-switch-sm">
+                  <input type="checkbox" class="dt-perm-toggle" data-category="notifications_read" checked>
+                  <span class="dt-slider"></span>
+                </label>
+              </div>
+
+              <!-- Streaming Ops -->
+              <div class="dt-perm-item">
+                <div class="perm-info">
+                  <span class="perm-icon">📡</span>
+                  <div>
+                    <span class="perm-name">Kelola Aktivitas Streaming (OBS)</span>
+                    <small class="perm-sub">Ganti scene OBS Studio & status siaran langsung</small>
+                  </div>
+                </div>
+                <label class="dt-switch dt-switch-sm">
+                  <input type="checkbox" class="dt-perm-toggle" data-category="streaming_ops">
+                  <span class="dt-slider"></span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pending Confirmation Alert Banner (Appears when High-Risk Action is Requested) -->
+        <div id="dtPendingAlert" class="dt-pending-alert" style="display: none;">
+          <div class="pending-alert-icon">⚠️</div>
+          <div class="pending-alert-content">
+            <h4 id="dtPendingTitle">Konfirmasi Izin: Tindakan Berisiko Tinggi Diminta</h4>
+            <p id="dtPendingDesc">Eve meminta izin untuk menutup aplikasi atau mengganti scene siaran langsung.</p>
+            <div class="pending-alert-actions">
+              <button type="button" id="btnDtApprovePending" class="btn btn-primary btn-sm">✅ Izinkan & Jalankan</button>
+              <button type="button" id="btnDtRejectPending" class="btn btn-danger btn-sm">❌ Tolak Aksi Ini</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Middle Row: Interactive Controls & App Whitelist -->
+        <div class="dt-grid-row">
+          <!-- Live Interactive Control Desk -->
+          <div class="dt-box dt-controls-box">
+            <div class="dt-box-header">
+              <span class="dt-box-title">🎛️ Meja Kontrol Komputer (Live Control Desk)</span>
+              <span id="dtCurrentTrackBadge" class="badge badge-sm">Lofi Girl Beats</span>
+            </div>
+
+            <!-- Volume Slider & Mute -->
+            <div class="dt-control-section">
+              <div class="dt-control-label-row">
+                <span>🔊 Volume Master: <strong id="dtVolumeText">50%</strong></span>
+                <button type="button" id="btnDtMuteToggle" class="btn btn-secondary btn-xs">🔇 Mute</button>
+              </div>
+              <input type="range" id="dtVolumeSlider" min="0" max="100" value="50" class="dt-slider-input">
+            </div>
+
+            <!-- Media Player Buttons -->
+            <div class="dt-control-section">
+              <span class="dt-sub-label">🎵 Pemutar Musik Latar:</span>
+              <div class="dt-media-btn-row">
+                <button type="button" id="btnDtMediaPrev" class="btn btn-secondary btn-sm">⏮️ Prev</button>
+                <button type="button" id="btnDtMediaPlayPause" class="btn btn-primary btn-sm">⏯️ Play / Pause</button>
+                <button type="button" id="btnDtMediaNext" class="btn btn-secondary btn-sm">⏭️ Next Track</button>
+              </div>
+            </div>
+
+            <!-- Quick Action Testing Bar -->
+            <div class="dt-sim-test-bar">
+              <span class="sim-label">Uji Respon Eve Terhadap Desktop:</span>
+              <div class="dt-test-buttons">
+                <button type="button" class="btn-dt-test pill" data-test="vol_down">🔉 "Eve kecilin volume"</button>
+                <button type="button" class="btn-dt-test pill" data-test="music_next">🎶 "Eve ganti lagu dong"</button>
+                <button type="button" class="btn-dt-test pill" data-test="launch_notepad">📝 "Buka Notepad"</button>
+                <button type="button" class="btn-dt-test pill" data-test="read_notif">🔔 "Ada notifikasi apa?"</button>
+                <button type="button" class="btn-dt-test pill pill-danger" data-test="risky_obs">⚠️ Minta Ganti Scene OBS (Tes Konfirmasi)</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Allowed Apps Whitelist & Notifications -->
+          <div class="dt-box dt-whitelist-box">
+            <div class="dt-box-header">
+              <span class="dt-box-title">📋 Whitelist Aplikasi yang Diizinkan</span>
+              <small class="dt-hint">Aplikasi aman tanpa izin sistem luas</small>
+            </div>
+            
+            <div id="dtAllowedAppsList" class="dt-apps-tags">
+              <!-- Dynamically populated app tags -->
+            </div>
+
+            <!-- Add App Form -->
+            <form id="dtAddAppForm" class="dt-add-app-form">
+              <input type="text" id="dtAppInput" placeholder="misal: code.exe atau blender.exe" required>
+              <button type="submit" class="btn btn-secondary btn-sm">➕ Tambah Whitelist</button>
+            </form>
+
+            <div class="dt-notifs-section">
+              <div class="dt-box-header">
+                <span class="dt-box-title">📬 Notifikasi Desktop Terakhir</span>
+                <span id="dtNotifsCount" class="badge badge-sm">3 Notifikasi</span>
+              </div>
+              <div id="dtNotifsList" class="dt-notifs-list">
+                <!-- Dynamically populated notifs -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Bottom Row: Live Audit Trail & History -->
+        <div class="dt-box dt-audit-box">
+          <div class="dt-box-header">
+            <span class="dt-box-title">📜 Log Audit Aktivitas Desktop (Security Audit Trail)</span>
+            <small class="dt-hint">Mencatat riwayat setiap aksi yang dieksekusi, disetujui, maupun diblokir</small>
+          </div>
+          <div id="dtAuditList" class="dt-audit-list">
+            <!-- Dynamically populated audit log entries -->
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">

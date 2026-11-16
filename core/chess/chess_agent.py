@@ -72,7 +72,7 @@ class ChessAgent:
             lines = [
                 f"[emotion: smug] Skak! {san}! Mau kabur ke mana lagi raja kamu?! [action: wink]",
                 f"[emotion: angry] {san}, SKAK! Rasakan tekanan dari perwira AI idol-mu!",
-                f"[emotion: smug] Cek posisi rajamu: {san}! Keringat dingin mulai keluar kan? [action: giggle]"
+                f"[emotion: smug] Skak! Cek posisi rajamu: {san}! Keringat dingin mulai keluar kan? [action: giggle]"
             ]
             return random.choice(lines)
 

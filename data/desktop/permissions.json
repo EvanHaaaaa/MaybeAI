@@ -1,0 +1,103 @@
+{
+  "config": {
+    "master_enabled": true,
+    "categories": {
+      "app_launch": true,
+      "media_control": true,
+      "volume_control": true,
+      "notifications_read": true,
+      "streaming_ops": false
+    },
+    "require_confirmation_for_medium": false,
+    "require_confirmation_for_high": true,
+    "allowed_apps": [
+      "obs64.exe",
+      "spotify.exe",
+      "discord.exe",
+      "chrome.exe",
+      "notepad.exe",
+      "calc.exe"
+    ],
+    "current_volume": 10,
+    "is_muted": false,
+    "media_state": "playing",
+    "current_track": "ChilledCow - Lofi Girl Beats",
+    "streaming_scene": "Just Chatting",
+    "is_streaming": false
+  },
+  "audit_log": [
+    {
+      "id": "act_8b65b183",
+      "category": "media_control",
+      "action_type": "media_play_pause",
+      "params": {},
+      "risk_level": "low",
+      "status": "executed",
+      "requested_at": 1794841719.810988,
+      "requested_at_str": "22:08:39",
+      "resolved_at": null,
+      "details": "Memutar lagu santai pengiring livestream.",
+      "result_summary": "Media player playing: ChilledCow - Lofi Girl Beats"
+    },
+    {
+      "id": "act_8a19972e",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794841719.8804655,
+      "requested_at_str": "22:08:39",
+      "resolved_at": 1794841719.9197698,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' berhasil dibuka di desktop."
+    },
+    {
+      "id": "act_ee2b3bbd",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794841741.7484527,
+      "requested_at_str": "22:09:01",
+      "resolved_at": 1794841741.7484527,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_01e417a8",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794841747.2045193,
+      "requested_at_str": "22:09:07",
+      "resolved_at": 1794841747.2045193,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_f5bb435d",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794841774.799597,
+      "requested_at_str": "22:09:34",
+      "resolved_at": 1794841774.799597,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    }
+  ]
+}

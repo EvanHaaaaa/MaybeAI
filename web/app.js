@@ -123,6 +123,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateVisionUi(msg.data);
     } else if (msg.type === "multiplayer_updated") {
       updateMultiplayerUi(msg.data);
+    } else if (msg.type === "desktop_updated") {
+      updateDesktopUi(msg.data);
     } else if (msg.type === "goal_completed") {
       showGoalCompletedAlert(msg.data);
     } else if (msg.type === "strategy_adapted") {
@@ -2280,6 +2282,321 @@ document.addEventListener("DOMContentLoaded", () => {
             message: "Siap, aku bawa 10 obsidian sama perlengkapan potion fire resistance!"
           });
         }, 800);
+      }
+    });
+  });
+
+  // =========================================================================
+  // --- Desktop Companion & Computer Interaction UI ---
+  // =========================================================================
+  const dtMasterBadge = document.getElementById("dt-master-badge");
+  const dtVolumeBadge = document.getElementById("dt-volume-badge");
+  const dtMediaBadge = document.getElementById("dt-media-badge");
+  const dtPendingBadge = document.getElementById("dt-pending-badge");
+
+  const dtMasterToggle = document.getElementById("dtMasterToggle");
+  const dtRequireHighRisk = document.getElementById("dtRequireHighRisk");
+  const dtRequireMediumRisk = document.getElementById("dtRequireMediumRisk");
+
+  const dtPendingAlert = document.getElementById("dtPendingAlert");
+  const dtPendingTitle = document.getElementById("dtPendingTitle");
+  const dtPendingDesc = document.getElementById("dtPendingDesc");
+  const btnDtApprovePending = document.getElementById("btnDtApprovePending");
+  const btnDtRejectPending = document.getElementById("btnDtRejectPending");
+
+  const dtCurrentTrackBadge = document.getElementById("dtCurrentTrackBadge");
+  const dtVolumeText = document.getElementById("dtVolumeText");
+  const dtVolumeSlider = document.getElementById("dtVolumeSlider");
+  const btnDtMuteToggle = document.getElementById("btnDtMuteToggle");
+  const btnDtMediaPrev = document.getElementById("btnDtMediaPrev");
+  const btnDtMediaPlayPause = document.getElementById("btnDtMediaPlayPause");
+  const btnDtMediaNext = document.getElementById("btnDtMediaNext");
+
+  const dtAllowedAppsList = document.getElementById("dtAllowedAppsList");
+  const dtAddAppForm = document.getElementById("dtAddAppForm");
+  const dtAppInput = document.getElementById("dtAppInput");
+
+  const dtNotifsCount = document.getElementById("dtNotifsCount");
+  const dtNotifsList = document.getElementById("dtNotifsList");
+  const dtAuditList = document.getElementById("dtAuditList");
+
+  let currentPendingActionId = null;
+
+  function sendDesktopAction(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "desktop_action",
+        ...payload
+      }));
+    }
+  }
+
+  function updateDesktopUi(data) {
+    if (!data) return;
+
+    // 1. Status Badges
+    if (dtMasterBadge) {
+      dtMasterBadge.textContent = data.master_enabled ? "Companion: ACTIVE" : "Companion: DISABLED";
+      dtMasterBadge.className = data.master_enabled ? "badge badge-online" : "badge";
+    }
+    if (dtVolumeBadge) {
+      dtVolumeBadge.textContent = `Vol: ${data.current_volume}% ${data.is_muted ? '(Muted)' : ''}`;
+    }
+    if (dtMediaBadge) {
+      dtMediaBadge.textContent = `Media: ${data.media_state.toUpperCase()}`;
+    }
+
+    // 2. Pending Actions Alert
+    if (data.pending_actions && data.pending_actions.length > 0) {
+      const pending = data.pending_actions[0];
+      currentPendingActionId = pending.id;
+      if (dtPendingAlert) dtPendingAlert.style.display = "flex";
+      if (dtPendingBadge) {
+        dtPendingBadge.style.display = "inline-block";
+        dtPendingBadge.textContent = `${data.pending_actions.length} Pending Approval`;
+      }
+      if (dtPendingTitle) {
+        dtPendingTitle.textContent = `Konfirmasi Izin: ${pending.action_type.replace('_', ' ').toUpperCase()} (${pending.risk_level.toUpperCase()})`;
+      }
+      if (dtPendingDesc) {
+        dtPendingDesc.textContent = `${pending.details} Target: ${JSON.stringify(pending.params || {})}`;
+      }
+    } else {
+      currentPendingActionId = null;
+      if (dtPendingAlert) dtPendingAlert.style.display = "none";
+      if (dtPendingBadge) dtPendingBadge.style.display = "none";
+    }
+
+    // 3. Master & Policy Toggles
+    if (dtMasterToggle) dtMasterToggle.checked = !!data.master_enabled;
+    if (dtRequireHighRisk) dtRequireHighRisk.checked = !!data.require_confirmation_for_high;
+    if (dtRequireMediumRisk) dtRequireMediumRisk.checked = !!data.require_confirmation_for_medium;
+
+    // 4. Category Toggles
+    if (data.categories) {
+      document.querySelectorAll(".dt-perm-toggle").forEach(toggle => {
+        const cat = toggle.dataset.category;
+        if (cat in data.categories) {
+          toggle.checked = !!data.categories[cat];
+        }
+      });
+    }
+
+    // 5. Volume & Media State
+    if (dtVolumeText) dtVolumeText.textContent = `${data.current_volume}%`;
+    if (dtVolumeSlider) dtVolumeSlider.value = data.current_volume;
+    if (btnDtMuteToggle) {
+      btnDtMuteToggle.textContent = data.is_muted ? "🔊 Unmute" : "🔇 Mute";
+      btnDtMuteToggle.className = data.is_muted ? "btn btn-danger btn-xs" : "btn btn-secondary btn-xs";
+    }
+    if (dtCurrentTrackBadge) dtCurrentTrackBadge.textContent = data.current_track || "No media";
+    if (btnDtMediaPlayPause) {
+      btnDtMediaPlayPause.textContent = data.media_state === "playing" ? "⏸️ Pause" : "▶️ Play";
+    }
+
+    // 6. Whitelist Apps Tags
+    if (dtAllowedAppsList && data.allowed_apps) {
+      dtAllowedAppsList.innerHTML = "";
+      data.allowed_apps.forEach(app => {
+        const tag = document.createElement("span");
+        tag.className = "dt-app-tag";
+        tag.innerHTML = `
+          <span>💻 ${app}</span>
+          <span class="dt-app-remove" data-app="${app}" title="Hapus dari whitelist">✕</span>
+        `;
+        dtAllowedAppsList.appendChild(tag);
+      });
+
+      dtAllowedAppsList.querySelectorAll(".dt-app-remove").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const appToRemove = btn.dataset.app;
+          sendDesktopAction({ action: "remove_app", app_name: appToRemove });
+        });
+      });
+    }
+
+    // 7. Notifications
+    if (dtNotifsList && data.notifications) {
+      dtNotifsList.innerHTML = "";
+      if (dtNotifsCount) dtNotifsCount.textContent = `${data.notifications.length} Notifikasi`;
+      data.notifications.forEach(n => {
+        const item = document.createElement("div");
+        item.className = "dt-notif-item";
+        item.innerHTML = `
+          <div class="notif-header">
+            <span class="notif-source">${n.source}</span>
+            <span class="notif-time">${n.time_str || ''}</span>
+          </div>
+          <div class="notif-title">${n.title}</div>
+          <div class="notif-body">${n.body}</div>
+        `;
+        dtNotifsList.appendChild(item);
+      });
+    }
+
+    // 8. Audit Log
+    if (dtAuditList && data.audit_log) {
+      dtAuditList.innerHTML = "";
+      data.audit_log.forEach(a => {
+        const row = document.createElement("div");
+        row.className = "dt-audit-item";
+        const stClass = `audit-status-${(a.status || 'executed').toLowerCase()}`;
+        row.innerHTML = `
+          <div class="audit-left">
+            <span class="audit-status-badge ${stClass}">${a.status}</span>
+            <span class="audit-details"><strong>${a.action_type}</strong>: ${a.details}</span>
+          </div>
+          <span class="audit-time">${a.requested_at_str || ''}</span>
+        `;
+        dtAuditList.appendChild(row);
+      });
+    }
+  }
+
+  // --- Event Listeners for Desktop UI ---
+  if (dtMasterToggle) {
+    dtMasterToggle.addEventListener("change", (e) => {
+      sendDesktopAction({ action: "toggle_master", enabled: e.target.checked });
+    });
+  }
+
+  function sendPolicyUpdate() {
+    sendDesktopAction({
+      action: "set_policy",
+      require_high: dtRequireHighRisk ? dtRequireHighRisk.checked : true,
+      require_medium: dtRequireMediumRisk ? dtRequireMediumRisk.checked : false
+    });
+  }
+
+  if (dtRequireHighRisk) dtRequireHighRisk.addEventListener("change", sendPolicyUpdate);
+  if (dtRequireMediumRisk) dtRequireMediumRisk.addEventListener("change", sendPolicyUpdate);
+
+  document.querySelectorAll(".dt-perm-toggle").forEach(toggle => {
+    toggle.addEventListener("change", (e) => {
+      const cat = e.target.dataset.category;
+      sendDesktopAction({ action: "toggle_category", category: cat, enabled: e.target.checked });
+    });
+  });
+
+  if (dtVolumeSlider) {
+    dtVolumeSlider.addEventListener("input", (e) => {
+      if (dtVolumeText) dtVolumeText.textContent = `${e.target.value}%`;
+    });
+    dtVolumeSlider.addEventListener("change", (e) => {
+      sendDesktopAction({
+        action: "request_action",
+        category: "volume_control",
+        action_type: "set_volume",
+        params: { volume: parseInt(e.target.value, 10) }
+      });
+    });
+  }
+
+  if (btnDtMuteToggle) {
+    btnDtMuteToggle.addEventListener("click", () => {
+      sendDesktopAction({
+        action: "request_action",
+        category: "volume_control",
+        action_type: "toggle_mute"
+      });
+    });
+  }
+
+  if (btnDtMediaPlayPause) {
+    btnDtMediaPlayPause.addEventListener("click", () => {
+      sendDesktopAction({
+        action: "request_action",
+        category: "media_control",
+        action_type: "play_pause"
+      });
+    });
+  }
+
+  if (btnDtMediaNext) {
+    btnDtMediaNext.addEventListener("click", () => {
+      sendDesktopAction({
+        action: "request_action",
+        category: "media_control",
+        action_type: "next"
+      });
+    });
+  }
+
+  if (btnDtMediaPrev) {
+    btnDtMediaPrev.addEventListener("click", () => {
+      sendDesktopAction({
+        action: "request_action",
+        category: "media_control",
+        action_type: "prev"
+      });
+    });
+  }
+
+  if (btnDtApprovePending) {
+    btnDtApprovePending.addEventListener("click", () => {
+      if (currentPendingActionId) {
+        sendDesktopAction({ action: "confirm_action", action_id: currentPendingActionId, approved: true });
+      }
+    });
+  }
+
+  if (btnDtRejectPending) {
+    btnDtRejectPending.addEventListener("click", () => {
+      if (currentPendingActionId) {
+        sendDesktopAction({ action: "confirm_action", action_id: currentPendingActionId, approved: false });
+      }
+    });
+  }
+
+  if (dtAddAppForm && dtAppInput) {
+    dtAddAppForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const val = dtAppInput.value.trim();
+      if (val) {
+        sendDesktopAction({ action: "add_app", app_name: val });
+        dtAppInput.value = "";
+      }
+    });
+  }
+
+  // Quick Action Test Buttons
+  document.querySelectorAll(".btn-dt-test").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const testType = btn.dataset.test;
+      if (testType === "vol_down") {
+        sendDesktopAction({
+          action: "request_action",
+          category: "volume_control",
+          action_type: "adjust_volume",
+          params: { delta: -10 }
+        });
+      } else if (testType === "music_next") {
+        sendDesktopAction({
+          action: "request_action",
+          category: "media_control",
+          action_type: "next"
+        });
+      } else if (testType === "launch_notepad") {
+        sendDesktopAction({
+          action: "request_action",
+          category: "app_launch",
+          action_type: "launch_app",
+          params: { app_name: "notepad.exe" }
+        });
+      } else if (testType === "read_notif") {
+        sendDesktopAction({
+          action: "request_action",
+          category: "notifications_read",
+          action_type: "read_notification"
+        });
+      } else if (testType === "risky_obs") {
+        // High-Risk simulation: changing OBS scene or stopping stream
+        sendDesktopAction({
+          action: "request_action",
+          category: "streaming_ops",
+          action_type: "switch_scene",
+          params: { scene_name: "Gaming Mode (Speedrun)" }
+        });
       }
     });
   });
