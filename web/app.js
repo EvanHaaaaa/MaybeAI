@@ -34,25 +34,44 @@ document.addEventListener("DOMContentLoaded", () => {
   let musicNotes = [];
 
   // --- WebSocket Connection ---
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const wsUrl = `${protocol}//${window.location.host}/ws`;
-  const ws = new WebSocket(wsUrl);
+  let ws = null;
+  let reconnectTimer = null;
 
-  ws.onopen = () => {
-    wsStatus.textContent = "Connected";
-    wsStatus.className = "badge badge-online";
-  };
+  function connectWs() {
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    ws = new WebSocket(wsUrl);
 
-  ws.onclose = () => {
-    wsStatus.textContent = "Disconnected";
-    wsStatus.className = "badge";
-  };
+    ws.onopen = () => {
+      wsStatus.textContent = "Connected";
+      wsStatus.className = "badge badge-online";
+    };
 
-  ws.onmessage = (event) => {
+    ws.onclose = () => {
+      wsStatus.textContent = "Reconnecting...";
+      wsStatus.className = "badge";
+      reconnectTimer = setTimeout(connectWs, 2000);
+    };
+
+    ws.onerror = () => {
+      try { ws.close(); } catch (e) {}
+    };
+
+    ws.onmessage = handleWsMessage;
+  }
+
+  function handleWsMessage(event) {
     const msg = JSON.parse(event.data);
 
     if (msg.type === "chat_received") {
       let author = msg.data.source === "minecraft" ? `🎮 [MC] ${msg.data.user}` : msg.data.user;
+      if (msg.data.source === "mic") {
+        author = `🎙️ [Mic] ${msg.data.user}`;
+      }
       if (msg.data.is_donation) {
         author = `🎁 [SUPERCHAT ${msg.data.donation_amount}] ${msg.data.user}`;
       }
@@ -107,7 +126,10 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
     }
-  };
+  }
+
+  // Connect WebSocket initially
+  connectWs();
 
   // LLM Provider Switcher Listener
   if (llmProviderSelect) {
@@ -221,10 +243,147 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function sendMessage(user, text) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "user_message", user: user, text: text }));
+  function sendMessage(user, text, source = "web") {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "user_message", user: user, text: text, source: source }));
     }
+  }
+
+  // --- Microphone Voice Listening (Speech-to-Text) ---
+  const btnToggleMicHeader = document.getElementById("btn-toggle-mic-header");
+  const btnChatMic = document.getElementById("btn-chat-mic");
+  const micStatusBar = document.getElementById("mic-status-bar");
+  const micTranscriptPreview = document.getElementById("mic-transcript-preview");
+  const micLangSelect = document.getElementById("micLangSelect");
+
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let recognition = null;
+  let isListeningMic = false;
+
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = micLangSelect ? micLangSelect.value : "id-ID";
+
+    if (micLangSelect) {
+      micLangSelect.addEventListener("change", () => {
+        if (recognition) {
+          recognition.lang = micLangSelect.value;
+          if (isListeningMic) {
+            recognition.stop();
+            setTimeout(() => { if (isListeningMic) recognition.start(); }, 150);
+          }
+        }
+      });
+    }
+
+    recognition.onstart = () => {
+      isListeningMic = true;
+      updateMicUiState(true);
+      if (micTranscriptPreview) micTranscriptPreview.textContent = "Mendengarkan suaramu... silakan bicara!";
+    };
+
+    recognition.onresult = (event) => {
+      let interimTranscript = "";
+      let finalTranscript = "";
+
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          finalTranscript += transcript;
+        } else {
+          interimTranscript += transcript;
+        }
+      }
+
+      if (interimTranscript && micTranscriptPreview) {
+        micTranscriptPreview.textContent = `"${interimTranscript.trim()}"`;
+      }
+
+      if (finalTranscript.trim()) {
+        const spokenText = finalTranscript.trim();
+        if (micTranscriptPreview) micTranscriptPreview.textContent = `Terkirim: "${spokenText}"`;
+        sendMessage("Creator", spokenText, "mic");
+      }
+    };
+
+    recognition.onerror = (event) => {
+      console.log("[Mic Recognition Notice]", event.error);
+      if (event.error === "not-allowed") {
+        alert("Akses mikrofon ditolak oleh browser. Silakan klik ikon gembok pada address bar browser Anda dan pilih 'Allow' untuk mikrofon.");
+        stopMic();
+      }
+    };
+
+    recognition.onend = () => {
+      if (isListeningMic) {
+        try {
+          recognition.start();
+        } catch (e) {}
+      } else {
+        updateMicUiState(false);
+      }
+    };
+  }
+
+  function updateMicUiState(listening) {
+    if (btnToggleMicHeader) {
+      btnToggleMicHeader.textContent = listening ? "🔴 Mic: LISTENING" : "🎙️ Mic: OFF";
+      if (listening) {
+        btnToggleMicHeader.classList.add("active");
+      } else {
+        btnToggleMicHeader.classList.remove("active");
+      }
+    }
+    if (btnChatMic) {
+      if (listening) {
+        btnChatMic.classList.add("active");
+        btnChatMic.textContent = "🔴";
+      } else {
+        btnChatMic.classList.remove("active");
+        btnChatMic.textContent = "🎙️";
+      }
+    }
+    if (micStatusBar) {
+      micStatusBar.style.display = listening ? "flex" : "none";
+    }
+  }
+
+  function startMic() {
+    if (!SpeechRecognition) {
+      alert("Browser Anda belum mendukung SpeechRecognition API. Silakan buka MaybeAI menggunakan Google Chrome atau Microsoft Edge untuk menggunakan mic.");
+      return;
+    }
+    isListeningMic = true;
+    try {
+      recognition.start();
+    } catch (e) {
+      updateMicUiState(true);
+    }
+  }
+
+  function stopMic() {
+    isListeningMic = false;
+    if (recognition) {
+      try { recognition.stop(); } catch (e) {}
+    }
+    updateMicUiState(false);
+  }
+
+  function toggleMic() {
+    if (isListeningMic) {
+      stopMic();
+    } else {
+      startMic();
+    }
+  }
+
+  if (btnToggleMicHeader) {
+    btnToggleMicHeader.addEventListener("click", toggleMic);
+  }
+  if (btnChatMic) {
+    btnChatMic.addEventListener("click", toggleMic);
   }
 
   function updateConversationState(state) {

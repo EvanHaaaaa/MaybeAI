@@ -145,13 +145,18 @@ class MinecraftController:
             await asyncio.sleep(1.5)
 
         if self.bridge_ws is None:
-            try:
-                self.bridge_ws = await websockets.connect("ws://localhost:25566")
-                print("[Minecraft] Connected to Mineflayer WebSocket bridge!")
-                if self.bridge_task is None or self.bridge_task.done():
-                    self.bridge_task = asyncio.create_task(self._listen_bridge())
-            except Exception as e:
-                print(f"[Minecraft] Failed connecting to bridge ws://localhost:25566: {e}")
+            for attempt in range(4):
+                try:
+                    self.bridge_ws = await websockets.connect("ws://localhost:25566")
+                    print("[Minecraft] Connected to Mineflayer WebSocket bridge!")
+                    if self.bridge_task is None or self.bridge_task.done():
+                        self.bridge_task = asyncio.create_task(self._listen_bridge())
+                    break
+                except Exception as e:
+                    if attempt < 3:
+                        await asyncio.sleep(0.8)
+                    else:
+                        print(f"[Minecraft] Failed connecting to bridge ws://localhost:25566: {e}")
 
     async def _listen_bridge(self):
         """Listens for real-time events from the Mineflayer bot."""

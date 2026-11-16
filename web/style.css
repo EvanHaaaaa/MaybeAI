@@ -818,3 +818,105 @@ body {
   font-family: monospace;
 }
 
+/* Microphone Listening Feature Styles */
+.btn-mic-toggle {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid #475569;
+  color: #cbd5e1;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-mic-toggle:hover {
+  background: rgba(51, 65, 85, 0.9);
+  border-color: #94a3b8;
+  color: #fff;
+}
+
+.btn-mic-toggle.active {
+  background: #7f1d1d;
+  border-color: #ef4444;
+  color: #fef2f2;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+  animation: pulse-mic 1.6s infinite ease-in-out;
+}
+
+.btn-mic-icon {
+  background: rgba(30, 41, 59, 0.7);
+  border: 1px solid var(--border);
+  color: #cbd5e1;
+  font-size: 16px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-mic-icon:hover {
+  background: rgba(51, 65, 85, 0.9);
+  color: #fff;
+}
+
+.btn-mic-icon.active {
+  background: #dc2626;
+  border-color: #ef4444;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.7);
+  animation: pulse-mic 1.6s infinite ease-in-out;
+}
+
+@keyframes pulse-mic {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.mic-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  animation: fadeIn 0.2s ease;
+}
+
+.mic-recording-pulse {
+  animation: blink-rec 1s infinite;
+  font-size: 14px;
+}
+
+@keyframes blink-rec {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.mic-transcript {
+  flex: 1;
+  font-size: 13px;
+  color: #fca5a5;
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.select-mic-lang {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid #475569;
+  color: #e2e8f0;
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+

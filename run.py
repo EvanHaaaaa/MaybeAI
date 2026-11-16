@@ -42,7 +42,7 @@ async def get_status():
         "status": "online",
         "busy": orchestrator.is_busy,
         "vts_connected": orchestrator.vts.connected,
-        "llm_provider": orchestrator.brain.settings.get("llm", {}).get("provider", "mock")
+        "llm_provider": orchestrator.brain.settings.get("llm", {}).get("provider", "gemini")
     }
 
 @app.websocket("/ws")
@@ -83,7 +83,8 @@ async def websocket_endpoint(websocket: WebSocket):
             if data.get("type") == "user_message":
                 user = data.get("user", "User")
                 text = data.get("text", "")
-                await orchestrator.chat.put_message(user=user, text=text, source="web")
+                source = data.get("source", "web")
+                await orchestrator.chat.put_message(user=user, text=text, source=source)
             elif data.get("type") == "donation":
                 user = data.get("user", "Supporter")
                 text = data.get("text", "Love your stream!")

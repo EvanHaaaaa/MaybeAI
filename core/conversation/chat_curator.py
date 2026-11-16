@@ -122,6 +122,10 @@ class ChatCurator:
         if msg.is_donation:
             return 200.0
 
+        # Voice input from microphone (creator speaking directly) gets immediate response priority
+        if msg.source == "mic":
+            score += 95.0
+
         # Direct mentions of Eve
         if "mention" in msg.msg_type:
             score += 45.0

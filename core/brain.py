@@ -154,7 +154,7 @@ class Brain:
         self, system_prompt: str, user_name: str, message: str, game_context: str,
         is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]]
     ) -> str:
-        base_url = self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
+        base_url = os.getenv("OLLAMA_BASE_URL") or self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
         model = self.settings.get("llm", {}).get("ollama_model", "llama3.2")
 
         messages = [{"role": "system", "content": system_prompt}]
@@ -189,7 +189,7 @@ class Brain:
         if not api_key:
             return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
 
-        model = self.settings.get("llm", {}).get("gemini_model", "gemini-3.8-flash")
+        model = self.settings.get("llm", {}).get("gemini_model", "gemini-3-flash-preview")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
         
         # Build contents from conversational history
@@ -205,16 +205,27 @@ class Brain:
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": contents,
-            "generationConfig": {"temperature": 0.85, "maxOutputTokens": 160}
+            "generationConfig": {
+                "temperature": 0.85,
+                "maxOutputTokens": 800,
+                "thinkingConfig": {"thinkingBudget": 50}
+            }
         }
 
         try:
-            timeout = aiohttp.ClientTimeout(total=12)
+            timeout = aiohttp.ClientTimeout(total=15)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.post(url, json=payload) as resp:
                     if resp.status == 200:
                         data = await resp.json()
-                        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+                        candidates = data.get("candidates", [])
+                        if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
+                            parts = candidates[0]["content"]["parts"]
+                            text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
+                            if text:
+                                return text
+                        print(f"[Brain Warning] Gemini response missing valid parts. Falling back to persona.")
+                        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
                     else:
                         err_text = await resp.text()
                         print(f"[Brain Warning] Gemini returned status {resp.status}: {err_text[:120]}. Using persona fallback.")

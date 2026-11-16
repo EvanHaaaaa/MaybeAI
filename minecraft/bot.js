@@ -61,6 +61,9 @@ let guardTarget = null;
 
 // Initialize WebSocket Bridge Server for Python on 25566
 const wsServer = new WebSocket.Server({ port: config.bridge_ws_port });
+wsServer.on('error', (err) => {
+  console.error('[Minecraft Bridge Error]', err.message);
+});
 console.log(`[Minecraft Bridge] WebSocket bridge listening on ws://localhost:${config.bridge_ws_port}`);
 
 wsServer.on('connection', (ws) => {

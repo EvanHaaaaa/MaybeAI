@@ -257,7 +257,7 @@ class GuardRunner {
       // Check current combat target status
       if (this.combatTarget) {
         const stillExists = this.bot.entities[this.combatTarget.id];
-        if (!stillExists || !stillExists.isValid) {
+        if (!stillExists || !stillExists.isValid || (stillExists.health !== undefined && stillExists.health <= 0)) {
           console.log(`[Guard Runner] Threat ${this.combatTarget.name || 'mob'} eliminated!`);
           this.sendToPython('guard_mob_eliminated', {
             mob: this.combatTarget.name || 'hostile',

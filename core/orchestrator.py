@@ -308,6 +308,8 @@ class Orchestrator:
 
         if primary.source == "minecraft":
             llm_input = f"[Minecraft In-Game Chat from {primary.user}]: {clean_input}\n(You are currently inside Minecraft playing with them! Respond directly to {primary.user} in 1-2 witty sentences)"
+        elif primary.source == "mic":
+            llm_input = f"[Spoken Voice from Creator/User via Microphone]: {clean_input}\n(They are speaking directly to you via voice microphone! Answer them directly, naturally, and warmly/playfully in 1-2 sentences with emotion tags)"
         elif is_donation:
             llm_input = f"[DONATION {primary.donation_amount} from {primary.user}]: {clean_input}"
         elif is_group_debate:
@@ -339,6 +341,8 @@ class Orchestrator:
             user_label = f"Eve (Commenting on {primary.user} & {interaction.related_messages[0].user})"
         elif primary.source == "minecraft":
             user_label = f"Eve (to {primary.user})"
+        elif primary.source == "mic":
+            user_label = f"Eve (to {primary.user} 🎙️)"
         else:
             user_label = "Eve"
 

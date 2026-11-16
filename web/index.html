@@ -26,6 +26,7 @@
           </select>
         </div>
         <div class="status-tags">
+          <button id="btn-toggle-mic-header" class="btn btn-mic-toggle">🎙️ Mic: OFF</button>
           <span id="llm-status" class="badge badge-accent">LLM: GEMINI</span>
           <span id="vts-status" class="badge">VTS: Standby</span>
           <span id="ws-status" class="badge badge-online">Connected</span>
@@ -84,8 +85,18 @@
           </div>
         </div>
 
+        <div id="mic-status-bar" class="mic-status-bar" style="display: none;">
+          <span class="mic-recording-pulse">🔴</span>
+          <span id="mic-transcript-preview" class="mic-transcript">Mendengarkan suaramu...</span>
+          <select id="micLangSelect" class="select-mic-lang" title="Bahasa Pengenalan Suara">
+            <option value="id-ID" selected>🇮🇩 ID</option>
+            <option value="en-US">🇺🇸 EN</option>
+          </select>
+        </div>
+
         <form id="chatForm" class="chat-input-area">
-          <input type="text" id="chatInput" placeholder="Send a message to Eve..." autocomplete="off" required>
+          <button type="button" id="btn-chat-mic" class="btn btn-mic-icon" title="Toggle Mic (Bicara langsung ke Eve)">🎙️</button>
+          <input type="text" id="chatInput" placeholder="Ketik pesan atau klik mic untuk bicara..." autocomplete="off">
           <button type="submit" class="btn btn-primary">Send</button>
         </form>
       </section>
