@@ -2450,5 +2450,283 @@ body {
   box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
 }
 
+/* --- Visual Perception & Screen Awareness --- */
+.vision-card {
+  grid-column: 1 / -1;
+  background: var(--card-bg);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 4px 20px rgba(16, 185, 129, 0.08);
+}
+
+.vision-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.vision-icon {
+  font-size: 26px;
+}
+
+.vision-subtitle {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.vision-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.vision-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.vision-monitor-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .vision-monitor-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Screen Viewport */
+.vision-viewport-wrap {
+  background: #090c15;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.vision-screen-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12px;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.vision-timestamp {
+  font-family: monospace;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.vision-screen-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #05070d;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.vision-screen-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.vision-screen-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.placeholder-icon {
+  font-size: 36px;
+  opacity: 0.6;
+}
+
+.vision-event-overlay {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: rgba(239, 68, 68, 0.9);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 12px;
+  box-shadow: 0 0 14px rgba(239, 68, 68, 0.8);
+  animation: pulse 1s infinite alternate;
+}
+
+/* Telemetry & Grounding Panel */
+.vision-telemetry-panel {
+  background: #0c0f1a;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.telemetry-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.telemetry-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.telemetry-value {
+  font-size: 14px;
+  color: #f1f5f9;
+}
+
+.telemetry-bar-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.telemetry-pct {
+  font-family: monospace;
+  font-size: 12px;
+  font-weight: 700;
+  color: #34d399;
+  min-width: 35px;
+}
+
+.telemetry-desc-box {
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 6px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.box-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+}
+
+.box-text {
+  margin: 0;
+  font-size: 12px;
+  color: #cbd5e1;
+  line-height: 1.4;
+}
+
+/* Commentary Bubble */
+.vision-commentary-bubble {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.commentary-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6ee7b7;
+}
+
+.bubble-avatar {
+  font-size: 16px;
+}
+
+.bubble-speech {
+  margin: 0;
+  font-size: 13px;
+  color: #ecfdf5;
+  font-style: italic;
+  line-height: 1.45;
+}
+
+/* Controls & Simulator Presets */
+.vision-controls-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: #0f121d;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+
+.vision-action-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vision-sim-presets {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.08);
+  padding-top: 10px;
+}
+
+.presets-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.presets-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-vision-preset {
+  cursor: pointer;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+  transition: all 0.2s ease;
+}
+
+.btn-vision-preset:hover {
+  background: #10b981;
+  color: #fff;
+  box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+}
+
+
 
 

@@ -106,6 +106,8 @@ class Orchestrator:
         asyncio.create_task(self._process_chat_loop())
         # Start spontaneous banter / idle stream thoughts loop
         asyncio.create_task(self._idle_banter_loop())
+        # Start visual perception / screen awareness loop
+        asyncio.create_task(self._visual_perception_loop())
 
     async def _idle_banter_loop(self):
         """
@@ -190,6 +192,99 @@ class Orchestrator:
             print(f"[Improv Error] {e}")
         finally:
             self.is_busy = False
+
+    async def _visual_perception_loop(self):
+        """
+        Periodically captures screen or observes scene, analyzes visual changes,
+        and triggers spontaneous visual commentary when events occur.
+        """
+        while self.is_running:
+            interval = self.brain.vision.config.capture_interval_sec
+            await asyncio.sleep(interval)
+            if not self.brain.vision.is_auto_active:
+                continue
+
+            try:
+                dominant_mood, _ = self.brain.mood.get_dominant_mood()
+                mood_directive = self.brain.mood.get_behavioral_directive()
+                obs = self.brain.vision.perceive(
+                    mood_directive=mood_directive,
+                    dominant_mood=dominant_mood
+                )
+                await self.broadcast("vision_updated", self.brain.vision.get_state())
+
+                # If an event occurred or commentary produced and not busy, speak commentary
+                if obs.eve_commentary and not self.is_busy:
+                    await self._speak_visual_commentary(obs)
+            except Exception as e:
+                print(f"[Orchestrator] Visual perception loop error: {e}")
+
+    async def _speak_visual_commentary(self, obs: Any):
+        if not obs.eve_commentary or self.is_busy:
+            return
+        self.is_busy = True
+        try:
+            raw_thought = obs.eve_commentary
+            _, clean_response = self.moderator.clean_text(raw_thought)
+            speech_text, emotions, actions = ActionParser.parse(clean_response)
+            primary_emotion = emotions[0] if emotions else "happy"
+
+            # Apply mood stimulus based on visual scene
+            if obs.scene_type == "minecraft_defeat":
+                self.brain.mood.apply_stimulus("minecraft_threat", 0.8)
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
+            elif obs.scene_type == "minecraft_diamond":
+                self.brain.mood.apply_stimulus("minecraft_gift", 0.9)
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
+            elif obs.scene_type in ("chess_gameover", "chess_match"):
+                self.brain.mood.apply_stimulus("chess_queen_capture", 0.7)
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
+
+            await self.broadcast("ai_response", {
+                "user": "Eve (Screen Awareness)",
+                "raw": clean_response,
+                "speech": speech_text,
+                "emotions": emotions,
+                "actions": actions,
+                "source": "vision"
+            })
+
+            if self.vts.connected:
+                await self.vts.trigger_expression(primary_emotion)
+
+            async def on_mouth_update(val: float):
+                if self.vts.connected:
+                    await self.vts.update_mouth(val)
+                await self.broadcast("avatar_state", {
+                    "mouth_open": val,
+                    "emotion": primary_emotion
+                })
+
+            print(f"[Screen Awareness] [{primary_emotion}] {speech_text}")
+            await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+
+            if self.vts.connected:
+                await self.vts.trigger_expression("neutral")
+                await self.vts.update_mouth(0.0)
+
+            await self.broadcast("avatar_state", {"mouth_open": 0.0, "emotion": "neutral"})
+        finally:
+            self.is_busy = False
+
+    async def perceive_screen_now(self, simulated_scene: Optional[str] = None):
+        """Triggers an immediate on-demand visual perception scan."""
+        dominant_mood, _ = self.brain.mood.get_dominant_mood()
+        mood_directive = self.brain.mood.get_behavioral_directive()
+        obs = self.brain.vision.perceive(
+            simulated_scene=simulated_scene,
+            force_commentary=True,
+            mood_directive=mood_directive,
+            dominant_mood=dominant_mood
+        )
+        await self.broadcast("vision_updated", self.brain.vision.get_state())
+        if obs.eve_commentary and not self.is_busy:
+            asyncio.create_task(self._speak_visual_commentary(obs))
+        return obs
 
     async def _ingest_message(self, msg: ChatMessage):
         """Filters, broadcasts, and ingests message into ChatCurator."""

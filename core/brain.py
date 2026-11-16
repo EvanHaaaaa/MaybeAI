@@ -45,6 +45,10 @@ class Brain:
     def relationships(self):
         return self.conversation.relationships
 
+    @property
+    def vision(self):
+        return self.conversation.vision
+
     def _load_json(self, path_str: str) -> Dict[str, Any]:
         p = Path(path_str)
         if p.exists():
@@ -77,7 +81,8 @@ class Brain:
             "second_brain": self.conversation.episodic_memory.get_stats(),
             "mood": self.mood.get_state(),
             "goals": self.goals.get_state(),
-            "relationships": self.relationships.get_state()
+            "relationships": self.relationships.get_state(),
+            "vision": self.vision.get_state()
         }
 
     async def generate_response(
@@ -88,9 +93,16 @@ class Brain:
         is_donation: bool = False,
         donation_amount: str = "",
         is_group_debate: bool = False,
-        debate_users: Optional[List[str]] = None
+        debate_users: Optional[List[str]] = None,
+        image_base64: Optional[str] = None
     ) -> str:
         provider = self.settings.get("llm", {}).get("provider", "mock").lower()
+
+        # If user explicitly asks about screen/visual and no image passed, use latest vision thumbnail
+        if image_base64 is None and self.vision and self.vision.current_observation:
+            obs = self.vision.current_observation
+            if any(w in message.lower() for w in ["layar", "screen", "liat", "lihat", "gambar"]):
+                image_base64 = obs.thumbnail_base64
 
         # Build dynamic contextual system prompt
         system_prompt = self.conversation.build_system_prompt(
@@ -104,11 +116,11 @@ class Brain:
         )
 
         if provider == "openai":
-            response = await self._generate_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            response = await self._generate_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
         elif provider == "ollama":
-            response = await self._generate_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            response = await self._generate_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
         elif provider == "gemini":
-            response = await self._generate_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            response = await self._generate_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
         else:
             response = self.conversation.generate_mock_response(
                 user_name=user_name,
@@ -130,7 +142,8 @@ class Brain:
 
     async def _generate_openai(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
-        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]]
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
+        image_base64: Optional[str] = None
     ) -> str:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
@@ -144,7 +157,18 @@ class Brain:
             messages.append({"role": item["role"], "content": item["content"]})
         
         user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
-        messages.append({"role": "user", "content": f"{user_prefix}: {message}"})
+        prompt_text = f"{user_prefix}: {message}"
+
+        if image_base64:
+            raw_b64 = image_base64.split("base64,")[1] if "base64," in image_base64 else image_base64
+            user_content = [
+                {"type": "text", "text": prompt_text},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{raw_b64}"}}
+            ]
+        else:
+            user_content = prompt_text
+
+        messages.append({"role": "user", "content": user_content})
 
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
@@ -173,7 +197,8 @@ class Brain:
 
     async def _generate_ollama(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
-        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]]
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
+        image_base64: Optional[str] = None
     ) -> str:
         base_url = os.getenv("OLLAMA_BASE_URL") or self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
         model = self.settings.get("llm", {}).get("ollama_model", "llama3.2")
@@ -183,7 +208,11 @@ class Brain:
             messages.append({"role": item["role"], "content": item["content"]})
         
         user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
-        messages.append({"role": "user", "content": f"{user_prefix}: {message}"})
+        user_msg = {"role": "user", "content": f"{user_prefix}: {message}"}
+        if image_base64:
+            raw_b64 = image_base64.split("base64,")[1] if "base64," in image_base64 else image_base64
+            user_msg["images"] = [raw_b64]
+        messages.append(user_msg)
 
         url = f"{base_url}/api/chat"
         payload = {
@@ -204,7 +233,8 @@ class Brain:
 
     async def _generate_gemini(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
-        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]]
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
+        image_base64: Optional[str] = None
     ) -> str:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
@@ -219,9 +249,18 @@ class Brain:
             role = "user" if item["role"] == "user" else "model"
             contents.append({"role": role, "parts": [{"text": item["content"]}]})
         
-        # Append current message
+        # Append current message with optional vision part
         user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
-        contents.append({"role": "user", "parts": [{"text": f"{user_prefix}: {message}"}]})
+        user_parts = [{"text": f"{user_prefix}: {message}"}]
+        if image_base64:
+            raw_b64 = image_base64.split("base64,")[1] if "base64," in image_base64 else image_base64
+            user_parts.append({
+                "inline_data": {
+                    "mime_type": "image/jpeg",
+                    "data": raw_b64
+                }
+            })
+        contents.append({"role": "user", "parts": user_parts})
 
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},

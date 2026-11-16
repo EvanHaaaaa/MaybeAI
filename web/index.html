@@ -651,6 +651,112 @@
       </div>
     </section>
 
+    <!-- Visual Perception & Screen Awareness (Vision-Language Intelligence) -->
+    <section class="card vision-card" id="visionCard">
+      <div class="card-header">
+        <div class="vision-title">
+          <span class="vision-icon">👁️</span>
+          <div>
+            <h2>Visual Perception & Screen Awareness</h2>
+            <small class="vision-subtitle">Live Monitor Capture, Visual Heuristics & Multimodal VLM Grounding</small>
+          </div>
+        </div>
+        <div class="vision-status-bar">
+          <span id="vision-scene-badge" class="badge badge-accent">Scene: Desktop Workspace</span>
+          <span id="vision-auto-badge" class="badge badge-online">Auto-Perceive: ON</span>
+          <span id="vision-diff-badge" class="badge badge-sm">Diff: 0%</span>
+        </div>
+      </div>
+
+      <div class="vision-content">
+        <!-- Main Visual Monitor Row (Screen Frame + Telemetry Panel) -->
+        <div class="vision-monitor-row">
+          <!-- Screen Frame Viewport -->
+          <div class="vision-viewport-wrap">
+            <div class="vision-screen-header">
+              <span class="vision-screen-title">🖥️ Live Screen Viewport (Eve's Eyes)</span>
+              <span id="vision-timestamp" class="vision-timestamp">00:00:00</span>
+            </div>
+            <div class="vision-screen-container">
+              <img id="visionScreenImg" class="vision-screen-img" src="" alt="Screen Observation Frame" style="display: none;">
+              <div id="visionScreenPlaceholder" class="vision-screen-placeholder">
+                <span class="placeholder-icon">👁️</span>
+                <span>Mengambil tangkapan layar monitor...</span>
+              </div>
+              <div id="visionEventOverlay" class="vision-event-overlay" style="display: none;">
+                <span id="visionEventText" class="event-text">💀 PLAYER DEFEAT DETECTED!</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Telemetry & Grounded Perception Panel -->
+          <div class="vision-telemetry-panel">
+            <div class="telemetry-item">
+              <span class="telemetry-label">🎮 Terdeteksi:</span>
+              <strong id="visionSceneLabel" class="telemetry-value">Desktop Workspace</strong>
+            </div>
+
+            <div class="telemetry-item">
+              <span class="telemetry-label">📊 Keyakinan Scene:</span>
+              <div class="telemetry-bar-wrap">
+                <div class="gauge-bar-track">
+                  <div id="visionConfBar" class="gauge-bar-fill gauge-fill-happy" style="width: 85%;"></div>
+                </div>
+                <span id="visionConfVal" class="telemetry-pct">85%</span>
+              </div>
+            </div>
+
+            <div class="telemetry-item">
+              <span class="telemetry-label">🔄 Perubahan Visual (Diff Delta):</span>
+              <div class="telemetry-bar-wrap">
+                <div class="gauge-bar-track">
+                  <div id="visionDiffBar" class="gauge-bar-fill gauge-fill-curious" style="width: 0%;"></div>
+                </div>
+                <span id="visionDiffVal" class="telemetry-pct">0%</span>
+              </div>
+            </div>
+
+            <div class="telemetry-desc-box">
+              <span class="box-title">📋 Ringkasan Pengamatan:</span>
+              <p id="visionSummaryText" class="box-text">Layar monitor menampilkan lingkungan desktop aktif.</p>
+            </div>
+
+            <!-- Eve's Grounded Visual Reaction Speech Bubble -->
+            <div class="vision-commentary-bubble">
+              <div class="commentary-header">
+                <span class="bubble-avatar">👧</span>
+                <strong>Komentar Eve Berdasarkan Apa yang Dilihatnya:</strong>
+              </div>
+              <p id="visionCommentaryText" class="bubble-speech">
+                "Sistem mata visual Eve aktif! Sekarang aku bisa melihat langsung apa pun yang kamu buka di layar."
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Vision Controls & Scene Presets Simulator -->
+        <div class="vision-controls-row">
+          <div class="vision-action-buttons">
+            <button type="button" id="btn-vision-snap" class="btn btn-primary btn-sm">📸 Snap Layar Sekarang</button>
+            <button type="button" id="btn-vision-toggle-auto" class="btn btn-secondary btn-sm">⏸️ Pause Auto-Perceive</button>
+          </div>
+
+          <!-- Preset Stream Scene Simulator -->
+          <div class="vision-sim-presets">
+            <span class="presets-label">Simulasi Skenario Visual Game:</span>
+            <div class="presets-buttons">
+              <button type="button" class="btn-vision-preset pill pill-sm" data-scene="minecraft_defeat">💀 Player Mati ("YOU DIED")</button>
+              <button type="button" class="btn-vision-preset pill pill-sm" data-scene="minecraft_diamond">💎 Temu Diamond Cave (Y=-58)</button>
+              <button type="button" class="btn-vision-preset pill pill-sm" data-scene="minecraft_playing">🟩 Main Minecraft (Survival)</button>
+              <button type="button" class="btn-vision-preset pill pill-sm" data-scene="chess_gameover">👑 Skakmat Catur (Game Over)</button>
+              <button type="button" class="btn-vision-preset pill pill-sm" data-scene="video_watching">🎬 Nonton Video YouTube</button>
+              <button type="button" class="btn-vision-preset pill pill-sm" data-scene="desktop_general">🖥️ Coding / Desktop</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">

@@ -119,6 +119,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateGoalUi(msg.data);
     } else if (msg.type === "relationship_updated") {
       updateRelationshipUi(msg.data);
+    } else if (msg.type === "vision_updated") {
+      updateVisionUi(msg.data);
     } else if (msg.type === "goal_completed") {
       showGoalCompletedAlert(msg.data);
     } else if (msg.type === "strategy_adapted") {
@@ -1813,6 +1815,140 @@ document.addEventListener("DOMContentLoaded", () => {
           game: game,
           details: { stimulated_by: "dashboard_sim" }
         });
+      }
+    });
+  });
+
+  // --- Visual Perception & Screen Awareness Elements ---
+  const visionSceneBadge = document.getElementById("vision-scene-badge");
+  const visionAutoBadge = document.getElementById("vision-auto-badge");
+  const visionDiffBadge = document.getElementById("vision-diff-badge");
+  const visionTimestamp = document.getElementById("vision-timestamp");
+  const visionScreenImg = document.getElementById("visionScreenImg");
+  const visionScreenPlaceholder = document.getElementById("visionScreenPlaceholder");
+  const visionEventOverlay = document.getElementById("visionEventOverlay");
+  const visionEventText = document.getElementById("visionEventText");
+  const visionSceneLabel = document.getElementById("visionSceneLabel");
+  const visionConfBar = document.getElementById("visionConfBar");
+  const visionConfVal = document.getElementById("visionConfVal");
+  const visionDiffBar = document.getElementById("visionDiffBar");
+  const visionDiffVal = document.getElementById("visionDiffVal");
+  const visionSummaryText = document.getElementById("visionSummaryText");
+  const visionCommentaryText = document.getElementById("visionCommentaryText");
+  const btnVisionSnap = document.getElementById("btn-vision-snap");
+  const btnVisionToggleAuto = document.getElementById("btn-vision-toggle-auto");
+
+  let currentVisionData = null;
+  let isVisionAuto = true;
+
+  function sendVisionAction(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "vision_action",
+        ...payload
+      }));
+    }
+  }
+
+  function updateVisionUi(data) {
+    if (!data) return;
+    currentVisionData = data;
+    isVisionAuto = data.is_auto_active !== undefined ? data.is_auto_active : isVisionAuto;
+
+    if (visionAutoBadge) {
+      visionAutoBadge.textContent = isVisionAuto ? "Auto-Perceive: ON" : "Auto-Perceive: OFF";
+      visionAutoBadge.className = isVisionAuto ? "badge badge-online" : "badge";
+    }
+
+    if (btnVisionToggleAuto) {
+      btnVisionToggleAuto.textContent = isVisionAuto ? "⏸️ Pause Auto-Perceive" : "▶️ Resume Auto-Perceive";
+    }
+
+    const obs = data.current_observation;
+    if (!obs) return;
+
+    if (visionSceneBadge) {
+      visionSceneBadge.textContent = `Scene: ${obs.scene_label || obs.scene_type}`;
+      if (obs.scene_type === "minecraft_defeat") {
+        visionSceneBadge.className = "badge badge-danger";
+      } else if (obs.scene_type === "minecraft_diamond") {
+        visionSceneBadge.className = "badge badge-accent";
+      } else if (obs.scene_type === "chess_gameover") {
+        visionSceneBadge.className = "badge badge-online";
+      } else {
+        visionSceneBadge.className = "badge";
+      }
+    }
+
+    const diffPct = Math.round((obs.change_delta || 0) * 100);
+    if (visionDiffBadge) {
+      visionDiffBadge.textContent = `Diff: ${diffPct}%`;
+    }
+
+    if (visionTimestamp && obs.formatted_time) {
+      visionTimestamp.textContent = obs.formatted_time;
+    }
+
+    // Render image frame
+    if (obs.thumbnail_base64 && visionScreenImg && visionScreenPlaceholder) {
+      visionScreenImg.src = obs.thumbnail_base64;
+      visionScreenImg.style.display = "block";
+      visionScreenPlaceholder.style.display = "none";
+    }
+
+    // Event overlay check
+    if (visionEventOverlay && visionEventText) {
+      if (obs.is_event) {
+        let evLabel = "EVENT DETECTED!";
+        if (obs.event_type === "player_defeat") evLabel = "💀 PLAYER DEFEAT DETECTED (YOU DIED!)";
+        else if (obs.event_type === "diamond_found") evLabel = "💎 DIAMOND VEIN DISCOVERED (Y=-58)";
+        else if (obs.event_type === "checkmate") evLabel = "👑 CHECKMATE / GAME OVER!";
+        else if (obs.event_type === "video_reaction") evLabel = "🎬 VIDEO STREAM MOMENT!";
+        else if (obs.event_type === "scene_change") evLabel = "🔄 SIGNIFICANT SCENE TRANSITION!";
+
+        visionEventText.textContent = evLabel;
+        visionEventOverlay.style.display = "block";
+      } else {
+        visionEventOverlay.style.display = "none";
+      }
+    }
+
+    // Telemetry
+    if (visionSceneLabel) visionSceneLabel.textContent = obs.scene_label || obs.scene_type;
+
+    const confPct = Math.round((obs.confidence || 0.85) * 100);
+    if (visionConfVal) visionConfVal.textContent = `${confPct}%`;
+    if (visionConfBar) visionConfBar.style.width = `${confPct}%`;
+
+    if (visionDiffVal) visionDiffVal.textContent = `${diffPct}%`;
+    if (visionDiffBar) visionDiffBar.style.width = `${diffPct}%`;
+
+    if (visionSummaryText) visionSummaryText.textContent = obs.summary || "Layar termonitor.";
+    if (visionCommentaryText && obs.eve_commentary) {
+      visionCommentaryText.textContent = `"${obs.eve_commentary}"`;
+    }
+  }
+
+  // Snap button
+  if (btnVisionSnap) {
+    btnVisionSnap.addEventListener("click", () => {
+      sendVisionAction({ action: "perceive_now" });
+    });
+  }
+
+  // Toggle auto
+  if (btnVisionToggleAuto) {
+    btnVisionToggleAuto.addEventListener("click", () => {
+      sendVisionAction({ action: "toggle_auto", enabled: !isVisionAuto });
+    });
+  }
+
+  // Preset buttons
+  document.querySelectorAll(".btn-vision-preset").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const scene = btn.dataset.scene;
+      if (scene) {
+        sendVisionAction({ action: "perceive_now", simulated_scene: scene });
       }
     });
   });

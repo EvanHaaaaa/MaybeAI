@@ -2,81 +2,81 @@
   "profiles": [
     {
       "username": "Creator",
-      "tier": "gaming_partner",
-      "tier_label": "Gaming Partner \ud83c\udfae",
-      "familiarity": 0.97,
+      "tier": "trusted_friend",
+      "tier_label": "Trusted Friend \ud83d\udc96",
+      "familiarity": 0.95,
       "trust": 0.9,
       "rivalry": 0.1,
       "gaming_affinity": 0.6,
       "affection": 0.9,
-      "interaction_count": 51,
+      "interaction_count": 50,
       "special_nickname": "Creator Tercinta",
       "inside_jokes": [
         {
-          "id": "joke_8ff9e9",
+          "id": "joke_220afc",
           "topic": "Overclock GPU",
           "punchline": "GPU-ku overclocking pas dengerin curhatmu sampai kipas muter 5000 RPM!",
           "context": "curhat malam",
-          "created_at": 1794837190.4956784
+          "created_at": 1794837990.626659
         },
         {
-          "id": "joke_669ab2",
+          "id": "joke_c66805",
           "topic": "Begadang Martabak",
           "punchline": "Siksaan begadang coding ditemenin martabak manis keju.",
           "context": "coding stream",
-          "created_at": 1794837190.4956784
+          "created_at": 1794837990.626659
         }
       ],
       "shared_experiences": [
         {
-          "id": "exp_7d3d51",
+          "id": "exp_7705b3",
           "category": "development",
           "summary": "Membangun sistem kesadaran AI Eve dari nol.",
           "impact": "positive",
-          "timestamp": 1794837190.4956784
+          "timestamp": 1794837990.626659
         }
       ],
-      "first_seen": 1794837190.4956784,
-      "last_seen": 1794837202.9298646
+      "first_seen": 1794837990.626659,
+      "last_seen": 1794837990.626659
     },
     {
       "username": "DiamondHunter",
       "tier": "gaming_partner",
       "tier_label": "Gaming Partner \ud83c\udfae",
-      "familiarity": 0.8,
+      "familiarity": 0.75,
       "trust": 0.7,
       "rivalry": 0.2,
-      "gaming_affinity": 1.0,
+      "gaming_affinity": 0.88,
       "affection": 0.65,
       "interaction_count": 32,
       "special_nickname": "Partner Mining VIP",
       "inside_jokes": [
         {
-          "id": "joke_7cc121",
+          "id": "joke_07f8a9",
           "topic": "Pajak Diamond 50%",
           "punchline": "Pajak perlindungan streamer: 50% diamond yang kamu tambang masuk ke kas Eve!",
           "context": "minecraft mining",
-          "created_at": 1794837190.4956784
+          "created_at": 1794837990.626659
         },
         {
-          "id": "joke_5f41da",
+          "id": "joke_70b90a",
           "topic": "Insiden Ayam Nether",
           "punchline": "Trauma didorong ayam misterius masuk ke jurang lava.",
           "context": "minecraft fail",
-          "created_at": 1794837190.4956784
+          "created_at": 1794837990.626659
         }
       ],
       "shared_experiences": [
         {
-          "id": "exp_e7b11e",
+          "id": "exp_61eb91",
           "category": "minecraft",
           "summary": "Menjelajahi gua ravines bersama dan selamat dari serbuan creeper.",
           "impact": "positive",
-          "timestamp": 1794837190.4956784
+          "timestamp": 1794837990.626659
         }
       ],
-      "first_seen": 1794837190.4956784,
-      "last_seen": 1794837202.3530219
+      "first_seen": 1794837990.626659,
+      "last_seen": 1794837990.626659
     },
     {
       "username": "GrandmasterGarry",
@@ -91,31 +91,31 @@
       "special_nickname": "Rival Abadi Catur",
       "inside_jokes": [
         {
-          "id": "joke_dbe9a1",
+          "id": "joke_498ec2",
           "topic": "Blunder Ratu Langkah 12",
           "punchline": "Menteri melayang di langkah ke-12 karena sok asik mau fork kuda!",
           "context": "chess match",
-          "created_at": 1794837190.4956784
+          "created_at": 1794837990.626659
         },
         {
-          "id": "joke_5bf0cc",
+          "id": "joke_020789",
           "topic": "Ngeceat di Depan AI",
           "punchline": "Pura-pura mikir 2 menit padahal lagi buka Stockfish di tab sebelah kan?",
           "context": "chess accusations",
-          "created_at": 1794837190.4956784
+          "created_at": 1794837990.626659
         }
       ],
       "shared_experiences": [
         {
-          "id": "exp_b1ce07",
+          "id": "exp_1c89b6",
           "category": "chess",
           "summary": "Pertandingan catur ELO 1500 yang berakhir dengan skakmat dramatis.",
           "impact": "competitive",
-          "timestamp": 1794837190.4956784
+          "timestamp": 1794837990.626659
         }
       ],
-      "first_seen": 1794837190.4956784,
-      "last_seen": 1794837190.4956784
+      "first_seen": 1794837990.626659,
+      "last_seen": 1794837990.626659
     },
     {
       "username": "Steve",
@@ -130,112 +130,16 @@
       "special_nickname": "Penonton Setia",
       "inside_jokes": [
         {
-          "id": "joke_8cf946",
+          "id": "joke_0f786f",
           "topic": "Penebang Hutan",
           "punchline": "Spesialis nebangi pohon tapi lupa nanam bibitnya lagi.",
           "context": "casual chat",
-          "created_at": 1794837190.4956784
+          "created_at": 1794837990.626659
         }
       ],
       "shared_experiences": [],
-      "first_seen": 1794837190.4956784,
-      "last_seen": 1794837190.4956784
-    },
-    {
-      "username": "Chat",
-      "tier": "new_friend",
-      "tier_label": "New Friend \ud83c\udf1f",
-      "familiarity": 0.1,
-      "trust": 0.2,
-      "rivalry": 0.05,
-      "gaming_affinity": 0.05,
-      "affection": 0.3,
-      "interaction_count": 0,
-      "special_nickname": null,
-      "inside_jokes": [],
-      "shared_experiences": [],
-      "first_seen": 1794837202.177639,
-      "last_seen": 1794837202.177639
-    },
-    {
-      "username": "Admin",
-      "tier": "new_friend",
-      "tier_label": "New Friend \ud83c\udf1f",
-      "familiarity": 0.22,
-      "trust": 0.2,
-      "rivalry": 0.28,
-      "gaming_affinity": 0.05,
-      "affection": 0.3,
-      "interaction_count": 3,
-      "special_nickname": null,
-      "inside_jokes": [],
-      "shared_experiences": [],
-      "first_seen": 1794837202.1825914,
-      "last_seen": 1794837202.1916966
-    },
-    {
-      "username": "Alice",
-      "tier": "new_friend",
-      "tier_label": "New Friend \ud83c\udf1f",
-      "familiarity": 0.12,
-      "trust": 0.24,
-      "rivalry": 0.05,
-      "gaming_affinity": 0.05,
-      "affection": 0.35,
-      "interaction_count": 1,
-      "special_nickname": null,
-      "inside_jokes": [],
-      "shared_experiences": [],
-      "first_seen": 1794837202.7075534,
-      "last_seen": 1794837202.7075534
-    },
-    {
-      "username": "Troll",
-      "tier": "new_friend",
-      "tier_label": "New Friend \ud83c\udf1f",
-      "familiarity": 0.12,
-      "trust": 0.2,
-      "rivalry": 0.13,
-      "gaming_affinity": 0.05,
-      "affection": 0.3,
-      "interaction_count": 1,
-      "special_nickname": null,
-      "inside_jokes": [],
-      "shared_experiences": [],
-      "first_seen": 1794837202.7141335,
-      "last_seen": 1794837202.7141335
-    },
-    {
-      "username": "Chatter1",
-      "tier": "new_friend",
-      "tier_label": "New Friend \ud83c\udf1f",
-      "familiarity": 0.12,
-      "trust": 0.2,
-      "rivalry": 0.05,
-      "gaming_affinity": 0.05,
-      "affection": 0.3,
-      "interaction_count": 1,
-      "special_nickname": null,
-      "inside_jokes": [],
-      "shared_experiences": [],
-      "first_seen": 1794837202.9237947,
-      "last_seen": 1794837202.9237947
-    },
-    {
-      "username": "TestFan",
-      "tier": "new_friend",
-      "tier_label": "New Friend \ud83c\udf1f",
-      "familiarity": 0.12,
-      "trust": 0.2,
-      "rivalry": 0.05,
-      "gaming_affinity": 0.05,
-      "affection": 0.3,
-      "interaction_count": 1,
-      "special_nickname": null,
-      "inside_jokes": [],
-      "shared_experiences": [],
-      "first_seen": 1794837202.9982715,
-      "last_seen": 1794837202.9982715
+      "first_seen": 1794837990.626659,
+      "last_seen": 1794837990.626659
     }
   ]
 }

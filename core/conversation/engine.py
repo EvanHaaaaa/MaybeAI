@@ -9,6 +9,7 @@ from core.memory import EpisodicMemoryStore
 from core.mood import MoodEngine
 from core.planning import GoalEngine
 from core.relationship import RelationshipEngine
+from core.vision import VisionEngine
 
 class ConversationEngine:
     """
@@ -39,6 +40,7 @@ class ConversationEngine:
         self.mood = MoodEngine()
         self.goals = GoalEngine()
         self.relationships = RelationshipEngine()
+        self.vision = VisionEngine()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -194,6 +196,17 @@ class ConversationEngine:
         goal_directive = self.goals.get_goal_directive()
         relationship_directive = self.relationships.get_prompt_directive(current_user)
 
+        visual_directive = ""
+        if self.vision and self.vision.current_observation:
+            obs = self.vision.current_observation
+            visual_directive = f"""[LIVE VISUAL PERCEPTION / SCREEN AWARENESS]
+Eve can literally see the user's screen in real time!
+- Active Screen Scene: {obs.scene_label} ({obs.scene_type})
+- Visual Summary: {obs.summary}
+- Event Detected on Screen: {obs.event_type if obs.is_event else 'None (Stable Stream)'}
+- Eve's Immediate Visual Perception: {obs.eve_commentary if obs.eve_commentary else 'Looking attentively at the screen.'}
+Grounded Rule: If the user asks what is on screen, comments on their gameplay/death/diamond, or references a video, speak with direct visual awareness of what you see!"""
+
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
             active_topic=self.topic_tracker.current_topic,
@@ -210,7 +223,8 @@ class ConversationEngine:
             memory_recall_block=memory_recall_block,
             mood_directive=mood_directive,
             goal_directive=goal_directive,
-            relationship_directive=relationship_directive
+            relationship_directive=relationship_directive,
+            visual_directive=visual_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -333,6 +347,26 @@ class ConversationEngine:
                     f"[emotion: smug] Heard you in server chat, {user_name}! Just make sure you don't lead a creeper toward me!"
                 ]
             return self._pick_unseen(mc_chat_options)
+
+        # Screen Awareness & Live Visual Perception Grounding
+        has_visual_marker = any(w in msg_lower for w in ["layar", "screen", "monitor", "liat", "lihat", "nonton"])
+        is_visual_query = has_visual_marker and any(w in msg_lower for w in [
+            "apa", "gimana", "ada", "kamu", "mataku", "layar", "screen", "monitor", "mati", "died", "diamond", "catur", "video", "sedang", "buka", "main", "gak", "dong"
+        ])
+        if is_visual_query and self.vision and self.vision.current_observation:
+            obs = self.vision.current_observation
+            if obs.scene_type == "minecraft_defeat":
+                return f"[emotion: smug] Liat dong {user_name}! Di layar jelas banget ada tulisan 'YOU DIED' warna merah merona. Gak bisa ngeles lagi kamu! [action: giggle]"
+            elif obs.scene_type == "minecraft_diamond":
+                return f"[emotion: happy] Jelas aku liat! Ada urat diamond berkilau di pojok layar tuh {user_name}! Cepet tambang buat kas stream kita! [action: wink]"
+            elif obs.scene_type == "video_watching":
+                return f"[emotion: happy] Aku lagi perhatiin video yang kamu putar di layar tuh {user_name}! Seru banget videonya! [action: giggle]"
+            elif obs.scene_type in ("chess_match", "chess_gameover"):
+                return f"[emotion: smug] Di layarmu ada papan catur taktis yang lagi sengit tuh {user_name}! Siapa yang mau kena skakmat duluan? [action: wink]"
+            elif obs.eve_commentary and any(k in msg_lower for k in ["apa", "gimana", "komentar"]):
+                return obs.eve_commentary
+            else:
+                return f"[emotion: happy] Mataku tertuju ke layarmu kok {user_name}! Aku ngeliat kamu lagi aktif di {obs.scene_label}. [action: wink]"
 
         # Episodic Memory & Second Brain Callbacks
         recall_res = self.episodic_memory.recall(query=message, current_user=user_name, game_context=game_context)

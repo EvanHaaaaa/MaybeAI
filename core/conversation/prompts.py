@@ -36,7 +36,8 @@ class MasterPromptBuilder:
         memory_recall_block: str = "",
         mood_directive: str = "",
         goal_directive: str = "",
-        relationship_directive: str = ""
+        relationship_directive: str = "",
+        visual_directive: str = ""
     ) -> str:
         name = character.get("name", "Eve Maybe")
         nickname = character.get("nickname", "Eve")
@@ -108,6 +109,8 @@ CURRENT STREAM SITUATION & CONTEXT:
 {goal_directive if goal_directive else ""}
 
 {relationship_directive if relationship_directive else ""}
+
+{visual_directive if visual_directive else ""}
 
 CORE CHARACTER LORE:
 {lore}

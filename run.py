@@ -86,6 +86,15 @@ async def get_relationships_state():
 async def get_user_relationship(username: str):
     return orchestrator.brain.relationships.get_relationship(username).to_dict()
 
+@app.get("/api/vision/state")
+async def get_vision_state():
+    return orchestrator.brain.vision.get_state()
+
+@app.post("/api/vision/perceive")
+async def trigger_vision_perceive(simulated_scene: Optional[str] = None):
+    obs = await orchestrator.perceive_screen_now(simulated_scene=simulated_scene)
+    return obs.to_dict()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -146,6 +155,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "relationship_updated",
         "data": orchestrator.brain.relationships.get_state()
+    })
+
+    # Send initial visual perception / screen awareness state
+    await websocket.send_json({
+        "type": "vision_updated",
+        "data": orchestrator.brain.vision.get_state()
     })
 
     try:
@@ -413,6 +428,19 @@ async def websocket_endpoint(websocket: WebSocket):
                     det = data.get("details", {})
                     orchestrator.brain.relationships.record_gaming_event(uname, game, ev, det)
                     await orchestrator.broadcast("relationship_updated", orchestrator.brain.relationships.get_state())
+            elif data.get("type") == "vision_action":
+                act = data.get("action")
+                if act == "perceive_now":
+                    scene = data.get("simulated_scene")
+                    await orchestrator.perceive_screen_now(simulated_scene=scene)
+                elif act == "toggle_auto":
+                    enabled = data.get("enabled", True)
+                    orchestrator.brain.vision.set_auto_perception(enabled)
+                    await orchestrator.broadcast("vision_updated", orchestrator.brain.vision.get_state())
+                elif act == "set_interval":
+                    sec = float(data.get("interval_sec", 5.0))
+                    orchestrator.brain.vision.config.capture_interval_sec = max(1.0, min(60.0, sec))
+                    await orchestrator.broadcast("vision_updated", orchestrator.brain.vision.get_state())
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:
