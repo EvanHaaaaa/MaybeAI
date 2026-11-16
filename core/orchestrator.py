@@ -10,6 +10,7 @@ from core.moderator import Moderator
 from core.actions import ActionParser
 from core.singer import Singer
 from core.minecraft.controller import MinecraftController
+from core.chess.controller import ChessController
 from core.conversation.chat_curator import ChatInteraction
 
 class Orchestrator:
@@ -51,6 +52,13 @@ class Orchestrator:
             on_commentary=self._on_minecraft_commentary,
             on_state_change=self._on_minecraft_state_change,
             on_in_game_chat=self._on_in_game_chat
+        )
+
+        # Chess Gameplay Controller
+        self.chess = ChessController(bot_name="EveMaybe")
+        self.chess.set_callbacks(
+            on_commentary=self._on_chess_commentary,
+            on_state_change=self._on_chess_state_change
         )
 
         self.chat = ChatReceiver()
@@ -121,13 +129,16 @@ class Orchestrator:
             return
         self.is_busy = True
         try:
-            game_context = ""
+            game_contexts = []
             if self.minecraft.connection_status == "connected":
                 srv = self.minecraft.active_server.get("name", "Minecraft") if self.minecraft.active_server else "Minecraft"
                 mode_desc = f"mode={self.minecraft.current_mode}"
                 if self.minecraft.current_mode == "guard":
                     mode_desc += f", guarding {self.minecraft.guard_target or 'player'}"
-                game_context = f"Playing in Minecraft ({srv}, {mode_desc})"
+                game_contexts.append(f"Playing in Minecraft ({srv}, {mode_desc})")
+            if self.chess.is_active:
+                game_contexts.append(f"Playing Chess against {self.chess.player_name} (Eve ELO {self.chess.engine.elo}, turn: {self.chess.engine.turn})")
+            game_context = "; ".join(game_contexts)
 
             raw_thought = self.brain.generate_spontaneous_banter(game_context=game_context)
             _, clean_response = self.moderator.clean_text(raw_thought)
@@ -293,14 +304,46 @@ class Orchestrator:
                 await self.minecraft.set_mode("santai")
             return
 
+        # Check for Chess commands / requests
+        if msg_lower.startswith("!chess") or msg_lower.startswith("!catur") or "main catur" in msg_lower or "play chess" in msg_lower:
+            parts = clean_input.split()
+            # ELO command: !chess elo 1500
+            if "elo" in msg_lower:
+                for idx, p in enumerate(parts):
+                    if p.lower() == "elo" and idx + 1 < len(parts):
+                        try:
+                            elo_val = int(parts[idx + 1])
+                            await self.chess.set_elo(elo_val)
+                            return
+                        except ValueError:
+                            pass
+            elif "resign" in msg_lower or "menyerah" in msg_lower:
+                await self.chess.resign_game()
+                return
+            elif "move" in msg_lower or "jalan" in msg_lower:
+                for idx, p in enumerate(parts):
+                    if p.lower() in ("move", "jalan") and idx + 1 < len(parts):
+                        move_str = parts[idx + 1]
+                        success, err = await self.chess.make_player_move(move_str)
+                        if not success:
+                            await self.chess.emit_commentary(f"[emotion: smug] Langkah '{move_str}' tidak valid, {primary.user}! Mau ngeceat di depan grandmaster ya? [action: pout]")
+                        return
+            elif "new" in msg_lower or "mulai" in msg_lower or "start" in msg_lower or "main catur" in msg_lower or "play chess" in msg_lower:
+                player_color = "black" if "black" in msg_lower or "hitam" in msg_lower else "white"
+                await self.chess.start_game(player_name=primary.user, player_color=player_color)
+                return
+
         # Game context
-        game_context = ""
+        game_contexts = []
         if self.minecraft.connection_status == "connected":
             srv = self.minecraft.active_server.get("name", "Minecraft Server") if self.minecraft.active_server else "Minecraft"
             mode_desc = f"mode={self.minecraft.current_mode}"
             if self.minecraft.current_mode == "guard":
                 mode_desc += f", bodyguarding {self.minecraft.guard_target or 'player'}"
-            game_context = f"Playing in Minecraft ({srv}, {mode_desc}, health={self.minecraft.health}/20)"
+            game_contexts.append(f"Playing in Minecraft ({srv}, {mode_desc}, health={self.minecraft.health}/20)")
+        if self.chess.is_active:
+            game_contexts.append(f"Playing Chess against {self.chess.player_name} (Eve ELO {self.chess.engine.elo}, turn: {self.chess.engine.turn})")
+        game_context = "; ".join(game_contexts)
 
         is_donation = (interaction.interaction_type == "donation")
         is_group_debate = (interaction.interaction_type == "group_debate")
@@ -510,3 +553,35 @@ class Orchestrator:
         if "plays on server" not in prof.known_facts:
             prof.known_facts.append("plays on server")
         await self.chat.put_message(user=sender, text=message, source="minecraft")
+
+    async def _on_chess_commentary(self, speech_raw: str):
+        speech_text, emotions, actions = ActionParser.parse(speech_raw)
+        primary_emotion = emotions[0] if emotions else "neutral"
+
+        await self.broadcast("ai_response", {
+            "user": "Eve (Chess)",
+            "raw": speech_raw,
+            "speech": speech_text,
+            "emotions": emotions,
+            "actions": actions
+        })
+
+        if self.vts.connected:
+            await self.vts.trigger_expression(primary_emotion)
+
+        async def on_mouth_update(val: float):
+            if self.vts.connected:
+                await self.vts.update_mouth(val)
+            await self.broadcast("avatar_state", {"mouth_open": val, "emotion": primary_emotion})
+
+        print(f"[Chess Commentary] [{primary_emotion}] {speech_text}")
+        await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+
+        if self.vts.connected:
+            await self.vts.trigger_expression("neutral")
+            await self.vts.update_mouth(0.0)
+
+        await self.broadcast("avatar_state", {"mouth_open": 0.0, "emotion": "neutral"})
+
+    async def _on_chess_state_change(self, state: Dict[str, Any]):
+        await self.broadcast("chess_state", state)

@@ -201,6 +201,93 @@
       </div>
     </section>
 
+    <!-- Chess Live Arena (Play with Eve) -->
+    <section class="card chess-card" id="chessCard">
+      <div class="card-header">
+        <div class="chess-title">
+          <span class="chess-icon">♟️</span>
+          <h2>Chess Arena (Play vs Eve Maybe)</h2>
+        </div>
+        <div class="chess-status-bar">
+          <span id="chess-status-badge" class="badge">Standby</span>
+          <span id="chess-elo-badge" class="badge badge-accent">Eve ELO: 1200</span>
+          <span id="chess-turn-badge" class="badge">Turn: White</span>
+          <span id="chess-eval-badge" class="badge">Eval: 0.0</span>
+        </div>
+      </div>
+      <div class="chess-content">
+        <!-- Left: Eval Bar + 8x8 Board -->
+        <div class="chess-board-area">
+          <div class="eval-bar-wrapper" title="Evaluation Score">
+            <div id="eval-bar-fill" class="eval-bar-fill" style="height: 50%"></div>
+          </div>
+          <div class="board-wrapper">
+            <div id="chess-board" class="chess-board">
+              <!-- 64 squares rendered via JS -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Settings, Move List, Banter -->
+        <div class="chess-sidebar">
+          <div class="chess-controls">
+            <div class="chess-control-group">
+              <div class="chess-control-label">
+                <span>Difficulty:</span>
+                <span id="chess-elo-val" class="highlight-val">1200 ELO (Streamer)</span>
+              </div>
+              <div class="elo-slider-wrap">
+                <input type="range" id="chessEloRange" min="600" max="2400" step="100" value="1200">
+              </div>
+              <div class="elo-preset-pills">
+                <button type="button" class="pill pill-sm" data-elo="600">Noob 600</button>
+                <button type="button" class="pill pill-sm" data-elo="1000">Casual 1000</button>
+                <button type="button" class="pill pill-sm" data-elo="1400">Streamer 1400</button>
+                <button type="button" class="pill pill-sm" data-elo="1800">Sweaty 1800</button>
+                <button type="button" class="pill pill-sm" data-elo="2200">GM 2200+</button>
+              </div>
+            </div>
+
+            <div class="chess-control-row">
+              <div class="control-subgroup">
+                <label for="chessColorSelect">Your Color:</label>
+                <select id="chessColorSelect" class="select-chess">
+                  <option value="white" selected>White (Move First)</option>
+                  <option value="black">Black (Eve First)</option>
+                </select>
+              </div>
+              <div class="chess-btn-actions">
+                <button type="button" id="btn-chess-new" class="btn btn-primary">🚀 New Game</button>
+                <button type="button" id="btn-chess-resign" class="btn btn-secondary">🏳️ Resign</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Commentary Bubble -->
+          <div class="chess-commentary-box">
+            <div class="chess-commentary-header">
+              <span class="avatar-mini-icon">👑</span>
+              <strong>Eve's Banter:</strong>
+            </div>
+            <div id="chess-commentary-text" class="chess-commentary-text">
+              "Siap melawan grandmaster terhebat di dunia maya? Pilih ELO dan klik New Game kalau berani!"
+            </div>
+          </div>
+
+          <!-- Move History -->
+          <div class="chess-moves-container">
+            <div class="chess-moves-header">
+              <span>Move History</span>
+              <span id="chess-move-count" class="badge badge-sm">0 moves</span>
+            </div>
+            <div id="chess-move-list" class="chess-move-list">
+              <div class="chess-empty-moves">No moves yet. Start a game!</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Quick Actions Panel -->
     <footer class="controls-footer">
       <div class="quick-prompts">
@@ -224,6 +311,12 @@
         <button class="pill pill-conv" data-msg="!opinion Pizza nanas vs bubur diaduk?">🔥 Hot Take</button>
         <button class="pill pill-conv" data-msg="!roleplay Detektif Pintar">🎭 Roleplay</button>
         <button class="pill pill-conv" data-msg="!roleplay stop">🛑 Reset Role</button>
+
+        <span class="prompt-category">♟️ Chess Battles:</span>
+        <button class="pill pill-chess" data-msg="!chess new">♟️ Main Catur</button>
+        <button class="pill pill-chess" data-msg="!chess elo 1000">♟️ Set ELO 1000 (Casual)</button>
+        <button class="pill pill-chess" data-msg="!chess elo 1800">♟️ Set ELO 1800 (Sweaty)</button>
+        <button class="pill pill-chess" data-msg="!chess resign">🏳️ !chess resign</button>
       </div>
     </footer>
   </div>

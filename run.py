@@ -77,6 +77,12 @@ async def websocket_endpoint(websocket: WebSocket):
         "data": orchestrator.brain.get_conversation_state()
     })
 
+    # Send initial chess state immediately upon connection
+    await websocket.send_json({
+        "type": "chess_state",
+        "data": orchestrator.chess.get_status()
+    })
+
     try:
         while True:
             data = await websocket.receive_json()
@@ -164,6 +170,20 @@ async def websocket_endpoint(websocket: WebSocket):
                         comment = orchestrator.minecraft.guard_agent.on_mob_eliminated(mob, target)
                         await orchestrator.minecraft.emit_commentary(comment)
                         await orchestrator.minecraft.emit_state()
+            elif data.get("type") == "chess_action":
+                act = data.get("action")
+                if act == "start_game":
+                    await orchestrator.chess.start_game(
+                        player_name=data.get("player_name", "Creator"),
+                        player_color=data.get("player_color", "white"),
+                        elo=data.get("elo")
+                    )
+                elif act == "make_move":
+                    await orchestrator.chess.make_player_move(data.get("move", ""))
+                elif act == "set_elo":
+                    await orchestrator.chess.set_elo(int(data.get("elo", 1200)))
+                elif act == "resign":
+                    await orchestrator.chess.resign_game()
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:
