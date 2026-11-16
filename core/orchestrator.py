@@ -255,7 +255,19 @@ class Orchestrator:
         # Check for Minecraft command / request
         if msg_lower.startswith("!mc") or "main minecraft" in msg_lower or "speedrun minecraft" in msg_lower:
             parts = clean_input.split()
-            if "santai" in msg_lower or ("mode" in msg_lower and "santai" in msg_lower):
+            if "dance" in msg_lower or "joget" in msg_lower:
+                await self.minecraft.dance()
+            elif "gift" in msg_lower or "hadiah" in msg_lower:
+                await self.minecraft.gift_nearest()
+            elif "jump" in msg_lower or "lompat" in msg_lower:
+                await self.minecraft.jump()
+            elif "crouch" in msg_lower or "jongkok" in msg_lower:
+                await self.minecraft.crouch()
+            elif "follow" in msg_lower or "ikut" in msg_lower:
+                await self.minecraft.follow_nearest()
+            elif "stop" in msg_lower or "diam" in msg_lower or "stay" in msg_lower:
+                await self.minecraft.stop_moving()
+            elif "santai" in msg_lower or ("mode" in msg_lower and "santai" in msg_lower):
                 await self.minecraft.set_mode("santai")
             elif "kompe" in msg_lower or "speedrun" in msg_lower:
                 await self.minecraft.set_mode("kompe")
@@ -265,10 +277,6 @@ class Orchestrator:
                 await self.minecraft.player_attacked_bot(parts[2])
             elif len(parts) > 2 and parts[1] == "nearby":
                 await self.minecraft.player_joined_proximity(parts[2])
-            elif len(parts) > 1 and parts[1] == "crouch":
-                await self.minecraft.player_crouched("Player1")
-            elif len(parts) > 3 and parts[1] == "gift":
-                await self.minecraft.player_gave_gift(parts[2], parts[3])
             else:
                 await self.minecraft.set_mode("santai")
             return
@@ -309,6 +317,9 @@ class Orchestrator:
 
         if is_donation:
             user_label = f"Eve (to {primary.user} 🎁 {primary.donation_amount})"
+            # In-game celebration if Eve is connected in Minecraft!
+            if self.minecraft.connection_status == "connected":
+                asyncio.create_task(self.minecraft.celebrate(user=primary.user, amount=primary.donation_amount))
         elif is_group_debate:
             user_label = f"Eve (Commenting on {primary.user} & {interaction.related_messages[0].user})"
         elif primary.source == "minecraft":
@@ -460,6 +471,10 @@ class Orchestrator:
         print(f"[Minecraft Commentary] [{primary_emotion}] {speech_text}")
         await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
 
+        # Also speak into server chat so in-game players see Eve's reaction
+        if self.minecraft.connection_status == "connected":
+            await self.minecraft.send_chat(speech_text)
+
         if self.vts.connected:
             await self.vts.trigger_expression("neutral")
             await self.vts.update_mouth(0.0)
@@ -471,4 +486,8 @@ class Orchestrator:
 
     async def _on_in_game_chat(self, sender: str, message: str):
         print(f"[Minecraft Chat Ingested] <{sender}>: {message}")
+        prof = self.brain.conversation.user_memory.get_or_create(sender)
+        prof.tags.add("minecraft_player")
+        if "plays on server" not in prof.known_facts:
+            prof.known_facts.append("plays on server")
         await self.chat.put_message(user=sender, text=message, source="minecraft")

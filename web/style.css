@@ -449,6 +449,19 @@ body {
   color: #fff;
 }
 
+.pill-mc-action {
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.18), rgba(34, 197, 94, 0.18));
+  border-color: #3c824e;
+  color: #a4f0b5;
+  font-weight: 600;
+}
+
+.pill-mc-action:hover {
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.35), rgba(34, 197, 94, 0.35));
+  box-shadow: 0 0 10px rgba(74, 222, 128, 0.4);
+  color: #fff;
+}
+
 /* Real-Time Donation & Superchat Alert Banner */
 .donation-alert {
   position: absolute;

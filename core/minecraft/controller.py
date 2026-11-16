@@ -326,6 +326,18 @@ class MinecraftController:
     async def crouch(self):
         await self.send_bridge_cmd("crouch")
 
+    async def dance(self):
+        await self.send_bridge_cmd("dance")
+
+    async def celebrate(self, user: str = "", amount: str = ""):
+        await self.send_bridge_cmd("celebrate", user=user, amount=amount)
+
+    async def gift_nearest(self):
+        await self.send_bridge_cmd("gift_nearest")
+
+    async def look_at(self, target: str):
+        await self.send_bridge_cmd("look_at", target=target)
+
     async def toggle_wander(self):
         await self.send_bridge_cmd("toggle_wander")
 

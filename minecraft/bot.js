@@ -394,6 +394,58 @@ function handlePythonCommand(cmd) {
   } else if (cmd.action === 'jump') {
     bot.setControlState('jump', true);
     setTimeout(() => bot.setControlState('jump', false), 400);
+  } else if (cmd.action === 'celebrate') {
+    // Joyful celebration dance: jump, sneak, spin, swing arm
+    bot.setControlState('jump', true);
+    bot.setControlState('sneak', true);
+    try { bot.swingArm('right'); } catch (e) {}
+    setTimeout(() => {
+      bot.setControlState('jump', false);
+      bot.setControlState('sneak', false);
+    }, 500);
+
+    const curYaw = bot.entity ? bot.entity.yaw : 0;
+    bot.look(curYaw + Math.PI, 0, false);
+
+    if (cmd.user && cmd.amount) {
+      bot.chat(`[Stream Alert] Makasih donasi ${cmd.amount} dari ${cmd.user}! ✨`);
+    }
+
+    if (casualRunner && typeof casualRunner.giftPlayer === 'function') {
+      const nearest = getNearestPlayer();
+      if (nearest && nearest.entity) {
+        setTimeout(() => casualRunner.giftPlayer(nearest, nearest.entity), 600);
+      }
+    }
+  } else if (cmd.action === 'dance') {
+    let count = 0;
+    const danceTimer = setInterval(() => {
+      count++;
+      bot.setControlState('sneak', count % 2 === 1);
+      bot.setControlState('jump', count % 2 === 0);
+      try { bot.swingArm(count % 2 === 0 ? 'right' : 'left'); } catch (e) {}
+      if (count >= 6) {
+        clearInterval(danceTimer);
+        bot.setControlState('sneak', false);
+        bot.setControlState('jump', false);
+      }
+    }, 250);
+    bot.chat('Joget bareng Eve! 💃✨');
+  } else if (cmd.action === 'gift_nearest') {
+    if (casualRunner && typeof casualRunner.giftPlayer === 'function') {
+      const nearest = getNearestPlayer();
+      if (nearest && nearest.entity) {
+        casualRunner.giftPlayer(nearest, nearest.entity);
+      } else {
+        bot.chat('Lagi gak ada player di deketku nih buat dikasih hadiah!');
+      }
+    }
+  } else if (cmd.action === 'look_at') {
+    if (cmd.target && bot.players[cmd.target] && bot.players[cmd.target].entity) {
+      const targetEntity = bot.players[cmd.target].entity;
+      bot.lookAt(targetEntity.position.offset(0, 1.4, 0), true);
+      try { bot.swingArm('right'); } catch (e) {}
+    }
   } else if (cmd.action === 'follow_nearest') {
     const nearest = getNearestPlayer();
     if (nearest && nearest.entity && bot.pathfinder) {

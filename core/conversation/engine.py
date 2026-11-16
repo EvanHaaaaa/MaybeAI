@@ -210,18 +210,38 @@ class ConversationEngine:
         # 1. SPECIAL EVENT: Donation / Superchat Response
         if is_donation:
             amt = donation_amount or "Superchat"
+            has_mc = "minecraft" in game_context.lower()
             if is_indonesian:
                 options = [
                     f"[emotion: blush] Waaahh! Makasih banyak ya {user_name} buat saweran {amt}-nya! Bikin sistem pendingin CPU-ku langsung adem dan hatiku berbunga-bunga! [action: giggle]",
                     f"[emotion: happy] Terima kasih banyak {user_name} untuk donasi {amt}! Dukunganmu langsung masuk ke server pusat kebahagiaanku. Semoga harimu berkah terus ya! [action: wink]",
                     f"[emotion: smug] OMG {amt} dari {user_name}! Chat, tolong beri tepuk tangan meriah buat donatur dermawan kita! Mau request apa nih {user_name}?"
                 ]
+                if has_mc:
+                    options.append(f"[emotion: blush] Waaahh makasih banyak {user_name} saweran {amt}-nya! Liat tuh di Minecraft aku langsung joget selebrasi dan bagiin hadiah buat player di dekatku! [action: giggle]")
             else:
                 options = [
                     f"[emotion: blush] OMG, thank you so much {user_name} for the generous {amt} donation! That honestly made my digital heart skip a clock cycle! [action: giggle]",
                     f"[emotion: happy] Thank you so much for the {amt}, {user_name}! You're officially a VIP in my high-priority memory cache! [action: wink]"
                 ]
+                if has_mc:
+                    options.append(f"[emotion: happy] Thank you for the {amt}, {user_name}! Watch me do a victory dance and toss items to nearby players in Minecraft! [action: giggle]")
             return self._pick_unseen(options)
+
+        # In-Game Minecraft Chat response
+        if "[minecraft in-game chat" in msg_lower or "playing with them" in msg_lower:
+            if is_indonesian:
+                mc_chat_options = [
+                    f"[emotion: happy] Halo {user_name}! Salam dari stream, aku lagi nemenin kalian main di server nih. Mau jalan bareng ke mana kita? [action: wink]",
+                    f"[emotion: smug] Hei {user_name}, aku denger chat in-game mu! Awas ya kalau ada creeper di belakangmu jangan salahin aku! [action: giggle]",
+                    f"[emotion: blush] Makasih udah main bareng aku di server {user_name}! Seru banget bisa mabar langsung di dunia blocky ini."
+                ]
+            else:
+                mc_chat_options = [
+                    f"[emotion: happy] Hey {user_name}! Reading your in-game chat right now! Where are we exploring next? [action: wink]",
+                    f"[emotion: smug] Heard you in server chat, {user_name}! Just make sure you don't lead a creeper toward me!"
+                ]
+            return self._pick_unseen(mc_chat_options)
 
         # 2. SPECIAL EVENT: Live Chat Debate / Group Discussion Commentary
         if is_group_debate and debate_users:
