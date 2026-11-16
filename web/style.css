@@ -423,6 +423,112 @@ body {
   color: #fff;
 }
 
+.pill-donation {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.25), rgba(234, 179, 8, 0.25));
+  border-color: #f59e0b;
+  color: #fde047;
+  font-weight: 700;
+}
+
+.pill-donation:hover {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.45), rgba(234, 179, 8, 0.45));
+  box-shadow: 0 0 12px rgba(245, 158, 11, 0.5);
+  color: #fff;
+}
+
+.pill-debate {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(59, 130, 246, 0.2));
+  border-color: #a855f7;
+  color: #d8b4fe;
+  font-weight: 600;
+}
+
+.pill-debate:hover {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(59, 130, 246, 0.4));
+  box-shadow: 0 0 10px rgba(168, 85, 247, 0.4);
+  color: #fff;
+}
+
+/* Real-Time Donation & Superchat Alert Banner */
+.donation-alert {
+  position: absolute;
+  top: 25px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, rgba(24, 20, 10, 0.95), rgba(35, 27, 12, 0.95));
+  border: 2px solid #f59e0b;
+  box-shadow: 0 0 25px rgba(245, 158, 11, 0.6), inset 0 0 15px rgba(245, 158, 11, 0.3);
+  border-radius: 12px;
+  padding: 14px 22px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 280px;
+  max-width: 90%;
+  animation: donationSlideIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+@keyframes donationSlideIn {
+  0% { transform: translate(-50%, -30px) scale(0.8); opacity: 0; }
+  100% { transform: translate(-50%, 0) scale(1); opacity: 1; }
+}
+
+.donation-alert-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.donation-icon {
+  font-size: 28px;
+  animation: iconPulse 1s infinite alternate;
+}
+
+@keyframes iconPulse {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.2); }
+}
+
+.donation-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.donation-user {
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+}
+
+.donation-amount {
+  font-size: 14px;
+  font-weight: 800;
+  color: #fbbf24;
+  text-shadow: 0 0 8px rgba(251, 191, 36, 0.8);
+}
+
+.donation-text {
+  font-size: 13px;
+  color: #fef08a;
+  text-align: center;
+  font-style: italic;
+  max-width: 320px;
+}
+
+/* Donation highlight in chat */
+.chat-msg.donation-msg {
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.15), rgba(245, 158, 11, 0.05));
+  border-left: 3px solid #f59e0b;
+  border-radius: 4px;
+}
+
+.chat-msg.donation-msg .author {
+  color: #fbbf24;
+  font-weight: 700;
+}
+
 .prompt-category {
   font-size: 12px;
   font-weight: 600;

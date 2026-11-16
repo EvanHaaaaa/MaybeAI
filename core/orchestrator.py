@@ -10,6 +10,7 @@ from core.moderator import Moderator
 from core.actions import ActionParser
 from core.singer import Singer
 from core.minecraft.controller import MinecraftController
+from core.conversation.chat_curator import ChatInteraction
 
 class Orchestrator:
     """
@@ -167,29 +168,8 @@ class Orchestrator:
         finally:
             self.is_busy = False
 
-    async def _process_chat_loop(self):
-        """
-        Continuously pulls messages from queue and generates live streaming responses.
-        """
-        while self.is_running:
-            try:
-                msg: ChatMessage = await self.chat.get_next_message()
-
-                if self.is_busy:
-                    # Drop or defer if currently speaking
-                    continue
-
-                self.is_busy = True
-                await self._handle_message(msg)
-                self.is_busy = False
-
-            except Exception as e:
-                print(f"[Orchestrator Error] {e}")
-                self.is_busy = False
-                await asyncio.sleep(1)
-
-    async def _handle_message(self, msg: ChatMessage):
-        # 1. Moderation & Safety check
+    async def _ingest_message(self, msg: ChatMessage):
+        """Filters, broadcasts, and ingests message into ChatCurator."""
         is_safe, clean_input = self.moderator.clean_text(msg.text)
         if not is_safe:
             print(f"[Moderator] Filtered unsafe input from {msg.user}: {msg.text}")
@@ -197,8 +177,66 @@ class Orchestrator:
         await self.broadcast("chat_received", {
             "user": msg.user,
             "text": clean_input,
-            "source": msg.source
+            "source": msg.source,
+            "is_donation": msg.is_donation,
+            "donation_amount": msg.donation_amount
         })
+
+        if msg.is_donation:
+            print(f"[Donation Alert] 🎁 {msg.user} sent {msg.donation_amount}: '{clean_input}'")
+            await self.broadcast("donation_received", {
+                "user": msg.user,
+                "amount": msg.donation_amount,
+                "currency": msg.donation_currency,
+                "text": clean_input
+            })
+
+        self.brain.conversation.record_incoming_chat(
+            user=msg.user,
+            text=clean_input,
+            source=msg.source,
+            is_donation=msg.is_donation,
+            donation_amount=msg.donation_amount,
+            donation_currency=msg.donation_currency
+        )
+
+    async def _process_chat_loop(self):
+        """
+        Continuously ingests chat into ChatCurator, then selects the highest
+        priority message or group debate to respond to using real-time curation.
+        """
+        while self.is_running:
+            try:
+                # 1. Drain incoming messages from queue into curator buffer
+                while not self.chat.queue.empty():
+                    msg = await self.chat.get_next_message()
+                    await self._ingest_message(msg)
+
+                # 2. If not busy, select next best interaction from curator
+                if not self.is_busy:
+                    interaction = self.brain.conversation.select_next_interaction()
+                    if interaction:
+                        self.is_busy = True
+                        await self._execute_interaction(interaction)
+                        self.is_busy = False
+                        continue
+
+                # 3. If no interaction ready or currently busy, wait for next message
+                try:
+                    msg = await asyncio.wait_for(self.chat.get_next_message(), timeout=0.8)
+                    await self._ingest_message(msg)
+                except asyncio.TimeoutError:
+                    pass
+
+            except Exception as e:
+                print(f"[Orchestrator Error] {e}")
+                self.is_busy = False
+                await asyncio.sleep(1)
+
+    async def _execute_interaction(self, interaction: ChatInteraction):
+        primary = interaction.primary_message
+        clean_input = primary.text
+        msg_lower = clean_input.lower()
 
         # Check for spontaneous improv command
         if msg_lower.startswith("!improv"):
@@ -206,7 +244,6 @@ class Orchestrator:
             return
 
         # Check for sing command / request
-        msg_lower = clean_input.lower()
         if msg_lower.startswith("!sing") or "sing a song" in msg_lower or "nyanyi" in msg_lower or "coba nyanyi" in msg_lower:
             song_id = "digital_world"
             parts = clean_input.split()
@@ -233,53 +270,72 @@ class Orchestrator:
             elif len(parts) > 3 and parts[1] == "gift":
                 await self.minecraft.player_gave_gift(parts[2], parts[3])
             else:
-                # Default start santai if general request
                 await self.minecraft.set_mode("santai")
             return
 
-        # 2. Brain generates response
+        # Game context
         game_context = ""
         if self.minecraft.connection_status == "connected":
             srv = self.minecraft.active_server.get("name", "Minecraft Server") if self.minecraft.active_server else "Minecraft"
             game_context = f"Playing in Minecraft ({srv}, mode={self.minecraft.current_mode}, health={self.minecraft.health}/20)"
 
-        if msg.source == "minecraft":
-            llm_input = f"[Minecraft In-Game Chat from {msg.user}]: {clean_input}\n(You are currently inside Minecraft playing with them! Respond directly to {msg.user} in 1-2 witty sentences)"
+        is_donation = (interaction.interaction_type == "donation")
+        is_group_debate = (interaction.interaction_type == "group_debate")
+        debate_users = [primary.user] + [m.user for m in interaction.related_messages] if is_group_debate else None
+
+        if primary.source == "minecraft":
+            llm_input = f"[Minecraft In-Game Chat from {primary.user}]: {clean_input}\n(You are currently inside Minecraft playing with them! Respond directly to {primary.user} in 1-2 witty sentences)"
+        elif is_donation:
+            llm_input = f"[DONATION {primary.donation_amount} from {primary.user}]: {clean_input}"
+        elif is_group_debate:
+            u2_msg = interaction.related_messages[0]
+            llm_input = f"[CHAT DEBATE between {primary.user} and {u2_msg.user}]: {primary.user} said '{primary.text}', while {u2_msg.user} said '{u2_msg.text}'. (Commentate on this chat discussion!)"
         else:
             llm_input = clean_input
 
-        raw_response = await self.brain.generate_response(msg.user, llm_input, game_context=game_context)
+        raw_response = await self.brain.generate_response(
+            user_name=primary.user,
+            message=llm_input,
+            game_context=game_context,
+            is_donation=is_donation,
+            donation_amount=primary.donation_amount,
+            is_group_debate=is_group_debate,
+            debate_users=debate_users
+        )
 
-        # Filter AI response just in case
         _, clean_response = self.moderator.clean_text(raw_response)
-
-        # 3. Parse Emotions & Actions
         speech_text, emotions, actions = ActionParser.parse(clean_response)
         primary_emotion = emotions[0] if emotions else "neutral"
 
+        if is_donation:
+            user_label = f"Eve (to {primary.user} 🎁 {primary.donation_amount})"
+        elif is_group_debate:
+            user_label = f"Eve (Commenting on {primary.user} & {interaction.related_messages[0].user})"
+        elif primary.source == "minecraft":
+            user_label = f"Eve (to {primary.user})"
+        else:
+            user_label = "Eve"
+
         await self.broadcast("ai_response", {
-            "user": f"Eve (to {msg.user})" if msg.source == "minecraft" else "Eve",
+            "user": user_label,
             "raw": clean_response,
             "speech": speech_text,
             "emotions": emotions,
             "actions": actions,
-            "source": msg.source
+            "source": primary.source,
+            "is_donation": is_donation,
+            "donation_amount": primary.donation_amount
         })
 
-        # If from in-game Minecraft chat, send reply back into Minecraft server chat!
-        if msg.source == "minecraft":
+        if primary.source == "minecraft":
             await self.minecraft.send_chat(speech_text)
 
-        # 4. Trigger Avatar Expression
         if self.vts.connected:
             await self.vts.trigger_expression(primary_emotion)
 
-        # 5. Speak & Live Lip-sync
         async def on_mouth_update(val: float):
-            # Update VTube Studio parameter
             if self.vts.connected:
                 await self.vts.update_mouth(val)
-            # Update Web Canvas Avatar parameter
             await self.broadcast("avatar_state", {
                 "mouth_open": val,
                 "emotion": primary_emotion
@@ -288,7 +344,6 @@ class Orchestrator:
         print(f"[AI Speech] [{primary_emotion}] {speech_text}")
         await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
 
-        # Return to idle
         if self.vts.connected:
             await self.vts.trigger_expression("neutral")
             await self.vts.update_mouth(0.0)
@@ -297,8 +352,6 @@ class Orchestrator:
             "mouth_open": 0.0,
             "emotion": "neutral"
         })
-
-        # Broadcast updated conversation state & active context
         await self.broadcast("conversation_state", self.brain.get_conversation_state())
 
     async def perform_song(self, song_id: str):

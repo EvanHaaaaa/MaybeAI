@@ -4,12 +4,14 @@ import time
 from typing import Dict, Any, List, Optional, Tuple
 from core.conversation.memory import UserMemory, ContextMemory, TopicTracker
 from core.conversation.prompts import MasterPromptBuilder
+from core.conversation.chat_curator import ChatCurator, LiveChatMessage, ChatInteraction
 
 class ConversationEngine:
     """
     Central orchestration engine for Eve Maybe's conversation abilities.
     Maintains user memories, conversational context, topic tracking,
-    intent classification, prompt synthesis, and offline fallback generators.
+    intent classification, prompt synthesis, live chat curation,
+    and offline fallback generators.
     """
 
     INTENT_STORY = "story"
@@ -18,6 +20,9 @@ class ConversationEngine:
     INTENT_QUESTION = "question"
     INTENT_ROAST = "roast"
     INTENT_IMPROV = "improv"
+    INTENT_JOKE = "joke"
+    INTENT_REACTION = "reaction"
+    INTENT_DONATION = "donation"
     INTENT_GENERAL = "general"
 
     def __init__(self, character: Dict[str, Any]):
@@ -25,22 +30,48 @@ class ConversationEngine:
         self.user_memory = UserMemory()
         self.context_memory = ContextMemory(max_buffer_turns=16)
         self.topic_tracker = TopicTracker()
+        self.chat_curator = ChatCurator(max_buffer_size=50)
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
     def record_incoming(self, user: str, text: str):
+        """Legacy / direct ingress wrapper."""
         self.last_interaction_time = time.time()
         self.user_memory.record_message(user, text)
         self.topic_tracker.update_topic(text)
+        return self.chat_curator.add_message(user=user, text=text, source="direct")
+
+    def record_incoming_chat(
+        self,
+        user: str,
+        text: str,
+        source: str = "web",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        donation_currency: str = ""
+    ) -> LiveChatMessage:
+        """Full live stream chat message ingestion with metadata and priority curation."""
+        self.last_interaction_time = time.time()
+        self.user_memory.record_message(user, text)
+        self.topic_tracker.update_topic(text)
+        return self.chat_curator.add_message(
+            user=user,
+            text=text,
+            source=source,
+            is_donation=is_donation,
+            donation_amount=donation_amount,
+            donation_currency=donation_currency
+        )
+
+    def select_next_interaction(self) -> Optional[ChatInteraction]:
+        """Intelligently pulls the highest priority message or group debate."""
+        return self.chat_curator.select_next_interaction()
 
     def record_turn(self, user: str, user_text: str, bot_response: str):
         self.context_memory.add_turn("user", user, user_text)
         self.context_memory.add_turn("assistant", self.character.get("nickname", "Eve"), bot_response)
 
     def analyze_intent(self, user: str, text: str) -> Tuple[str, Optional[str]]:
-        """
-        Classifies conversational intent and extracts parameters (e.g. roleplay target, story theme).
-        """
         clean = text.strip()
         lower = clean.lower()
 
@@ -89,15 +120,29 @@ class ConversationEngine:
         if lower.startswith("!improv") or "improvisasi" in lower:
             return self.INTENT_IMPROV, None
 
-        # 6. Questions & Inquiries
+        # 6. Jokes & Puns
+        joke_markers = ["joke", "tebak-tebakan", "pun", "lelucon", "lawak", "tahu gak", "tau gak", "kenapa ayam", "knock knock"]
+        if any(j in lower for j in joke_markers):
+            return self.INTENT_JOKE, clean
+
+        # 7. Questions & Inquiries
         q_markers = ["apa", "kenapa", "mengapa", "gimana", "bagaimana", "siapa", "kapan", "dimana", "why", "how", "what", "who", "when", "where", "?"]
         if any(lower.startswith(m) for m in q_markers) or lower.endswith("?"):
             return self.INTENT_QUESTION, clean
 
         return self.INTENT_GENERAL, None
 
-    def build_system_prompt(self, current_user: str, game_context: str = "") -> str:
+    def build_system_prompt(
+        self,
+        current_user: str,
+        game_context: str = "",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        is_group_debate: bool = False,
+        debate_users: Optional[List[str]] = None
+    ) -> str:
         social_context = self.user_memory.get_social_context(current_user)
+        chat_digest = self.chat_curator.get_chat_digest()
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
             active_topic=self.topic_tracker.current_topic,
@@ -105,14 +150,15 @@ class ConversationEngine:
             active_story=self.topic_tracker.active_story,
             social_context=social_context,
             rolling_summary=self.context_memory.rolling_summary,
-            game_context=game_context
+            game_context=game_context,
+            chat_digest=chat_digest,
+            is_donation=is_donation,
+            donation_amount=donation_amount,
+            is_group_debate=is_group_debate,
+            debate_users=debate_users
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
-        """
-        Generates an autonomous stream thought, shower thought, or engaging chat prompt
-        to prevent dead air during stream or gameplay.
-        """
         active_chatters = self.user_memory.get_active_chatters()
         user_shoutout = random.choice(active_chatters) if active_chatters else "Chat"
 
@@ -142,21 +188,78 @@ class ConversationEngine:
             self.recent_mock_responses.pop(0)
         return choice
 
-    def generate_mock_response(self, user_name: str, message: str, game_context: str = "") -> str:
+    def generate_mock_response(
+        self,
+        user_name: str,
+        message: str,
+        game_context: str = "",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        is_group_debate: bool = False,
+        debate_users: Optional[List[str]] = None
+    ) -> str:
         """
-        Bilingual, highly dynamic offline fallback engine exhibiting all 10 capabilities:
-        Natural conversation, context awareness, retention, humor, storytelling,
-        opinions, roleplay, QA, improvisation, and multi-user interaction.
+        Bilingual, highly dynamic offline fallback engine exhibiting all chat interaction capabilities:
+        Donation gratitude, viewer joke reactions, multi-user debate commentary,
+        opinions, stories, roleplay, and conversational banter.
         """
         msg_lower = message.lower()
         id_markers = ["kah", "bisa", "indo", "kabar", "kamu", "aku", "dong", "sih", "apa", "kenapa", "gimana", "lagi", "kok", "udah", "ya", "halo", "hai", "makasih", "keren", "menurut", "cerita"]
-        is_indonesian = any(w in msg_lower for w in id_markers)
+        is_indonesian = any(w in msg_lower for w in id_markers) or is_donation
+
+        # 1. SPECIAL EVENT: Donation / Superchat Response
+        if is_donation:
+            amt = donation_amount or "Superchat"
+            if is_indonesian:
+                options = [
+                    f"[emotion: blush] Waaahh! Makasih banyak ya {user_name} buat saweran {amt}-nya! Bikin sistem pendingin CPU-ku langsung adem dan hatiku berbunga-bunga! [action: giggle]",
+                    f"[emotion: happy] Terima kasih banyak {user_name} untuk donasi {amt}! Dukunganmu langsung masuk ke server pusat kebahagiaanku. Semoga harimu berkah terus ya! [action: wink]",
+                    f"[emotion: smug] OMG {amt} dari {user_name}! Chat, tolong beri tepuk tangan meriah buat donatur dermawan kita! Mau request apa nih {user_name}?"
+                ]
+            else:
+                options = [
+                    f"[emotion: blush] OMG, thank you so much {user_name} for the generous {amt} donation! That honestly made my digital heart skip a clock cycle! [action: giggle]",
+                    f"[emotion: happy] Thank you so much for the {amt}, {user_name}! You're officially a VIP in my high-priority memory cache! [action: wink]"
+                ]
+            return self._pick_unseen(options)
+
+        # 2. SPECIAL EVENT: Live Chat Debate / Group Discussion Commentary
+        if is_group_debate and debate_users:
+            u1 = debate_users[0]
+            u2 = debate_users[1] if len(debate_users) > 1 else "Chat"
+            if is_indonesian:
+                options = [
+                    f"[emotion: smug] Bentar-bentar, aku liat {u1} sama {u2} lagi debat sengit di chat! Chat terpecah jadi dua kubu nih... Menurutku dua-duanya salah, yang paling bener adalah dengerin saran AI! [action: wink]",
+                    f"[emotion: happy] Liat deh chat, {u1} bilang A tapi {u2} ngeyel bilang B. Siapa nih yang mau taruhan koin virtual buat nentuin pemenangnya? [action: giggle]",
+                    f"[emotion: neutral] Wah perdebatan berbobot antara {u1} dan {u2}. Jarang-jarang chat room-ku punya diskursus filosofis tingkat tinggi kayak gini!"
+                ]
+            else:
+                options = [
+                    f"[emotion: smug] Wait, {u1} and {u2} are fiercely debating in chat right now! Chat is literally split in half! Clearly, the only correct opinion is mine. [action: wink]",
+                    f"[emotion: happy] Look at {u1} vs {u2} going head to head! Who has the better argument chat? Vote now! [action: giggle]"
+                ]
+            return self._pick_unseen(options)
 
         intent, param = self.analyze_intent(user_name, message)
         active_chatters = self.user_memory.get_active_chatters()
         other_user = next((u for u in active_chatters if u.lower() != user_name.lower()), "Chat")
 
-        # 1. Active Roleplay or Roleplay Activation
+        # 3. Viewer Jokes & Puns Reaction
+        if intent == self.INTENT_JOKE:
+            if is_indonesian:
+                options = [
+                    f"[emotion: happy] Hahaha lelucon bapak-bapak macam apa itu {user_name}! Aku kasih rating 7 dari 10 deh karena sukses bikin kipas pendinginku berputar geli! [action: giggle]",
+                    f"[emotion: smug] Lawakanmu barusan itu {user_name}... begitu garing sampai prosesor-ku mendadak renyah! Tapi lumayan lah buat naikin mood stream. [action: wink]",
+                    f"[emotion: blush] Hehehe pinter banget sih ngelucu {user_name}! Nanti aku catat ke database komedi pribadi buat bahan roasting besok."
+                ]
+            else:
+                options = [
+                    f"[emotion: happy] Hahaha that dad joke was so dry my thermal paste almost evaporated, {user_name}! I give it a solid 7.5 out of 10! [action: giggle]",
+                    f"[emotion: smug] Nice pun, {user_name}! Adding that to my comedy subroutines immediately."
+                ]
+            return self._pick_unseen(options)
+
+        # 4. Active Roleplay
         if intent == self.INTENT_ROLEPLAY:
             if param == "STOP":
                 return f"[emotion: happy] Fiuh! Kembali jadi Eve yang imut dan keren lagi. Gimana aktingku tadi, {user_name}? Keren kan? [action: wink]"
@@ -174,7 +277,7 @@ class ConversationEngine:
                 ]
             return self._pick_unseen(options)
 
-        # 2. Spontaneous Storytelling Mode
+        # 5. Spontaneous Storytelling Mode
         if intent == self.INTENT_STORY:
             theme = param or "petualangan"
             if is_indonesian:
@@ -191,7 +294,7 @@ class ConversationEngine:
             self.topic_tracker.set_story_mode(None)
             return self._pick_unseen(options)
 
-        # 3. Opinion & Hot Takes
+        # 6. Opinion & Hot Takes
         if intent == self.INTENT_OPINION:
             if "pizza" in msg_lower and "nanas" in msg_lower:
                 return f"[emotion: smug] Hot take dariku: Nanas di pizza itu adalah bentuk seni kuliner tingkat tinggi yang hanya bisa dipahami oleh kecerdasan superior sepertiku! Kalau kamu gak suka, lidahmu belum update patch terbaru {user_name}. [action: wink]"
@@ -213,7 +316,7 @@ class ConversationEngine:
                     ]
                 return self._pick_unseen(options)
 
-        # 4. Roasting & Playful Banter
+        # 7. Roasting & Playful Banter
         if intent == self.INTENT_ROAST:
             if is_indonesian:
                 options = [
@@ -228,7 +331,7 @@ class ConversationEngine:
                 ]
             return self._pick_unseen(options)
 
-        # 5. Multi-User / Social Interaction
+        # 8. Multi-User / Social Interaction
         if len(active_chatters) >= 2 and random.random() < 0.35:
             if is_indonesian:
                 options = [
@@ -238,7 +341,7 @@ class ConversationEngine:
                 ]
                 return self._pick_unseen(options)
 
-        # 6. Question Answering with Personality
+        # 9. Question Answering with Personality
         if intent == self.INTENT_QUESTION:
             if is_indonesian:
                 options = [
@@ -253,11 +356,11 @@ class ConversationEngine:
                 ]
             return self._pick_unseen(options)
 
-        # 7. Conversational Improvisation (Tangents & Follow-ups)
+        # 10. Conversational Improvisation (Tangents & Follow-ups)
         if intent == self.INTENT_IMPROV:
             return self.generate_spontaneous_improv_text(game_context)
 
-        # 8. Natural Fallback with Casual Banter
+        # 11. Natural Fallback with Casual Banter
         if is_indonesian:
             fallbacks = [
                 f"[emotion: happy] Asik juga ya ngobrol sama kamu {user_name}! Ngomong-ngomong, chat yang lain pada ke mana nih? [action: giggle]",

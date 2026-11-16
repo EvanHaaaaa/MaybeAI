@@ -10,7 +10,8 @@ class Brain:
     """
     LLM Brain responsible for personality, context memory, and generating responses.
     Powered by the Neuro-sama styled ConversationEngine for natural banter,
-    context retention, humor, storytelling, hot takes, roleplay, and improvisation.
+    context retention, humor, storytelling, hot takes, roleplay, improvisation,
+    and intelligent real-time chat curation.
     Supports: OpenAI, Ollama, Gemini, and rich offline fallback.
     """
 
@@ -59,23 +60,44 @@ class Brain:
             "memory_turns": len(self.conversation.context_memory.buffer)
         }
 
-    async def generate_response(self, user_name: str, message: str, game_context: str = "") -> str:
+    async def generate_response(
+        self,
+        user_name: str,
+        message: str,
+        game_context: str = "",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        is_group_debate: bool = False,
+        debate_users: Optional[List[str]] = None
+    ) -> str:
         provider = self.settings.get("llm", {}).get("provider", "mock").lower()
 
-        # Record incoming message in memory and update topics
-        self.conversation.record_incoming(user_name, message)
-        
         # Build dynamic contextual system prompt
-        system_prompt = self.conversation.build_system_prompt(user_name, game_context)
+        system_prompt = self.conversation.build_system_prompt(
+            current_user=user_name,
+            game_context=game_context,
+            is_donation=is_donation,
+            donation_amount=donation_amount,
+            is_group_debate=is_group_debate,
+            debate_users=debate_users
+        )
 
         if provider == "openai":
-            response = await self._generate_openai(system_prompt, user_name, message, game_context)
+            response = await self._generate_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         elif provider == "ollama":
-            response = await self._generate_ollama(system_prompt, user_name, message, game_context)
+            response = await self._generate_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         elif provider == "gemini":
-            response = await self._generate_gemini(system_prompt, user_name, message, game_context)
+            response = await self._generate_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         else:
-            response = self.conversation.generate_mock_response(user_name, message, game_context)
+            response = self.conversation.generate_mock_response(
+                user_name=user_name,
+                message=message,
+                game_context=game_context,
+                is_donation=is_donation,
+                donation_amount=donation_amount,
+                is_group_debate=is_group_debate,
+                debate_users=debate_users
+            )
 
         # Record full turn in multi-turn memory
         self.conversation.record_turn(user_name, message, response)
@@ -85,10 +107,13 @@ class Brain:
         """Generates an unprompted streamer remark, shower thought, or question to chat."""
         return self.conversation.generate_spontaneous_improv_text(game_context)
 
-    async def _generate_openai(self, system_prompt: str, user_name: str, message: str, game_context: str) -> str:
+    async def _generate_openai(
+        self, system_prompt: str, user_name: str, message: str, game_context: str,
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]]
+    ) -> str:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            return self.conversation.generate_mock_response(user_name, message, game_context)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
 
         model = self.settings.get("llm", {}).get("model", "gpt-4o-mini")
         temperature = self.settings.get("llm", {}).get("temperature", 0.85)
@@ -96,7 +121,9 @@ class Brain:
         messages = [{"role": "system", "content": system_prompt}]
         for item in self.conversation.context_memory.get_history_for_llm():
             messages.append({"role": item["role"], "content": item["content"]})
-        messages.append({"role": "user", "content": f"{user_name}: {message}"})
+        
+        user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
+        messages.append({"role": "user", "content": f"{user_prefix}: {message}"})
 
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
@@ -118,19 +145,24 @@ class Brain:
                         return data["choices"][0]["message"]["content"].strip()
                     else:
                         print(f"[Brain Warning] OpenAI status {resp.status}. Using persona fallback.")
-                        return self.conversation.generate_mock_response(user_name, message, game_context)
+                        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         except Exception as e:
             print(f"[Brain Error] OpenAI connection error: {e}")
-            return self.conversation.generate_mock_response(user_name, message, game_context)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
 
-    async def _generate_ollama(self, system_prompt: str, user_name: str, message: str, game_context: str) -> str:
+    async def _generate_ollama(
+        self, system_prompt: str, user_name: str, message: str, game_context: str,
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]]
+    ) -> str:
         base_url = self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
         model = self.settings.get("llm", {}).get("ollama_model", "llama3.2")
 
         messages = [{"role": "system", "content": system_prompt}]
         for item in self.conversation.context_memory.get_history_for_llm():
             messages.append({"role": item["role"], "content": item["content"]})
-        messages.append({"role": "user", "content": f"{user_name}: {message}"})
+        
+        user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
+        messages.append({"role": "user", "content": f"{user_prefix}: {message}"})
 
         url = f"{base_url}/api/chat"
         payload = {
@@ -145,14 +177,17 @@ class Brain:
                     if resp.status == 200:
                         data = await resp.json()
                         return data.get("message", {}).get("content", "").strip()
-                    return self.conversation.generate_mock_response(user_name, message, game_context)
+                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         except Exception as e:
-            return self.conversation.generate_mock_response(user_name, message, game_context)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
 
-    async def _generate_gemini(self, system_prompt: str, user_name: str, message: str, game_context: str) -> str:
+    async def _generate_gemini(
+        self, system_prompt: str, user_name: str, message: str, game_context: str,
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]]
+    ) -> str:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            return self.conversation.generate_mock_response(user_name, message, game_context)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
 
         model = self.settings.get("llm", {}).get("gemini_model", "gemini-3.8-flash")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
@@ -164,7 +199,8 @@ class Brain:
             contents.append({"role": role, "parts": [{"text": item["content"]}]})
         
         # Append current message
-        contents.append({"role": "user", "parts": [{"text": f"{user_name}: {message}"}]})
+        user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
+        contents.append({"role": "user", "parts": [{"text": f"{user_prefix}: {message}"}]})
 
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
@@ -182,7 +218,7 @@ class Brain:
                     else:
                         err_text = await resp.text()
                         print(f"[Brain Warning] Gemini returned status {resp.status}: {err_text[:120]}. Using persona fallback.")
-                        return self.conversation.generate_mock_response(user_name, message, game_context)
+                        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         except Exception as e:
             print(f"[Brain Warning] Gemini request error/timeout ({e}). Using persona fallback.")
-            return self.conversation.generate_mock_response(user_name, message, game_context)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)

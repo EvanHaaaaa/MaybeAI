@@ -15,6 +15,13 @@ document.addEventListener("DOMContentLoaded", () => {
   const convTopicBadge = document.getElementById("conv-topic-badge");
   const convRoleplayBadge = document.getElementById("conv-roleplay-badge");
 
+  // Donation Alert Elements
+  const donationAlertBanner = document.getElementById("donation-alert-banner");
+  const donUser = document.getElementById("don-user");
+  const donAmount = document.getElementById("don-amount");
+  const donText = document.getElementById("don-text");
+  let donationTimer = null;
+
   // State
   let mouthOpen = 0.0;
   let targetMouthOpen = 0.0;
@@ -45,8 +52,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const msg = JSON.parse(event.data);
 
     if (msg.type === "chat_received") {
-      const author = msg.data.source === "minecraft" ? `🎮 [MC] ${msg.data.user}` : msg.data.user;
-      addChatMessage(author, msg.data.text, false);
+      let author = msg.data.source === "minecraft" ? `🎮 [MC] ${msg.data.user}` : msg.data.user;
+      if (msg.data.is_donation) {
+        author = `🎁 [SUPERCHAT ${msg.data.donation_amount}] ${msg.data.user}`;
+      }
+      addChatMessage(author, msg.data.text, false, msg.data.is_donation);
+    } else if (msg.type === "donation_received") {
+      showDonationAlert(msg.data.user, msg.data.amount, msg.data.text);
     } else if (msg.type === "ai_response") {
       const author = msg.data.user || "Eve";
       addChatMessage(author, msg.data.speech, true);
@@ -116,9 +128,22 @@ document.addEventListener("DOMContentLoaded", () => {
     else headTilt = 0.0;
   }
 
-  function addChatMessage(author, text, isAi = false) {
+  function showDonationAlert(user, amount, text) {
+    if (!donationAlertBanner) return;
+    if (donUser) donUser.textContent = user;
+    if (donAmount) donAmount.textContent = amount;
+    if (donText) donText.textContent = `"${text}"`;
+
+    donationAlertBanner.style.display = "flex";
+    if (donationTimer) clearTimeout(donationTimer);
+    donationTimer = setTimeout(() => {
+      donationAlertBanner.style.display = "none";
+    }, 6000);
+  }
+
+  function addChatMessage(author, text, isAi = false, isDonation = false) {
     const div = document.createElement("div");
-    div.className = `chat-msg ${isAi ? "neuro-msg" : ""}`;
+    div.className = `chat-msg ${isAi ? "neuro-msg" : ""} ${isDonation ? "donation-msg" : ""}`;
     div.innerHTML = `<span class="author">${author}:</span><span class="text">${escapeHtml(text)}</span>`;
     chatHistory.appendChild(div);
     chatHistory.scrollTop = chatHistory.scrollHeight;
@@ -143,9 +168,58 @@ document.addEventListener("DOMContentLoaded", () => {
   document.querySelectorAll(".pill").forEach(pill => {
     pill.addEventListener("click", () => {
       const msg = pill.getAttribute("data-msg");
-      sendMessage("ChatUser", msg);
+      if (msg) {
+        sendMessage("ChatUser", msg);
+      }
     });
   });
+
+  // Real-Time Chat Interaction Simulation Buttons
+  const btnDonationUsd = document.getElementById("btn-quick-donation-usd");
+  const btnDonationIdr = document.getElementById("btn-quick-donation-idr");
+  const btnQuickDebate = document.getElementById("btn-quick-debate");
+
+  if (btnDonationUsd) {
+    btnDonationUsd.addEventListener("click", () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "donation",
+          user: "GigaChadViewer",
+          amount: "$10.00",
+          currency: "USD",
+          text: "Eve, ini saweran buat beli pendingin GPU baru biar gak kepanasan!"
+        }));
+      }
+    });
+  }
+
+  if (btnDonationIdr) {
+    btnDonationIdr.addEventListener("click", () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "donation",
+          user: "SultanLokal",
+          amount: "Rp 50.000",
+          currency: "IDR",
+          text: "Eve jajan martabak manis dulu gih biar makin ceria stream-nya!"
+        }));
+      }
+    });
+  }
+
+  if (btnQuickDebate) {
+    btnQuickDebate.addEventListener("click", () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "bulk_chat",
+          messages: [
+            { user: "KucingMania", text: "Kucing adalah hewan paling superior di dunia, setuju kan Eve?" },
+            { user: "DogLover99", text: "Nggak lah, anjing jauh lebih pintar dan bisa diajak main bola!" }
+          ]
+        }));
+      }
+    });
+  }
 
   function sendMessage(user, text) {
     if (ws.readyState === WebSocket.OPEN) {

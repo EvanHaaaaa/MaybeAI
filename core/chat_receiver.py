@@ -3,10 +3,21 @@ import re
 from typing import Optional, Callable, Dict, Any, List
 
 class ChatMessage:
-    def __init__(self, user: str, text: str, source: str = "web"):
+    def __init__(
+        self,
+        user: str,
+        text: str,
+        source: str = "web",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        donation_currency: str = ""
+    ):
         self.user = user
         self.text = text
         self.source = source
+        self.is_donation = is_donation
+        self.donation_amount = donation_amount
+        self.donation_currency = donation_currency
         self.timestamp = asyncio.get_event_loop().time()
 
 class ChatReceiver:
@@ -21,11 +32,26 @@ class ChatReceiver:
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
 
-    async def put_message(self, user: str, text: str, source: str = "web"):
+    async def put_message(
+        self,
+        user: str,
+        text: str,
+        source: str = "web",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        donation_currency: str = ""
+    ):
         """
         Push message into the active queue.
         """
-        msg = ChatMessage(user=user, text=text, source=source)
+        msg = ChatMessage(
+            user=user,
+            text=text,
+            source=source,
+            is_donation=is_donation,
+            donation_amount=donation_amount,
+            donation_currency=donation_currency
+        )
         await self.queue.put(msg)
 
     async def get_next_message(self) -> ChatMessage:

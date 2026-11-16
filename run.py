@@ -84,6 +84,23 @@ async def websocket_endpoint(websocket: WebSocket):
                 user = data.get("user", "User")
                 text = data.get("text", "")
                 await orchestrator.chat.put_message(user=user, text=text, source="web")
+            elif data.get("type") == "donation":
+                user = data.get("user", "Supporter")
+                text = data.get("text", "Love your stream!")
+                amount = data.get("amount", "$5.00")
+                currency = data.get("currency", "USD")
+                await orchestrator.chat.put_message(
+                    user=user,
+                    text=text,
+                    source="web",
+                    is_donation=True,
+                    donation_amount=amount,
+                    donation_currency=currency
+                )
+            elif data.get("type") == "bulk_chat":
+                msgs = data.get("messages", [])
+                for m in msgs:
+                    await orchestrator.chat.put_message(user=m.get("user", "Chatter"), text=m.get("text", ""), source="web")
             elif data.get("type") == "set_llm_provider":
                 prov = data.get("provider", "mock")
                 active_prov = orchestrator.brain.set_provider(prov)

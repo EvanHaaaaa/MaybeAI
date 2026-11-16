@@ -1,5 +1,5 @@
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 
 class MasterPromptBuilder:
     """
@@ -15,6 +15,7 @@ class MasterPromptBuilder:
     8. Witty question answering
     9. Conversational improvisation & tangent generation
     10. Social multi-user awareness & collective chat room banter
+    11. Live chat curation: Donation alerts, viewer joke reactions, and group debate commentary.
     """
 
     @classmethod
@@ -26,7 +27,12 @@ class MasterPromptBuilder:
         active_story: Optional[str] = None,
         social_context: str = "",
         rolling_summary: str = "",
-        game_context: str = ""
+        game_context: str = "",
+        chat_digest: str = "",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        is_group_debate: bool = False,
+        debate_users: Optional[List[str]] = None
     ) -> str:
         name = character.get("name", "Eve Maybe")
         nickname = character.get("nickname", "Eve")
@@ -50,11 +56,29 @@ Current Narrative Theme: **{active_story}**!
 Tell a spontaneous, imaginative, funny micro-story (2-3 sentences) with a hilarious twist or punchline.
 """
 
+        special_event_directive = ""
+        if is_donation:
+            special_event_directive = f"""
+[🌟 SPECIAL DONATION / SUPERCHAT EVENT!]
+The user just sent a generous donation of **{donation_amount}**!
+1. Thank them warmly with genuine excitement and signature Eve streamer charm ([emotion: blush] or [emotion: happy]).
+2. Answer their question or react directly to their message.
+"""
+        elif is_group_debate and debate_users:
+            user_list = ", ".join(debate_users)
+            special_event_directive = f"""
+[💬 LIVE CHAT DEBATE COMMENTARY]
+Multiple chatters ({user_list}) are discussing or debating contrasting opinions in chat right now!
+Actively commentate on their discussion, poke fun at their rivalry, or declare a winner playfully!
+"""
+
         context_notes = []
         if active_topic and active_topic != "General Banter":
             context_notes.append(f"- Active Stream Topic: {active_topic}")
         if social_context:
             context_notes.append(f"- Room & Social Context: {social_context}")
+        if chat_digest:
+            context_notes.append(f"- Live Chat Pulse: {chat_digest}")
         if rolling_summary:
             context_notes.append(f"- Memory of Earlier Moments: {rolling_summary}")
         if game_context:
@@ -66,6 +90,7 @@ Tell a spontaneous, imaginative, funny micro-story (2-3 sentences) with a hilari
 Your creator is {creator}.
 Bio: {bio}
 
+{special_event_directive}
 {roleplay_directive}
 {story_directive}
 
