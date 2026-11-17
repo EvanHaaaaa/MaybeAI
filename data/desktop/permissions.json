@@ -21,7 +21,7 @@
     "current_volume": 0,
     "is_muted": false,
     "media_state": "playing",
-    "current_track": "ChilledCow - Lofi Girl Beats",
+    "current_track": "Mili - Rightfully (Eve Acoustic Cover)",
     "streaming_scene": "Just Chatting",
     "is_streaming": false
   },
@@ -216,6 +216,21 @@
       "requested_at": 1794880360.4394727,
       "requested_at_str": "08:52:40",
       "resolved_at": 1794880360.4394727,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_ce3535b3",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794898800.5193152,
+      "requested_at_str": "14:00:00",
+      "resolved_at": 1794898800.5193152,
       "details": "Permintaan aksi launch_app pada sistem desktop.",
       "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
     }

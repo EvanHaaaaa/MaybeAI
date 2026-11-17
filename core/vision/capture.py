@@ -2,8 +2,22 @@ import io
 import base64
 import time
 from typing import Tuple, Optional, Any
-from PIL import Image, ImageDraw, ImageFont
-import mss
+
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    HAS_PIL = True
+except ImportError:
+    Image = None
+    ImageDraw = None
+    ImageFont = None
+    HAS_PIL = False
+
+try:
+    import mss
+    HAS_MSS = True
+except ImportError:
+    mss = None
+    HAS_MSS = False
 
 from core.vision.models import VisualSceneType
 
@@ -15,22 +29,31 @@ class ScreenCaptureManager:
     """
 
     def __init__(self):
-        self._sct: Optional[mss.mss] = None
+        self._sct: Optional[Any] = None
+        self.has_pil = HAS_PIL
+        self.has_mss = HAS_MSS
 
     def _get_sct(self) -> Any:
+        if not HAS_MSS or mss is None:
+            return None
         if self._sct is None:
             # mss.MSS is the newer entrypoint, fall back to mss.mss for older versions
-            cls_mss = getattr(mss, "MSS", mss.mss)
-            self._sct = cls_mss()
+            cls_mss = getattr(mss, "MSS", getattr(mss, "mss", None))
+            if cls_mss:
+                self._sct = cls_mss()
         return self._sct
 
-    def capture_screen(self, monitor_idx: int = 1) -> Image.Image:
+    def capture_screen(self, monitor_idx: int = 1) -> Any:
         """
         Captures the live primary monitor screen using mss.
         Falls back to desktop synthetic frame if screen capture is unavailable.
         """
+        if not HAS_PIL or not HAS_MSS:
+            return self.generate_mock_scene(VisualSceneType.DESKTOP_GENERAL.value)
         try:
             sct = self._get_sct()
+            if not sct:
+                return self.generate_mock_scene(VisualSceneType.DESKTOP_GENERAL.value)
             # monitor 1 is usually the primary monitor in mss
             monitors = sct.monitors
             mon = monitors[monitor_idx] if len(monitors) > monitor_idx else monitors[0]
@@ -42,11 +65,13 @@ class ScreenCaptureManager:
             # Fallback to simulated desktop workspace if display server is unreachable
             return self.generate_mock_scene(VisualSceneType.DESKTOP_GENERAL.value)
 
-    def generate_mock_scene(self, scene_type: str, width: int = 640, height: int = 360) -> Image.Image:
+    def generate_mock_scene(self, scene_type: str, width: int = 640, height: int = 360) -> Any:
         """
         Generates visually distinct simulated game and media screens
         for testing, demonstrations, and offline simulation.
         """
+        if not HAS_PIL or Image is None or ImageDraw is None:
+            return None
         img = Image.new("RGB", (width, height), color=(20, 24, 35))
         draw = ImageDraw.Draw(img)
 
@@ -193,13 +218,13 @@ class ScreenCaptureManager:
         return img
 
     @staticmethod
-    def compute_image_diff(img1: Image.Image, img2: Image.Image) -> float:
+    def compute_image_diff(img1: Any, img2: Any) -> float:
         """
         Calculates normalized pixel difference ratio between two images.
         Returns float in [0.0, 1.0].
         """
-        if img1 is None or img2 is None:
-            return 1.0
+        if not HAS_PIL or img1 is None or img2 is None:
+            return 0.0 if (img1 is None and img2 is None) else 1.0
 
         # Downscale to low-res grayscale for blazingly fast diffing
         sz = (64, 36)
@@ -218,10 +243,12 @@ class ScreenCaptureManager:
         return abs_diff / (total_pixels * 255.0)
 
     @staticmethod
-    def to_base64_data_url(img: Image.Image, max_size: Tuple[int, int] = (480, 270), quality: int = 75) -> str:
+    def to_base64_data_url(img: Any, max_size: Tuple[int, int] = (480, 270), quality: int = 75) -> str:
         """
         Resizes and encodes a PIL Image into a compact JPEG Base64 Data URL.
         """
+        if not HAS_PIL or img is None or Image is None:
+            return ""
         clone = img.copy()
         clone.thumbnail(max_size, Image.Resampling.LANCZOS)
         buf = io.BytesIO()

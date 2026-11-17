@@ -1,6 +1,11 @@
 import time
 from typing import Optional, Dict, Any, List, Callable
-from PIL import Image
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    Image = None
+    HAS_PIL = False
 
 from core.vision.models import VisualSceneType, VisualObservation, VisionConfig
 from core.vision.capture import ScreenCaptureManager
@@ -23,7 +28,7 @@ class VisionEngine:
         
         self.current_observation: Optional[VisualObservation] = None
         self.recent_observations: List[VisualObservation] = []
-        self._previous_image: Optional[Image.Image] = None
+        self._previous_image: Optional[Any] = None
         
         self.last_capture_time: float = 0.0
         self.last_commentary_time: float = 0.0
@@ -37,6 +42,19 @@ class VisionEngine:
 
     def _initialize_baseline(self):
         """Creates an initial baseline desktop perception."""
+        if not getattr(self.capture_mgr, "has_pil", True) or not HAS_PIL:
+            obs = VisualObservation(
+                scene_type=VisualSceneType.DESKTOP_GENERAL.value,
+                summary="Modul visual offline (Pillow/mss belum terpasang).",
+                eve_commentary="[emotion: thinking] Mataku agak buram nih, library Pillow belum terpasang. Tapi kita tetap bisa ngobrol dan mabar kok!",
+                change_delta=0.0
+            )
+            self.current_observation = obs
+            self.recent_observations.append(obs)
+            self.last_capture_time = time.time()
+            self.last_commentary_time = time.time()
+            return
+
         mock_img = self.capture_mgr.generate_mock_scene(VisualSceneType.DESKTOP_GENERAL.value)
         self._previous_image = mock_img
         b64 = ScreenCaptureManager.to_base64_data_url(

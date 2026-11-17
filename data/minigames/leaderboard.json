@@ -6,7 +6,7 @@
       "correct_answers": 9,
       "games_won": 3,
       "streak": 2,
-      "last_active_str": "08:52:48"
+      "last_active_str": "14:01:11"
     },
     "alex": {
       "username": "Alex",
@@ -14,7 +14,7 @@
       "correct_answers": 7,
       "games_won": 2,
       "streak": 1,
-      "last_active_str": "08:52:48"
+      "last_active_str": "14:01:11"
     },
     "steve": {
       "username": "Steve",
@@ -22,7 +22,7 @@
       "correct_answers": 6,
       "games_won": 1,
       "streak": 0,
-      "last_active_str": "08:52:48"
+      "last_active_str": "14:01:11"
     },
     "creator": {
       "username": "Creator",
@@ -30,7 +30,7 @@
       "correct_answers": 11,
       "games_won": 4,
       "streak": 3,
-      "last_active_str": "08:52:48"
+      "last_active_str": "14:01:11"
     }
   }
 }

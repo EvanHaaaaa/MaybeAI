@@ -1,17 +1,26 @@
 {
   "level": 2,
-  "exp": 28,
+  "exp": 60,
   "exp_to_next_level": 200,
   "traits": {
-    "competitiveness": 0.4004,
-    "confidence": 0.557,
-    "warmth": 0.7114,
-    "sassiness": 0.5315,
+    "competitiveness": 0.4124,
+    "confidence": 0.5701,
+    "warmth": 0.734,
+    "sassiness": 0.5596,
     "intellect": 0.5
   },
   "archetype": "Community Darling 💖 (Lv. 2)",
   "archetype_desc": "Sangat hangat, protektif terhadap kawan mabar, dan dekat dengan komunitas.",
-  "milestones": [],
+  "milestones": [
+    {
+      "id": "community_sweetheart",
+      "title": "Community Sweetheart 💖",
+      "description": "Sangat dekat dan protektif dengan teman mabar dan penonton setia streaming.",
+      "icon": "💖",
+      "category": "social",
+      "unlocked_at": 1794898801.6484156
+    }
+  ],
   "history": [
     {
       "id": "exp_19cddabf",
@@ -153,6 +162,42 @@
       "trait_changes": {
         "warmth": 0.012,
         "confidence": 0.0067
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_0a476649",
+      "timestamp": 1794898801.6484156,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0115,
+        "confidence": 0.0066
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan Alice membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_ead31429",
+      "timestamp": 1794898801.657931,
+      "category": "banter",
+      "trigger": "troll_encountered",
+      "trait_changes": {
+        "sassiness": 0.0281,
+        "competitiveness": 0.012
+      },
+      "exp_gained": 12,
+      "narrative": "Komentar usil dari Troll dibalas dengan sentilan cerdas, mempertajam gaya sarkastis Eve."
+    },
+    {
+      "id": "exp_45293958",
+      "timestamp": 1794898802.4605668,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0111,
+        "confidence": 0.0065
       },
       "exp_gained": 10,
       "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."

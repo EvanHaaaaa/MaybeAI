@@ -9,7 +9,7 @@
       "rivalry": 0.1,
       "gaming_affinity": 0.6,
       "affection": 0.9,
-      "interaction_count": 61,
+      "interaction_count": 62,
       "special_nickname": "Creator Tercinta",
       "inside_jokes": [
         {
@@ -37,7 +37,7 @@
         }
       ],
       "first_seen": 1794837990.626659,
-      "last_seen": 1794880364.670183
+      "last_seen": 1794898804.670445
     },
     {
       "username": "DiamondHunter",
@@ -76,7 +76,7 @@
         }
       ],
       "first_seen": 1794837990.626659,
-      "last_seen": 1794880360.7695456
+      "last_seen": 1794898800.8908815
     },
     {
       "username": "GrandmasterGarry",
@@ -166,76 +166,76 @@
       "rivalry": 1.0,
       "gaming_affinity": 0.05,
       "affection": 0.3,
-      "interaction_count": 33,
+      "interaction_count": 36,
       "special_nickname": "Penonton Setia",
       "inside_jokes": [],
       "shared_experiences": [],
       "first_seen": 1794840657.3044043,
-      "last_seen": 1794880358.7011986
+      "last_seen": 1794898797.142453
     },
     {
       "username": "Alice",
       "tier": "regular_viewer",
       "tier_label": "Regular Viewer \u2615",
-      "familiarity": 0.32,
-      "trust": 0.64,
+      "familiarity": 0.34,
+      "trust": 0.68,
       "rivalry": 0.05,
       "gaming_affinity": 0.05,
-      "affection": 0.85,
-      "interaction_count": 11,
+      "affection": 0.9,
+      "interaction_count": 12,
       "special_nickname": "Penonton Setia",
       "inside_jokes": [],
       "shared_experiences": [],
       "first_seen": 1794840657.8652763,
-      "last_seen": 1794880361.4823716
+      "last_seen": 1794898801.646979
     },
     {
       "username": "Troll",
       "tier": "rival",
       "tier_label": "Rival Sengit \u2694\ufe0f",
-      "familiarity": 0.32,
+      "familiarity": 0.34,
       "trust": 0.2,
-      "rivalry": 0.93,
+      "rivalry": 1.0,
       "gaming_affinity": 0.05,
       "affection": 0.3,
-      "interaction_count": 11,
+      "interaction_count": 12,
       "special_nickname": "Rival Abadi",
       "inside_jokes": [],
       "shared_experiences": [],
       "first_seen": 1794840657.8652763,
-      "last_seen": 1794880361.4881208
+      "last_seen": 1794898801.6555188
     },
     {
       "username": "Chatter1",
       "tier": "regular_viewer",
       "tier_label": "Regular Viewer \u2615",
-      "familiarity": 0.32,
+      "familiarity": 0.34,
       "trust": 0.2,
       "rivalry": 0.05,
       "gaming_affinity": 0.05,
       "affection": 0.3,
-      "interaction_count": 11,
+      "interaction_count": 12,
       "special_nickname": "Penonton Setia",
       "inside_jokes": [],
       "shared_experiences": [],
       "first_seen": 1794840658.2540317,
-      "last_seen": 1794880364.663666
+      "last_seen": 1794898804.6648955
     },
     {
       "username": "TestFan",
       "tier": "regular_viewer",
       "tier_label": "Regular Viewer \u2615",
-      "familiarity": 0.32,
+      "familiarity": 0.34,
       "trust": 0.2,
       "rivalry": 0.05,
       "gaming_affinity": 0.05,
       "affection": 0.3,
-      "interaction_count": 11,
+      "interaction_count": 12,
       "special_nickname": "Penonton Setia",
       "inside_jokes": [],
       "shared_experiences": [],
       "first_seen": 1794840658.334166,
-      "last_seen": 1794880366.4407885
+      "last_seen": 1794898806.8373723
     }
   ]
 }

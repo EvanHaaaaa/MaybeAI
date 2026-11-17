@@ -1,5 +1,10 @@
 from typing import Dict, Any, Tuple, Optional
-from PIL import Image
+try:
+    from PIL import Image
+    HAS_PIL = True
+except ImportError:
+    Image = None
+    HAS_PIL = False
 
 from core.vision.models import VisualSceneType, VisualObservation
 
@@ -13,7 +18,7 @@ class VisualAnalyzer:
     @classmethod
     def analyze_frame(
         cls,
-        image: Image.Image,
+        image: Any,
         previous_observation: Optional[VisualObservation] = None,
         change_delta: float = 0.0,
         hint_scene: Optional[str] = None
@@ -21,6 +26,15 @@ class VisualAnalyzer:
         """
         Processes an image and returns a detailed VisualObservation object.
         """
+        if not HAS_PIL or image is None:
+            return VisualObservation(
+                scene_type=hint_scene or VisualSceneType.DESKTOP_GENERAL.value,
+                summary="Layar monitor aktif (Modul Pillow belum terpasang).",
+                detected_label="Desktop",
+                confidence=0.5,
+                change_delta=change_delta
+            )
+
         # If an explicit hint or simulation preset was passed, leverage it directly
         if hint_scene and hint_scene in [s.value for s in VisualSceneType]:
             detected_type = hint_scene
@@ -89,7 +103,7 @@ class VisualAnalyzer:
         )
 
     @classmethod
-    def _classify_scene(cls, img: Image.Image) -> Tuple[str, float]:
+    def _classify_scene(cls, img: Any) -> Tuple[str, float]:
         """
         Fast multi-stage heuristics:
         1. Red vignette death screen detection
@@ -98,6 +112,8 @@ class VisualAnalyzer:
         4. YouTube red scrubber detection
         5. Sky/grass horizon detection
         """
+        if img is None or not HAS_PIL:
+            return VisualSceneType.DESKTOP_GENERAL.value, 0.5
         # Downscale to a normalized 128x72 for fast pixel statistics
         thumb = img.resize((128, 72)).convert("RGB")
         w, h = thumb.size
