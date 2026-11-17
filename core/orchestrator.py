@@ -573,6 +573,86 @@ class Orchestrator:
                 await self.chess.start_game(player_name=primary.user, player_color=player_color)
                 return
 
+        # Check for Desktop Companion commands / queries
+        is_desktop_command = (
+            msg_lower.startswith("!desktop") or
+            any(k in msg_lower for k in [
+                "buka notepad", "buka calc", "buka spotify", "buka discord", "buka obs",
+                "kecilin volume", "turunin volume", "besarin volume", "naikin volume",
+                "mute volume", "bisu", "unmute", "suara kekencengan", "suara kecil",
+                "next lagu", "pause lagu", "stop lagu", "play lagu", "putar lagu", "setel musik", "ganti lagu"
+            ])
+        )
+        if is_desktop_command:
+            desktop_engine = self.brain.desktop
+            parts = clean_input.split()
+            speech_resp = None
+            handled = False
+
+            # Volume
+            if any(k in msg_lower for k in ["kecilin volume", "turunin volume", "suara kekencengan", "!desktop volume down"]):
+                _, speech_resp = desktop_engine.request_action("volume_control", "adjust_volume", {"delta": -15})
+                handled = True
+            elif any(k in msg_lower for k in ["besarin volume", "naikin volume", "suara kecil", "!desktop volume up"]):
+                _, speech_resp = desktop_engine.request_action("volume_control", "adjust_volume", {"delta": 15})
+                handled = True
+            elif "mute" in msg_lower or "bisu" in msg_lower or "!desktop mute" in msg_lower:
+                _, speech_resp = desktop_engine.request_action("volume_control", "toggle_mute", {})
+                handled = True
+            elif "!desktop volume" in msg_lower:
+                for idx, p in enumerate(parts):
+                    if p.lower() == "volume" and idx + 1 < len(parts):
+                        try:
+                            target_vol = int(parts[idx + 1])
+                            _, speech_resp = desktop_engine.request_action("volume_control", "set_volume", {"volume": target_vol})
+                            handled = True
+                            break
+                        except ValueError:
+                            pass
+
+            # Media Player
+            elif any(k in msg_lower for k in ["pause", "jeda", "stop lagu", "!desktop pause"]):
+                _, speech_resp = desktop_engine.request_action("media_control", "play_pause", {})
+                handled = True
+            elif any(k in msg_lower for k in ["play lagu", "puter lagu", "putar lagu", "setel musik", "!desktop play"]):
+                _, speech_resp = desktop_engine.request_action("media_control", "play_pause", {})
+                handled = True
+            elif any(k in msg_lower for k in ["next lagu", "ganti lagu", "lagu berikutnya", "!desktop next"]):
+                _, speech_resp = desktop_engine.request_action("media_control", "next_track", {})
+                handled = True
+
+            # App Launch
+            elif any(k in msg_lower for k in ["buka ", "!desktop app"]):
+                app_target = "notepad.exe"
+                if "calc" in msg_lower:
+                    app_target = "calc.exe"
+                elif "spotify" in msg_lower:
+                    app_target = "spotify.exe"
+                elif "discord" in msg_lower:
+                    app_target = "discord.exe"
+                elif "obs" in msg_lower:
+                    app_target = "obs64.exe"
+                elif "!desktop app" in msg_lower and len(parts) > 2:
+                    app_target = parts[2]
+                _, speech_resp = desktop_engine.request_action("app_launch", "launch_app", {"app_name": app_target})
+                handled = True
+
+            # Notifications
+            elif "notifikasi" in msg_lower or "!desktop notif" in msg_lower:
+                _, speech_resp = desktop_engine.request_action("notifications_read", "read_notification", {})
+                handled = True
+
+            # General Status
+            elif "!desktop" in msg_lower or "desktop companion" in msg_lower:
+                st = "AKTIF" if desktop_engine.config.master_enabled else "MATI"
+                speech_resp = f"[emotion: happy] Mode Desktop Companion lagi {st}! Eve bisa bantu atur volume ({desktop_engine.config.current_volume}%), kontrol musik, buka aplikasi, dan cek notifikasi sesuai izin kamu! [action: wink]"
+                handled = True
+
+            if handled and speech_resp:
+                await self.broadcast("desktop_updated", desktop_engine.get_state())
+                await self._speak_response(speech_resp, user_label="Eve (Desktop Companion)")
+                return
+
         # Game context
         game_contexts = []
         if self.minecraft.connection_status == "connected":
@@ -838,12 +918,12 @@ class Orchestrator:
 
         await self.chat.put_message(user=sender, text=message, source="minecraft")
 
-    async def _on_chess_commentary(self, speech_raw: str):
+    async def _speak_response(self, speech_raw: str, user_label: str = "Eve"):
         speech_text, emotions, actions = ActionParser.parse(speech_raw)
         primary_emotion = emotions[0] if emotions else "neutral"
 
         await self.broadcast("ai_response", {
-            "user": "Eve (Chess)",
+            "user": user_label,
             "raw": speech_raw,
             "speech": speech_text,
             "emotions": emotions,
@@ -858,7 +938,7 @@ class Orchestrator:
                 await self.vts.update_mouth(val)
             await self.broadcast("avatar_state", {"mouth_open": val, "emotion": primary_emotion})
 
-        print(f"[Chess Commentary] [{primary_emotion}] {speech_text}")
+        print(f"[{user_label}] [{primary_emotion}] {speech_text}")
         await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
 
         if self.vts.connected:
@@ -866,6 +946,9 @@ class Orchestrator:
             await self.vts.update_mouth(0.0)
 
         await self.broadcast("avatar_state", {"mouth_open": 0.0, "emotion": "neutral"})
+
+    async def _on_chess_commentary(self, speech_raw: str):
+        await self._speak_response(speech_raw, user_label="Eve (Chess)")
 
     async def _on_chess_state_change(self, state: Dict[str, Any]):
         await self.broadcast("chess_state", state)

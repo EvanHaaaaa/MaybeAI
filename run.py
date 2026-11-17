@@ -778,25 +778,13 @@ async def websocket_endpoint(websocket: WebSocket):
                     params = data.get("params", {})
                     req, speech = engine.request_action(cat, a_type, params)
                     await orchestrator.broadcast("desktop_updated", engine.get_state())
-                    await orchestrator.broadcast("ai_response", {
-                        "user": "Eve (Desktop Companion)",
-                        "raw": speech,
-                        "speech": speech,
-                        "emotions": ["happy" if req.status == "executed" else "surprised"],
-                        "actions": ["wink"]
-                    })
+                    await orchestrator._speak_response(speech, user_label="Eve (Desktop Companion)")
                 elif act == "confirm_action":
                     action_id = data.get("action_id", "")
                     approved = bool(data.get("approved", True))
                     req, speech = engine.confirm_action(action_id, approved)
                     await orchestrator.broadcast("desktop_updated", engine.get_state())
-                    await orchestrator.broadcast("ai_response", {
-                        "user": "Eve (Desktop Companion)",
-                        "raw": speech,
-                        "speech": speech,
-                        "emotions": ["happy" if approved else "neutral"],
-                        "actions": ["nod"]
-                    })
+                    await orchestrator._speak_response(speech, user_label="Eve (Desktop Companion)")
             elif data.get("type") == "minigame_action":
                 act = data.get("action")
                 engine = orchestrator.brain.minigames

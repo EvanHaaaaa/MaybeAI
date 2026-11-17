@@ -1,12 +1,12 @@
 {
   "level": 2,
-  "exp": 60,
+  "exp": 92,
   "exp_to_next_level": 200,
   "traits": {
-    "competitiveness": 0.4124,
-    "confidence": 0.5701,
-    "warmth": 0.734,
-    "sassiness": 0.5596,
+    "competitiveness": 0.4242,
+    "confidence": 0.5829,
+    "warmth": 0.7548,
+    "sassiness": 0.586,
     "intellect": 0.5
   },
   "archetype": "Community Darling 💖 (Lv. 2)",
@@ -198,6 +198,42 @@
       "trait_changes": {
         "warmth": 0.0111,
         "confidence": 0.0065
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_3454bcd9",
+      "timestamp": 1794902721.5634668,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0106,
+        "confidence": 0.0064
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan Alice membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_fdcbef86",
+      "timestamp": 1794902721.5712347,
+      "category": "banter",
+      "trigger": "troll_encountered",
+      "trait_changes": {
+        "sassiness": 0.0264,
+        "competitiveness": 0.0118
+      },
+      "exp_gained": 12,
+      "narrative": "Komentar usil dari Troll dibalas dengan sentilan cerdas, mempertajam gaya sarkastis Eve."
+    },
+    {
+      "id": "exp_6965b02b",
+      "timestamp": 1794902722.4823027,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0102,
+        "confidence": 0.0064
       },
       "exp_gained": 10,
       "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."

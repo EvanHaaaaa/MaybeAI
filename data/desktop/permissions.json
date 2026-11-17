@@ -21,7 +21,7 @@
     "current_volume": 0,
     "is_muted": false,
     "media_state": "playing",
-    "current_track": "Mili - Rightfully (Eve Acoustic Cover)",
+    "current_track": "Yoasobi - Racing Into the Night (Piano ver.)",
     "streaming_scene": "Just Chatting",
     "is_streaming": false
   },
@@ -233,6 +233,51 @@
       "resolved_at": 1794898800.5193152,
       "details": "Permintaan aksi launch_app pada sistem desktop.",
       "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_541e5373",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794902068.9733024,
+      "requested_at_str": "14:54:28",
+      "resolved_at": 1794902068.9733024,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_e04bb4bf",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794902708.9947636,
+      "requested_at_str": "15:05:08",
+      "resolved_at": 1794902709.0737007,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' berhasil diluncurkan di desktop."
+    },
+    {
+      "id": "act_1af9af47",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794902720.3940978,
+      "requested_at_str": "15:05:20",
+      "resolved_at": 1794902720.4937544,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' berhasil diluncurkan di desktop."
     }
   ]
 }

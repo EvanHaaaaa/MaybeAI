@@ -43,21 +43,26 @@ class DesktopController:
     # --- 1. Volume Control ---
     def set_volume(self, target_volume: int) -> Tuple[int, str]:
         clamped = max(0, min(100, int(target_volume)))
+        old_vol = self.config.current_volume
+        diff = clamped - old_vol
         self.config.current_volume = clamped
         self.config.is_muted = False if clamped > 0 else self.config.is_muted
-        self._send_windows_media_key("volume_set")
+        if diff != 0:
+            steps = max(1, min(25, abs(diff) // 2))
+            key_type = "volume_up" if diff > 0 else "volume_down"
+            for _ in range(steps):
+                self._send_windows_media_key(key_type)
         msg = f"Volume sistem diatur ke {clamped}%."
         return clamped, msg
 
     def adjust_volume(self, delta: int) -> Tuple[int, str]:
         new_vol = max(0, min(100, self.config.current_volume + int(delta)))
         self.config.current_volume = new_vol
-        if delta > 0:
-            self._send_windows_media_key("volume_up")
-            msg = f"Volume dinaikkan ke {new_vol}%."
-        else:
-            self._send_windows_media_key("volume_down")
-            msg = f"Volume diturunkan ke {new_vol}%."
+        steps = max(1, min(15, abs(int(delta)) // 2))
+        key_type = "volume_up" if delta > 0 else "volume_down"
+        for _ in range(steps):
+            self._send_windows_media_key(key_type)
+        msg = f"Volume {'dinaikkan' if delta > 0 else 'diturunkan'} ke {new_vol}%."
         return new_vol, msg
 
     def toggle_mute(self) -> Tuple[bool, str]:
@@ -109,8 +114,20 @@ class DesktopController:
     # --- 3. App Launch ---
     def launch_app(self, app_name: str) -> Tuple[bool, str]:
         clean = app_name.strip()
+        if sys.platform == "win32" and not clean.lower().endswith(".exe") and not clean.lower().endswith(".lnk"):
+            target = f"{clean}.exe"
+        else:
+            target = clean
+
         try:
-            return True, f"Aplikasi '{clean}' diluncurkan / diaktifkan di desktop."
+            if sys.platform == "win32":
+                try:
+                    os.startfile(target)
+                except Exception:
+                    subprocess.Popen(target, shell=True)
+            else:
+                subprocess.Popen([target])
+            return True, f"Aplikasi '{target}' berhasil diluncurkan di desktop."
         except Exception as e:
             return False, f"Gagal membuka aplikasi '{clean}': {e}"
 

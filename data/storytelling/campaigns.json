@@ -61,7 +61,7 @@
       "stat_affinity": "Agility",
       "resolved_choice_id": null,
       "dice_result": null,
-      "time_str": "14:01:11"
+      "time_str": "15:05:29"
     },
     "scenes_history": [],
     "party": {
@@ -91,8 +91,8 @@
       "Guild Chat pernah mengalahkan Mimic berkat voting lempar biskuit",
       "Eve hampir membakar jenggot kurcaci dengan spell api level 1"
     ],
-    "created_at_str": "2026-11-17 14:01:11",
-    "updated_at_str": "14:01:11"
+    "created_at_str": "2026-11-17 15:05:29",
+    "updated_at_str": "15:05:29"
   },
   "history": [
     {
