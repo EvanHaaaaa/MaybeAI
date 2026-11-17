@@ -224,6 +224,29 @@ async def cheer_performance(user: str = "Chatter", cheer_type: str = "glowstick"
     })
     return {"total_glowsticks": cnt}
 
+# --- Experience-Based Personality Evolution Endpoints ---
+@app.get("/api/personality/state")
+async def get_personality_state():
+    return orchestrator.brain.personality.get_state()
+
+@app.post("/api/personality/experience")
+async def record_personality_experience(req: Dict[str, Any]):
+    event_type = req.get("event_type", "friendly_interaction")
+    context = req.get("context", {})
+    res = orchestrator.brain.personality.record_experience(event_type, context)
+    orchestrator.brain.personality.sync_to_mood_baselines(orchestrator.brain.mood)
+    await orchestrator.broadcast("personality_updated", orchestrator.brain.personality.get_state())
+    await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+    return res
+
+@app.post("/api/personality/reset")
+async def reset_personality():
+    orchestrator.brain.personality.reset_to_factory_defaults()
+    orchestrator.brain.personality.sync_to_mood_baselines(orchestrator.brain.mood)
+    await orchestrator.broadcast("personality_updated", orchestrator.brain.personality.get_state())
+    await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+    return {"status": "reset", "state": orchestrator.brain.personality.get_state()}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -320,6 +343,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "performance_updated",
         "data": orchestrator.brain.performance.get_state()
+    })
+
+    # Send initial experience-based personality evolution state
+    await websocket.send_json({
+        "type": "personality_updated",
+        "data": orchestrator.brain.personality.get_state()
     })
 
     try:
@@ -879,6 +908,21 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": c_type,
                         "total_glowsticks": cnt
                     })
+            elif data.get("type") == "personality_action":
+                act = data.get("action")
+                p_engine = orchestrator.brain.personality
+                if act == "experience":
+                    ev = data.get("event_type", "friendly_interaction")
+                    ctx = data.get("context", {})
+                    p_engine.record_experience(ev, ctx)
+                    p_engine.sync_to_mood_baselines(orchestrator.brain.mood)
+                    await orchestrator.broadcast("personality_updated", p_engine.get_state())
+                    await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+                elif act == "reset":
+                    p_engine.reset_to_factory_defaults()
+                    p_engine.sync_to_mood_baselines(orchestrator.brain.mood)
+                    await orchestrator.broadcast("personality_updated", p_engine.get_state())
+                    await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:

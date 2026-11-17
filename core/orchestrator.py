@@ -694,6 +694,10 @@ class Orchestrator:
 
         # 4. Post-Show MC & Self Evaluation
         outro_speech, score = director.finish_performance()
+        if hasattr(self.brain, "personality") and self.brain.personality:
+            self.brain.personality.record_experience("stage_performance", {"song": actual_song_id, "score": score})
+            self.brain.personality.sync_to_mood_baselines(self.brain.mood)
+            await self.broadcast("personality_updated", self.brain.personality.get_state())
         await self.broadcast("performance_updated", director.get_state())
 
         speech_text, emotions, actions = ActionParser.parse(outro_speech)
@@ -823,12 +827,20 @@ class Orchestrator:
             self.brain.relationships.record_gaming_event(data.get("player", "Player"), "chess", "game_over", data)
             if data.get("eve_won"):
                 self.brain.mood.apply_stimulus("chess_victory")
+                if hasattr(self.brain, "personality") and self.brain.personality:
+                    self.brain.personality.record_experience("game_victory", {"game": "chess", "opponent": data.get("player")})
+                    self.brain.personality.sync_to_mood_baselines(self.brain.mood)
                 await self.evaluate_goal_event("chess_game_won", data)
             elif data.get("player_won"):
                 self.brain.mood.apply_stimulus("chess_defeat")
+                if hasattr(self.brain, "personality") and self.brain.personality:
+                    self.brain.personality.record_experience("game_defeat", {"game": "chess", "opponent": data.get("player")})
+                    self.brain.personality.sync_to_mood_baselines(self.brain.mood)
         await self.broadcast("memory_updated", self.brain.episodic_memory.get_stats())
         await self.broadcast("mood_updated", self.brain.mood.get_state())
         await self.broadcast("relationship_updated", self.brain.relationships.get_state())
+        if hasattr(self.brain, "personality") and self.brain.personality:
+            await self.broadcast("personality_updated", self.brain.personality.get_state())
 
     async def evaluate_goal_event(self, event_type: str, data: Dict[str, Any]):
         """Evaluates domain events against autonomous active subtasks."""
@@ -838,6 +850,10 @@ class Orchestrator:
             if details.get("goal_completed"):
                 self.brain.mood.apply_stimulus("goal_all_completed")
                 g_dict = details.get("goal", {})
+                if hasattr(self.brain, "personality") and self.brain.personality:
+                    self.brain.personality.record_experience("challenge_completed", {"task": g_dict.get("title")})
+                    self.brain.personality.sync_to_mood_baselines(self.brain.mood)
+                    await self.broadcast("personality_updated", self.brain.personality.get_state())
                 self.brain.episodic_memory.record_episode(
                     title=f"Misi Selesai: {g_dict.get('title')}",
                     content=f"Eve berhasil menyelesaikan seluruh target '{g_dict.get('title')}' secara mandiri!",

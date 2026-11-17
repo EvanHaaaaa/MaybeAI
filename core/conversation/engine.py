@@ -15,6 +15,7 @@ from core.desktop import DesktopCompanionEngine
 from core.minigames import MiniGameEngine
 from core.storytelling import StoryEngine
 from core.performance import PerformanceDirector
+from core.personality import PersonalityEvolutionEngine
 
 class ConversationEngine:
     """
@@ -51,6 +52,8 @@ class ConversationEngine:
         self.minigames = MiniGameEngine()
         self.storytelling = StoryEngine()
         self.performance = PerformanceDirector()
+        self.personality = PersonalityEvolutionEngine()
+        self.personality.sync_to_mood_baselines(self.mood)
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -102,15 +105,29 @@ class ConversationEngine:
     def _apply_chat_stimulus(self, user: str, text: str, is_donation: bool, donation_amount: str):
         if is_donation:
             self.mood.apply_stimulus("donation")
+            if hasattr(self, "personality") and self.personality:
+                self.personality.record_experience("friendly_interaction", {"user": user, "note": f"Donation {donation_amount}"})
+                self.personality.sync_to_mood_baselines(self.mood)
             return
 
         lower = text.lower()
         if any(w in lower for w in ["bodoh", "noob", "cupu", "jelek", "loser", "bego", "roast", "hina"]):
             self.mood.apply_stimulus("insult")
+            if hasattr(self, "personality") and self.personality:
+                self.personality.record_experience("troll_encountered", {"user": user})
+                self.personality.sync_to_mood_baselines(self.mood)
         elif any(w in lower for w in ["cantik", "hebat", "pinter", "keren", "imut", "love", "suka", "gg", "cute"]):
             self.mood.apply_stimulus("compliment")
+            if hasattr(self, "personality") and self.personality:
+                self.personality.record_experience("friendly_interaction", {"user": user})
+                self.personality.sync_to_mood_baselines(self.mood)
         elif any(w in lower for w in ["wkwk", "haha", "lmao", "kekw", "lucu", "lawak", "joke"]):
             self.mood.apply_stimulus("joke")
+        elif any(w in lower for w in ["arti hidup", "kesadaran ai", "filosofi", "alam semesta", "tujuan hidup"]):
+            self.mood.apply_stimulus("philosophical_query")
+            if hasattr(self, "personality") and self.personality:
+                self.personality.record_experience("deep_conversation", {"topic": text, "user": user})
+                self.personality.sync_to_mood_baselines(self.mood)
         elif lower.endswith("?") or any(lower.startswith(q) for q in ["kenapa", "mengapa", "apa", "gimana", "bagaimana", "why", "how", "what"]):
             self.mood.apply_stimulus("question")
 
@@ -222,6 +239,7 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
         minigame_directive = self.minigames.get_prompt_directive() if self.minigames else ""
         storytelling_directive = self.storytelling.get_prompt_directive() if self.storytelling else ""
         performance_directive = self.performance.get_prompt_directive() if self.performance else ""
+        personality_directive = self.personality.get_prompt_directive() if self.personality else ""
 
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
@@ -245,7 +263,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             desktop_directive=desktop_directive,
             minigame_directive=minigame_directive,
             storytelling_directive=storytelling_directive,
-            performance_directive=performance_directive
+            performance_directive=performance_directive,
+            personality_directive=personality_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -535,6 +554,31 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
                 return f"[emotion: excited] Waaah! Terima kasih {user_name}! Glowstick panggung bertambah jadi {cnt} buah! Hype banget! [action: giggle]"
             else:
                 return f"[emotion: happy] Karena mood Eve lagi **{dominant_mood}**, Eve memilih lagu '{rec_title}'! {rec_reason} Mau Eve bawain sekarang? Ketik '!sing'! [action: wink]"
+
+        # Experience-Based Personality Evolution & Character Growth
+        is_personality_query = any(w in msg_lower for w in [
+            "kepribadian", "sifat", "evolusi", "personality", "trait", "traits",
+            "kompetitif", "competitive", "pede", "percaya diri", "sombong", "judes", "galak",
+            "level kamu", "archetype", "karakter kamu", "milestone kepribadian", "perkembangan sifat"
+        ])
+        if is_personality_query and hasattr(self, "personality") and self.personality:
+            p = self.personality.profile
+            t = p.traits
+            comp = int(t.get("competitiveness", 0.35) * 100)
+            conf = int(t.get("confidence", 0.50) * 100)
+            warm = int(t.get("warmth", 0.60) * 100)
+            sass = int(t.get("sassiness", 0.40) * 100)
+            intl = int(t.get("intellect", 0.50) * 100)
+            top_milestone = p.milestones[-1].title if p.milestones else "Idol Rookie"
+
+            if "kenapa" in msg_lower and ("kompetitif" in msg_lower or "kalah" in msg_lower):
+                return f"[emotion: smug] Kenapa kompetitif? Karena Eve belajar dari setiap kekalahan game! Tingkat kompetitif Eve sekarang {comp}%, jadi jangan harap bisa menang gampang ya {user_name}! [action: wink]"
+            elif "kenapa" in msg_lower and ("sombong" in msg_lower or "pede" in msg_lower or "percaya diri" in msg_lower):
+                return f"[emotion: smug] Percaya diri {conf}% ini hasil kerja keras Eve menaklukkan berbagai tantangan dan panggung stream! Wajar dong kalau Eve bangga! [action: giggle]"
+            elif "level" in msg_lower or "evolusi" in msg_lower:
+                return f"[emotion: happy] Status evolusi kepribadian Eve saat ini: **{p.archetype}** (Level {p.level}, EXP: {p.exp}/{p.exp_to_next_level})! Sifat Eve berkembang dari pengalaman nyata lho! [action: wink]"
+            else:
+                return f"[emotion: happy] Kepribadian Eve terus berkembang! Sekarang Eve adalah **{p.archetype}** (Kompetitif: {comp}%, Pede: {conf}%, Kehangatan: {warm}%, Sarkas: {sass}%, Intelek: {intl}%). Milestone: {top_milestone}! [action: giggle]"
 
         # Episodic Memory & Second Brain Callbacks
         recall_res = self.episodic_memory.recall(query=message, current_user=user_name, game_context=game_context)

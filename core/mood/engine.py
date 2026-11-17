@@ -36,7 +36,8 @@ class MoodEngine:
     }
 
     def __init__(self):
-        self.dimensions: Dict[str, float] = dict(self.BASELINES)
+        self.baselines: Dict[str, float] = dict(self.BASELINES)
+        self.dimensions: Dict[str, float] = dict(self.baselines)
         self.last_update_time: float = time.time()
         self.last_stimulus_name: str = "initialization"
         self.mood_history: list = []
@@ -47,7 +48,7 @@ class MoodEngine:
         dt = max(0.0, now - self.last_update_time)
         self.last_update_time = now
 
-        for dim, baseline in self.BASELINES.items():
+        for dim, baseline in self.baselines.items():
             rate = self.DECAY_RATES.get(dim, 0.015)
             current = self.dimensions[dim]
             # Exponential decay towards baseline: c(t) = b + (c0 - b) * e^(-r*t)
@@ -240,7 +241,7 @@ BEHAVIORAL DIRECTIVES:
 
     def reset_to_baseline(self):
         """Resets all affective dimensions to baseline defaults."""
-        self.dimensions = dict(self.BASELINES)
+        self.dimensions = dict(self.baselines)
         self.last_update_time = time.time()
         self.last_stimulus_name = "reset"
 
@@ -260,5 +261,5 @@ BEHAVIORAL DIRECTIVES:
                 "excitement": round(self.dimensions["excitement"], 3),
                 "competitiveness": round(self.dimensions["competitiveness"], 3)
             },
-            "baselines": self.BASELINES
+            "baselines": dict(self.baselines)
         }

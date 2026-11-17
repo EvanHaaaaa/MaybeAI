@@ -1,0 +1,125 @@
+{
+  "level": 1,
+  "exp": 96,
+  "exp_to_next_level": 100,
+  "traits": {
+    "competitiveness": 0.3882,
+    "confidence": 0.5435,
+    "warmth": 0.6869,
+    "sassiness": 0.5016,
+    "intellect": 0.5
+  },
+  "archetype": "Rookie Streamer 🌸 (Lv. 1)",
+  "archetype_desc": "Idol streamer pemula yang ramah, sedikit pemalu, namun penuh potensi.",
+  "milestones": [],
+  "history": [
+    {
+      "id": "exp_19cddabf",
+      "timestamp": 1794879328.7420864,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.016,
+        "confidence": 0.0075
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan Alice membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_395b130d",
+      "timestamp": 1794879328.7486086,
+      "category": "banter",
+      "trigger": "troll_encountered",
+      "trait_changes": {
+        "sassiness": 0.036,
+        "competitiveness": 0.013
+      },
+      "exp_gained": 12,
+      "narrative": "Komentar usil dari Troll dibalas dengan sentilan cerdas, mempertajam gaya sarkastis Eve."
+    },
+    {
+      "id": "exp_553a8fa9",
+      "timestamp": 1794879329.5930908,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0154,
+        "confidence": 0.0074
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_225dfdf1",
+      "timestamp": 1794879394.7720244,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0147,
+        "confidence": 0.0073
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan Alice membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_045faf92",
+      "timestamp": 1794879394.7796338,
+      "category": "banter",
+      "trigger": "troll_encountered",
+      "trait_changes": {
+        "sassiness": 0.0338,
+        "competitiveness": 0.0127
+      },
+      "exp_gained": 12,
+      "narrative": "Komentar usil dari Troll dibalas dengan sentilan cerdas, mempertajam gaya sarkastis Eve."
+    },
+    {
+      "id": "exp_9c89ffa7",
+      "timestamp": 1794879395.5952058,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0142,
+        "confidence": 0.0072
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_19763e0d",
+      "timestamp": 1794879410.563388,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0136,
+        "confidence": 0.0071
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan Alice membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_a735e7df",
+      "timestamp": 1794879410.569051,
+      "category": "banter",
+      "trigger": "troll_encountered",
+      "trait_changes": {
+        "sassiness": 0.0318,
+        "competitiveness": 0.0125
+      },
+      "exp_gained": 12,
+      "narrative": "Komentar usil dari Troll dibalas dengan sentilan cerdas, mempertajam gaya sarkastis Eve."
+    },
+    {
+      "id": "exp_92bef40f",
+      "timestamp": 1794879411.3632293,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.013,
+        "confidence": 0.007
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."
+    }
+  ]
+}

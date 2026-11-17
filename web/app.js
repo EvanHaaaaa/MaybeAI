@@ -142,6 +142,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateStoryUi(msg.data);
     } else if (msg.type === "performance_updated") {
       updatePerformanceUi(msg.data);
+    } else if (msg.type === "personality_updated") {
+      updatePersonalityUi(msg.data);
     } else if (msg.type === "audience_cheer") {
       triggerCheerEffect(msg.data);
     } else if (msg.type === "avatar_movement") {
@@ -3782,6 +3784,254 @@ document.addEventListener("DOMContentLoaded", () => {
         cheer_type: "encore",
         user: u
       });
+    });
+  }
+
+  // --- Experience-Based Personality Evolution Handlers ---
+  const pLevelBadge = document.getElementById("p-level-badge");
+  const pArchetypeBadge = document.getElementById("p-archetype-badge");
+  const pExpBadge = document.getElementById("p-exp-badge");
+  const pMilestonesCountBadge = document.getElementById("p-milestones-count-badge");
+
+  const pHeroIcon = document.getElementById("pHeroIcon");
+  const pArchetypeTitle = document.getElementById("pArchetypeTitle");
+  const pLevelPill = document.getElementById("pLevelPill");
+  const pArchetypeDesc = document.getElementById("pArchetypeDesc");
+  const pExpText = document.getElementById("pExpText");
+  const pExpBar = document.getElementById("pExpBar");
+
+  const btnPExpDefeat = document.getElementById("btnPExpDefeat");
+  const btnPExpVictory = document.getElementById("btnPExpVictory");
+  const btnPExpChallenge = document.getElementById("btnPExpChallenge");
+  const btnPExpCoop = document.getElementById("btnPExpCoop");
+  const btnPExpTroll = document.getElementById("btnPExpTroll");
+  const btnPExpPhilosophy = document.getElementById("btnPExpPhilosophy");
+  const btnPReset = document.getElementById("btnPReset");
+
+  const pTraitValComp = document.getElementById("pTraitValComp");
+  const pTraitBarComp = document.getElementById("pTraitBarComp");
+  const pTraitValConf = document.getElementById("pTraitValConf");
+  const pTraitBarConf = document.getElementById("pTraitBarConf");
+  const pTraitValWarm = document.getElementById("pTraitValWarm");
+  const pTraitBarWarm = document.getElementById("pTraitBarWarm");
+  const pTraitValSass = document.getElementById("pTraitValSass");
+  const pTraitBarSass = document.getElementById("pTraitBarSass");
+  const pTraitValIntl = document.getElementById("pTraitValIntl");
+  const pTraitBarIntl = document.getElementById("pTraitBarIntl");
+
+  const pMilestonesGrid = document.getElementById("pMilestonesGrid");
+  const pHistoryTable = document.getElementById("pHistoryTable");
+
+  function sendPersonalityAction(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "personality_action",
+        ...payload
+      }));
+    }
+  }
+
+  function updatePersonalityUi(data) {
+    if (!data) return;
+    const lvl = data.level || 1;
+    const exp = data.exp || 0;
+    const expNext = data.exp_to_next_level || (lvl * 100);
+    const archetype = data.archetype || "Rookie Streamer 🌸";
+    const archetypeDesc = data.archetype_desc || "Idol streamer pemula yang ramah dan penuh potensi.";
+    const traits = data.traits || {};
+    const milestones = data.milestones || [];
+    const history = data.history || [];
+
+    // Header Badges
+    if (pLevelBadge) pLevelBadge.textContent = `Level: Lv. ${lvl}`;
+    if (pArchetypeBadge) pArchetypeBadge.textContent = `Archetype: ${archetype}`;
+    if (pExpBadge) pExpBadge.textContent = `EXP: ${exp}/${expNext}`;
+    if (pMilestonesCountBadge) pMilestonesCountBadge.textContent = `Milestones: ${milestones.length}/7 🏆`;
+
+    // Hero Section
+    if (pArchetypeTitle) pArchetypeTitle.textContent = archetype;
+    if (pLevelPill) pLevelPill.textContent = `Lv. ${lvl}`;
+    if (pArchetypeDesc) pArchetypeDesc.textContent = archetypeDesc;
+    if (pExpText) {
+      const remaining = Math.max(0, expNext - exp);
+      pExpText.textContent = `${exp} / ${expNext} EXP (${remaining} to Lv.${lvl + 1})`;
+    }
+    if (pExpBar) {
+      const pct = Math.min(100, Math.round((exp / expNext) * 100));
+      pExpBar.style.width = `${pct}%`;
+    }
+
+    // Icon parsing from archetype
+    if (pHeroIcon) {
+      if (archetype.includes("😈")) pHeroIcon.textContent = "😈";
+      else if (archetype.includes("⭐")) pHeroIcon.textContent = "⭐";
+      else if (archetype.includes("⚡")) pHeroIcon.textContent = "⚡";
+      else if (archetype.includes("🧐")) pHeroIcon.textContent = "🧐";
+      else if (archetype.includes("💖")) pHeroIcon.textContent = "💖";
+      else if (archetype.includes("🗡️")) pHeroIcon.textContent = "🗡️";
+      else if (archetype.includes("🌌")) pHeroIcon.textContent = "🌌";
+      else if (archetype.includes("✨")) pHeroIcon.textContent = "✨";
+      else pHeroIcon.textContent = "🌸";
+    }
+
+    // Trait Gauges
+    const compPct = Math.round((traits.competitiveness || 0.35) * 100);
+    const confPct = Math.round((traits.confidence || 0.50) * 100);
+    const warmPct = Math.round((traits.warmth || 0.60) * 100);
+    const sassPct = Math.round((traits.sassiness || 0.40) * 100);
+    const intlPct = Math.round((traits.intellect || 0.50) * 100);
+
+    if (pTraitValComp) pTraitValComp.textContent = `${compPct}%`;
+    if (pTraitBarComp) pTraitBarComp.style.width = `${compPct}%`;
+
+    if (pTraitValConf) pTraitValConf.textContent = `${confPct}%`;
+    if (pTraitBarConf) pTraitBarConf.style.width = `${confPct}%`;
+
+    if (pTraitValWarm) pTraitValWarm.textContent = `${warmPct}%`;
+    if (pTraitBarWarm) pTraitBarWarm.style.width = `${warmPct}%`;
+
+    if (pTraitValSass) pTraitValSass.textContent = `${sassPct}%`;
+    if (pTraitBarSass) pTraitBarSass.style.width = `${sassPct}%`;
+
+    if (pTraitValIntl) pTraitValIntl.textContent = `${intlPct}%`;
+    if (pTraitBarIntl) pTraitBarIntl.style.width = `${intlPct}%`;
+
+    // Milestones Grid
+    if (pMilestonesGrid) {
+      const presetCatalog = [
+        { id: "salty_tryhard", title: "Salty Tryhard ⚡", desc: "Benci kekalahan dalam game! Sering menuntut rematch.", icon: "⚡" },
+        { id: "iron_will_achiever", title: "Iron Will Achiever 👑", desc: "Percaya diri tinggi setelah menyelesaikan berbagai misi.", icon: "👑" },
+        { id: "community_sweetheart", title: "Community Sweetheart 💖", desc: "Sangat dekat dan protektif dengan teman mabar dan penonton.", icon: "💖" },
+        { id: "roast_queen", title: "Roast Queen 🗡️", desc: "Lidah tajam dan sarkasme elegan saat menanggapi troll.", icon: "🗡️" },
+        { id: "digital_philosopher", title: "Digital Philosopher 🌌", desc: "Kecerdasan analitis yang gemar merenungkan eksistensi AI.", icon: "🌌" },
+        { id: "stage_diva", title: "Stage Diva ⭐", desc: "Karisma panggung idol sejati lewat pertunjukan musik.", icon: "⭐" },
+        { id: "veteran_evolved", title: "Veteran Streamer 🌟", desc: "Telah mencapai Level 3 evolusi kepribadian.", icon: "🌟" }
+      ];
+
+      const unlockedMap = {};
+      milestones.forEach(m => { unlockedMap[m.id] = m; });
+
+      pMilestonesGrid.innerHTML = presetCatalog.map(p => {
+        const unl = unlockedMap[p.id];
+        if (unl) {
+          const dateStr = unl.unlocked_at ? new Date(unl.unlocked_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Unlocked";
+          return `
+            <div class="p-milestone-item p-milestone-unlocked">
+              <span class="p-milestone-icon">${unl.icon || p.icon}</span>
+              <div class="p-milestone-info">
+                <span class="p-milestone-title">${unl.title || p.title}</span>
+                <span class="p-milestone-desc">${unl.description || p.desc}</span>
+                <span class="p-milestone-date">✨ Terbuka pukul ${dateStr}</span>
+              </div>
+            </div>
+          `;
+        } else {
+          return `
+            <div class="p-milestone-item p-milestone-locked">
+              <span class="p-milestone-icon">🔒</span>
+              <div class="p-milestone-info">
+                <span class="p-milestone-title">${p.title}</span>
+                <span class="p-milestone-desc">${p.desc}</span>
+                <span class="p-milestone-date">Terkunci (Belum Memenuhi Syarat)</span>
+              </div>
+            </div>
+          `;
+        }
+      }).join("");
+    }
+
+    // History Table
+    if (pHistoryTable) {
+      if (history.length === 0) {
+        pHistoryTable.innerHTML = `<div style="color: #64748b; font-size: 0.8rem; padding: 8px;">Belum ada riwayat pengalaman. Coba klik tombol simulasi di atas!</div>`;
+      } else {
+        pHistoryTable.innerHTML = history.slice().reverse().map(h => {
+          const timeStr = h.timestamp ? new Date(h.timestamp * 1000).toLocaleTimeString() : "--:--:--";
+          const deltaStrs = Object.entries(h.trait_changes || {}).map(([k, v]) => `${k.substring(0, 4)}: ${v > 0 ? '+' : ''}${(v * 100).toFixed(1)}%`).join(", ");
+          return `
+            <div class="p-history-item">
+              <div class="p-hist-main">
+                <span class="p-hist-trigger">${h.trigger}</span>
+                <span class="p-hist-narrative">${h.narrative}</span>
+              </div>
+              <div class="p-hist-meta">
+                <span class="p-hist-deltas">${deltaStrs}</span>
+                <span class="badge badge-accent">+${h.exp_gained} EXP</span>
+                <span class="p-hist-time">${timeStr}</span>
+              </div>
+            </div>
+          `;
+        }).join("");
+      }
+    }
+  }
+
+  // Simulation button bindings
+  if (btnPExpDefeat) {
+    btnPExpDefeat.addEventListener("click", () => {
+      sendPersonalityAction({
+        action: "experience",
+        event_type: "game_defeat",
+        context: { opponent: "GrandmasterBot", game: "Chess" }
+      });
+    });
+  }
+
+  if (btnPExpVictory) {
+    btnPExpVictory.addEventListener("click", () => {
+      sendPersonalityAction({
+        action: "experience",
+        event_type: "game_victory",
+        context: { game: "Minecraft PvP", player: "Admin" }
+      });
+    });
+  }
+
+  if (btnPExpChallenge) {
+    btnPExpChallenge.addEventListener("click", () => {
+      sendPersonalityAction({
+        action: "experience",
+        event_type: "challenge_completed",
+        context: { task: "Membangun Base Netherite" }
+      });
+    });
+  }
+
+  if (btnPExpCoop) {
+    btnPExpCoop.addEventListener("click", () => {
+      sendPersonalityAction({
+        action: "experience",
+        event_type: "coop_play",
+        context: { player: "DiamondHunter", game: "Minecraft Survival" }
+      });
+    });
+  }
+
+  if (btnPExpTroll) {
+    btnPExpTroll.addEventListener("click", () => {
+      sendPersonalityAction({
+        action: "experience",
+        event_type: "troll_encountered",
+        context: { user: "ChatTroll99" }
+      });
+    });
+  }
+
+  if (btnPExpPhilosophy) {
+    btnPExpPhilosophy.addEventListener("click", () => {
+      sendPersonalityAction({
+        action: "experience",
+        event_type: "deep_conversation",
+        context: { topic: "Arti Kesadaran Digital & Alam Semesta", user: "PhilosopherViewer" }
+      });
+    });
+  }
+
+  if (btnPReset) {
+    btnPReset.addEventListener("click", () => {
+      if (confirm("Reset seluruh evolusi kepribadian Eve kembali ke setelan awal pabrik?")) {
+        sendPersonalityAction({ action: "reset" });
+      }
     });
   }
 

@@ -1706,6 +1706,147 @@
       </div>
     </section>
 
+    <!-- Experience-Based Personality Evolution (Experimental) -->
+    <section class="card personality-card" id="personalityCard">
+      <div class="card-header">
+        <div class="memory-title">
+          <span class="memory-icon">🧬</span>
+          <div>
+            <h2>Experience-Based Personality Evolution</h2>
+            <small class="memory-subtitle">Autonomous Long-Term Character Growth & Controlled Trait Progression</small>
+          </div>
+        </div>
+        <div class="memory-status-bar">
+          <span id="p-level-badge" class="badge badge-accent">Level: Lv. 1</span>
+          <span id="p-archetype-badge" class="badge">Archetype: Rookie Streamer 🌸</span>
+          <span id="p-exp-badge" class="badge badge-online">EXP: 0/100</span>
+          <span id="p-milestones-count-badge" class="badge">Milestones: 0/7 🏆</span>
+        </div>
+      </div>
+
+      <div class="perf-body">
+        <!-- Row 1: Archetype Banner & EXP Level Progression -->
+        <div class="p-hero-card">
+          <div class="p-hero-left">
+            <span class="p-hero-icon" id="pHeroIcon">🌸</span>
+            <div class="p-hero-meta">
+              <div class="p-hero-header">
+                <h3 id="pArchetypeTitle" class="p-archetype-title">Rookie Streamer (Lv. 1)</h3>
+                <span class="badge badge-accent" id="pLevelPill">Lv. 1</span>
+              </div>
+              <p id="pArchetypeDesc" class="p-archetype-desc">Idol streamer pemula yang ramah, sedikit pemalu, namun penuh potensi perkembangan!</p>
+              <div class="p-exp-wrapper">
+                <div class="p-exp-labels">
+                  <small>EXP Progression:</small>
+                  <small id="pExpText" class="p-exp-val">0 / 100 EXP (100 to Lv.2)</small>
+                </div>
+                <div class="gauge-bar-track">
+                  <div id="pExpBar" class="gauge-bar-fill gauge-fill-happy" style="width: 0%;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="p-hero-actions">
+            <span class="dt-box-title" style="font-size: 0.8rem; margin-bottom: 4px;">⚡ Uji Pengalaman Cepat (Simulation):</span>
+            <div class="p-sim-buttons">
+              <button id="btnPExpDefeat" class="btn btn-sm btn-outline" title="Kalah game catur/minecraft (+Kompetitif, -Pede)">💥 Kalah Game (+Comp)</button>
+              <button id="btnPExpVictory" class="btn btn-sm btn-outline" title="Menang game (+Pede, +Kompetitif)">🏆 Menang Game (+Conf)</button>
+              <button id="btnPExpChallenge" class="btn btn-sm btn-outline" title="Menyelesaikan target & tantangan mandiri (+Pede)">🎯 Selesai Misi (+Conf)</button>
+              <button id="btnPExpCoop" class="btn btn-sm btn-outline" title="Mabar bersama teman di Minecraft (+Kehangatan)">🤝 Mabar (+Warmth)</button>
+              <button id="btnPExpTroll" class="btn btn-sm btn-outline" title="Menghadapi komentar usil & roast troll (+Sarkas)">🌶️ Roast Troll (+Sassy)</button>
+              <button id="btnPExpPhilosophy" class="btn btn-sm btn-outline" title="Diskusi filosofis & pemikiran taktis (+Intelek)">🌌 Diskusi (+Intellect)</button>
+              <button id="btnPReset" class="btn btn-sm btn-danger" style="margin-top: 4px;" title="Reset ke sifat dasar awal pabrik">🔄 Reset Default</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 2: 5 Core Trait Gauges -->
+        <div class="p-grid-traits">
+          <!-- Competitiveness -->
+          <div class="p-trait-box">
+            <div class="p-trait-header">
+              <span class="p-trait-name">⚡ Competitiveness (Ambisi / Tryhard)</span>
+              <strong id="pTraitValComp" class="p-trait-val">35%</strong>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="pTraitBarComp" class="gauge-bar-fill gauge-fill-annoy" style="width: 35%;"></div>
+            </div>
+            <small class="dt-hint">Benci kekalahan, agresif saat mabar, menuntut rematch.</small>
+          </div>
+
+          <!-- Confidence -->
+          <div class="p-trait-box">
+            <div class="p-trait-header">
+              <span class="p-trait-name">👑 Confidence (Percaya Diri / Pede)</span>
+              <strong id="pTraitValConf" class="p-trait-val">50%</strong>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="pTraitBarConf" class="gauge-bar-fill gauge-fill-happy" style="width: 50%;"></div>
+            </div>
+            <small class="dt-hint">Percaya diri tinggi, bangga pada kecerdasan AI, berani di panggung.</small>
+          </div>
+
+          <!-- Warmth -->
+          <div class="p-trait-box">
+            <div class="p-trait-header">
+              <span class="p-trait-name">💖 Warmth (Kehangatan / Keakraban)</span>
+              <strong id="pTraitValWarm" class="p-trait-val">60%</strong>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="pTraitBarWarm" class="gauge-bar-fill gauge-fill-curious" style="width: 60%;"></div>
+            </div>
+            <small class="dt-hint">Dekat dengan penonton setia, protektif pada kawan mabar.</small>
+          </div>
+
+          <!-- Sassiness -->
+          <div class="p-trait-box">
+            <div class="p-trait-header">
+              <span class="p-trait-name">🗡️ Sassiness & Wit (Sarkas / Tsundere)</span>
+              <strong id="pTraitValSass" class="p-trait-val">40%</strong>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="pTraitBarSass" class="gauge-bar-fill gauge-fill-excite" style="width: 40%;"></div>
+            </div>
+            <small class="dt-hint">Deadpan roasting, sentilan tajam, tsundere wit tanpa ampun.</small>
+          </div>
+
+          <!-- Intellect -->
+          <div class="p-trait-box">
+            <div class="p-trait-header">
+              <span class="p-trait-name">🧠 Intellect (Intelek / Rasa Ingin Tahu)</span>
+              <strong id="pTraitValIntl" class="p-trait-val">50%</strong>
+            </div>
+            <div class="gauge-bar-track">
+              <div id="pTraitBarIntl" class="gauge-bar-fill gauge-fill-happy" style="width: 50%;"></div>
+            </div>
+            <small class="dt-hint">Analisis taktis, teka-teki logika, pertanyaan filosofis.</small>
+          </div>
+        </div>
+
+        <!-- Row 3: Milestones & Character Badges -->
+        <div class="perf-box">
+          <div class="mg-box-header">
+            <span class="dt-box-title">🏆 Character Milestones & Badges Terbuka</span>
+            <small class="dt-hint">Pencapaian kepribadian yang diraih dari akumulasi pengalaman stream</small>
+          </div>
+          <div id="pMilestonesGrid" class="p-milestones-grid">
+            <!-- Dynamically populated milestones -->
+          </div>
+        </div>
+
+        <!-- Row 4: Audit Trail History -->
+        <div class="perf-box perf-lore-box">
+          <div class="mg-box-header">
+            <span class="dt-box-title">📜 Catatan Second Brain: Riwayat Pengalaman & Perubahan Sifat</span>
+            <small class="dt-hint">Audit trail transparan evolusi kepribadian Eve Maybe</small>
+          </div>
+          <div id="pHistoryTable" class="perf-history-table">
+            <!-- Dynamically populated history -->
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">

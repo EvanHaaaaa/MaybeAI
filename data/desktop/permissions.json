@@ -21,7 +21,7 @@
     "current_volume": 0,
     "is_muted": false,
     "media_state": "playing",
-    "current_track": "ChilledCow - Lofi Girl Beats",
+    "current_track": "Yoasobi - Racing Into the Night (Piano ver.)",
     "streaming_scene": "Just Chatting",
     "is_streaming": false
   },
@@ -156,6 +156,51 @@
       "requested_at": 1794878373.6155615,
       "requested_at_str": "08:19:33",
       "resolved_at": 1794878373.6155615,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_f82b8e3c",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794879327.9511042,
+      "requested_at_str": "08:35:27",
+      "resolved_at": 1794879327.9511042,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_20bc0536",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794879393.9429162,
+      "requested_at_str": "08:36:33",
+      "resolved_at": 1794879393.9429162,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_866c167c",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794879409.7849884,
+      "requested_at_str": "08:36:49",
+      "resolved_at": 1794879409.7849884,
       "details": "Permintaan aksi launch_app pada sistem desktop.",
       "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
     }
