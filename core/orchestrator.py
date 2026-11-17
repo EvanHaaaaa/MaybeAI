@@ -356,12 +356,18 @@ class Orchestrator:
         if not is_safe:
             print(f"[Moderator] Filtered unsafe input from {msg.user}: {msg.text}")
 
+        is_creator_flag = getattr(msg, "is_creator", False) or (
+            msg.source in ("creator", "mic") or msg.user.strip().lower() in ("creator", "admin", "evanh")
+        )
+
         await self.broadcast("chat_received", {
             "user": msg.user,
             "text": clean_input,
             "source": msg.source,
             "is_donation": msg.is_donation,
-            "donation_amount": msg.donation_amount
+            "donation_amount": msg.donation_amount,
+            "is_creator": is_creator_flag,
+            "channel": "creator" if is_creator_flag else "audience"
         })
 
         if msg.is_donation:
@@ -379,7 +385,8 @@ class Orchestrator:
             source=msg.source,
             is_donation=msg.is_donation,
             donation_amount=msg.donation_amount,
-            donation_currency=msg.donation_currency
+            donation_currency=msg.donation_currency,
+            is_creator=is_creator_flag
         )
         await self.broadcast("mood_updated", self.brain.mood.get_state())
         await self.broadcast("relationship_updated", self.brain.relationships.get_state())
@@ -465,6 +472,9 @@ class Orchestrator:
         primary = interaction.primary_message
         clean_input = primary.text
         msg_lower = clean_input.lower()
+        is_creator = getattr(primary, "is_creator", False) or (
+            primary.source in ("creator", "mic") or primary.user.strip().lower() in ("creator", "admin", "evanh")
+        )
 
         # Check for spontaneous improv command
         if msg_lower.startswith("!improv"):
@@ -483,6 +493,12 @@ class Orchestrator:
         # Check for Minecraft command / request
         if msg_lower.startswith("!mc") or "main minecraft" in msg_lower or "speedrun minecraft" in msg_lower or "guard me" in msg_lower or "lindungi aku" in msg_lower:
             parts = clean_input.split()
+            is_crucial_mc = any(k in msg_lower for k in ["mode", "kompe", "speedrun", "advance", "santai", "stop", "join", "connect", "disconnect", "server"]) or (len(parts) > 1 and parts[1] in ("next", "mode", "stop", "connect", "disconnect"))
+            if is_crucial_mc and not is_creator:
+                refuse_speech = f"[emotion: sassy] Hehe {primary.user}, pengaturan mode dan server Minecraft cuma boleh diubah sama Creator! Chat bolehnya ajak mabar, minta dilindungi ('guard me'), atau kasih gift ya! [action: pout]"
+                await self._speak_response(refuse_speech, user_label="Eve (Minecraft Guard)", is_creator=False)
+                return
+
             if "guard" in msg_lower or "lindungi" in msg_lower or "jaga" in msg_lower:
                 target = None
                 if len(parts) > 2 and parts[1].lower() == "guard":
@@ -539,6 +555,12 @@ class Orchestrator:
         # Check for Chess commands / requests
         if msg_lower.startswith("!chess") or msg_lower.startswith("!catur") or "main catur" in msg_lower or "play chess" in msg_lower:
             parts = clean_input.split()
+            is_crucial_chess = any(k in msg_lower for k in ["elo", "new", "mulai", "start", "resign", "menyerah"])
+            if is_crucial_chess and not is_creator:
+                refuse_speech = f"[emotion: smug] Santai dulu {primary.user}, cuma Creator yang berhak atur level ELO dan reset catur! Tapi kalau kamu mau adu taktik langkah per langkah, ketik '!chess move <langkah>' ya! [action: wink]"
+                await self._speak_response(refuse_speech, user_label="Eve (Chess Guard)", is_creator=False)
+                return
+
             # ELO command: !chess elo 1500
             if "elo" in msg_lower:
                 for idx, p in enumerate(parts):
@@ -584,6 +606,13 @@ class Orchestrator:
             ])
         )
         if is_desktop_command:
+            if not is_creator:
+                self.brain.mood.apply_stimulus("roast_request", 0.6)
+                await self.broadcast("mood_updated", self.brain.mood.get_state())
+                refuse_speech = f"[emotion: smug] Eits {primary.user}, fitur desktop dan kontrol sistem cuma boleh diatur sama Creator-ku tersayang! Chat cuma boleh nonton dan nikmati stream ya~ [action: wink]"
+                await self._speak_response(refuse_speech, user_label="Eve (Security Guard)", is_creator=False)
+                return
+
             desktop_engine = self.brain.desktop
             parts = clean_input.split()
             speech_resp = None
@@ -709,6 +738,7 @@ class Orchestrator:
         else:
             user_label = "Eve"
 
+        channel_name = "creator" if is_creator else "audience"
         await self.broadcast("ai_response", {
             "user": user_label,
             "raw": clean_response,
@@ -717,7 +747,9 @@ class Orchestrator:
             "actions": actions,
             "source": primary.source,
             "is_donation": is_donation,
-            "donation_amount": primary.donation_amount
+            "donation_amount": primary.donation_amount,
+            "is_creator": is_creator,
+            "channel": channel_name
         })
 
         if primary.source == "minecraft":
@@ -918,7 +950,7 @@ class Orchestrator:
 
         await self.chat.put_message(user=sender, text=message, source="minecraft")
 
-    async def _speak_response(self, speech_raw: str, user_label: str = "Eve"):
+    async def _speak_response(self, speech_raw: str, user_label: str = "Eve", is_creator: bool = True):
         speech_text, emotions, actions = ActionParser.parse(speech_raw)
         primary_emotion = emotions[0] if emotions else "neutral"
 
@@ -927,7 +959,9 @@ class Orchestrator:
             "raw": speech_raw,
             "speech": speech_text,
             "emotions": emotions,
-            "actions": actions
+            "actions": actions,
+            "is_creator": is_creator,
+            "channel": "creator" if is_creator else "audience"
         })
 
         if self.vts.connected:

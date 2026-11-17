@@ -10,7 +10,8 @@ class ChatMessage:
         source: str = "web",
         is_donation: bool = False,
         donation_amount: str = "",
-        donation_currency: str = ""
+        donation_currency: str = "",
+        is_creator: Optional[bool] = None
     ):
         self.user = user
         self.text = text
@@ -19,6 +20,10 @@ class ChatMessage:
         self.donation_amount = donation_amount
         self.donation_currency = donation_currency
         self.timestamp = asyncio.get_event_loop().time()
+        if is_creator is not None:
+            self.is_creator = bool(is_creator)
+        else:
+            self.is_creator = (source in ("creator", "mic") or user.lower() in ("creator", "admin", "evanh"))
 
 class ChatReceiver:
     """
@@ -50,7 +55,8 @@ class ChatReceiver:
         source: str = "web",
         is_donation: bool = False,
         donation_amount: str = "",
-        donation_currency: str = ""
+        donation_currency: str = "",
+        is_creator: Optional[bool] = None
     ):
         """
         Push message into the active queue.
@@ -61,7 +67,8 @@ class ChatReceiver:
             source=source,
             is_donation=is_donation,
             donation_amount=donation_amount,
-            donation_currency=donation_currency
+            donation_currency=donation_currency,
+            is_creator=is_creator
         )
         await self.queue.put(msg)
 

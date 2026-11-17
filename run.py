@@ -414,7 +414,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 user = data.get("user", "User")
                 text = data.get("text", "")
                 source = data.get("source", "web")
-                await orchestrator.chat.put_message(user=user, text=text, source=source)
+                is_creator = data.get("is_creator", None)
+                await orchestrator.chat.put_message(user=user, text=text, source=source, is_creator=is_creator)
             elif data.get("type") == "donation":
                 user = data.get("user", "Supporter")
                 text = data.get("text", "Love your stream!")

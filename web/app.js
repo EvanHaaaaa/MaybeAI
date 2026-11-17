@@ -5,9 +5,54 @@ document.addEventListener("DOMContentLoaded", () => {
   const meterFill = document.getElementById("meter-fill");
   const emotionBadge = document.getElementById("emotion-badge");
   const subtitles = document.getElementById("subtitles");
-  const chatHistory = document.getElementById("chatHistory");
-  const chatForm = document.getElementById("chatForm");
-  const chatInput = document.getElementById("chatInput");
+  // Dual Chat Elements (Creator VIP vs Audience Stream)
+  const tabCreatorChat = document.getElementById("tabCreatorChat");
+  const tabAudienceChat = document.getElementById("tabAudienceChat");
+  const audienceUnreadBadge = document.getElementById("audienceUnreadBadge");
+  const panelCreatorChat = document.getElementById("panelCreatorChat");
+  const panelAudienceChat = document.getElementById("panelAudienceChat");
+  const chatHistoryCreator = document.getElementById("chatHistoryCreator");
+  const chatHistoryAudience = document.getElementById("chatHistoryAudience");
+  const chatHistory = chatHistoryCreator || document.getElementById("chatHistory");
+  const creatorChatForm = document.getElementById("creatorChatForm");
+  const creatorChatInput = document.getElementById("creatorChatInput");
+  const audienceChatForm = document.getElementById("audienceChatForm");
+  const audienceUsernameInput = document.getElementById("audienceUsernameInput");
+  const audienceChatInput = document.getElementById("audienceChatInput");
+  const chatForm = creatorChatForm || document.getElementById("chatForm");
+  const chatInput = creatorChatInput || document.getElementById("chatInput");
+
+  let activeChatTab = "creator";
+  let unreadAudienceCount = 0;
+
+  function switchChatTab(tab) {
+    activeChatTab = tab;
+    if (tab === "creator") {
+      if (tabCreatorChat) tabCreatorChat.classList.add("active");
+      if (tabAudienceChat) tabAudienceChat.classList.remove("active");
+      if (panelCreatorChat) panelCreatorChat.style.display = "flex";
+      if (panelAudienceChat) panelAudienceChat.style.display = "none";
+      if (chatHistoryCreator) chatHistoryCreator.scrollTop = chatHistoryCreator.scrollHeight;
+    } else {
+      if (tabAudienceChat) tabAudienceChat.classList.add("active");
+      if (tabCreatorChat) tabCreatorChat.classList.remove("active");
+      if (panelAudienceChat) panelAudienceChat.style.display = "flex";
+      if (panelCreatorChat) panelCreatorChat.style.display = "none";
+      unreadAudienceCount = 0;
+      if (audienceUnreadBadge) {
+        audienceUnreadBadge.textContent = "0";
+        audienceUnreadBadge.style.display = "none";
+      }
+      if (chatHistoryAudience) chatHistoryAudience.scrollTop = chatHistoryAudience.scrollHeight;
+    }
+  }
+
+  if (tabCreatorChat) {
+    tabCreatorChat.addEventListener("click", () => switchChatTab("creator"));
+  }
+  if (tabAudienceChat) {
+    tabAudienceChat.addEventListener("click", () => switchChatTab("audience"));
+  }
   const vtsStatus = document.getElementById("vts-status");
   const wsStatus = document.getElementById("ws-status");
   const llmStatus = document.getElementById("llm-status");
@@ -68,19 +113,25 @@ document.addEventListener("DOMContentLoaded", () => {
     const msg = JSON.parse(event.data);
 
     if (msg.type === "chat_received") {
-      let author = msg.data.source === "minecraft" ? `🎮 [MC] ${msg.data.user}` : msg.data.user;
-      if (msg.data.source === "mic") {
+      const isCreator = Boolean(msg.data.is_creator || msg.data.channel === "creator" || msg.data.source === "mic" || msg.data.source === "creator");
+      const channel = msg.data.channel || (isCreator ? "creator" : "audience");
+      let author = msg.data.user;
+      if (msg.data.source === "minecraft") {
+        author = `🎮 [MC] ${msg.data.user}`;
+      } else if (msg.data.source === "mic") {
         author = `🎙️ [Mic] ${msg.data.user}`;
       }
       if (msg.data.is_donation) {
         author = `🎁 [SUPERCHAT ${msg.data.donation_amount}] ${msg.data.user}`;
       }
-      addChatMessage(author, msg.data.text, false, msg.data.is_donation);
+      addChatMessage(author, msg.data.text, false, msg.data.is_donation, channel, isCreator);
     } else if (msg.type === "donation_received") {
       showDonationAlert(msg.data.user, msg.data.amount, msg.data.text);
     } else if (msg.type === "ai_response") {
       const author = msg.data.user || "Eve";
-      addChatMessage(author, msg.data.speech, true);
+      const isCreator = Boolean(msg.data.is_creator);
+      const channel = msg.data.channel || (isCreator ? "creator" : "audience");
+      addChatMessage(author, msg.data.speech, true, false, channel, isCreator);
       subtitles.textContent = `"${msg.data.speech}"`;
       if (author === "Eve (Chess)" && chessCommentaryText) {
         chessCommentaryText.textContent = `"${msg.data.speech}"`;
@@ -99,7 +150,8 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (msg.type === "song_started") {
       isSinging = true;
       subtitles.textContent = `🎵 Playing: "${msg.data.title}" 🎵`;
-      addChatMessage("Eve", `[Singing: ${msg.data.title}]`, true);
+      addChatMessage("Eve", `[Singing: ${msg.data.title}]`, true, false, "creator", true);
+      addChatMessage("Eve", `[Singing: ${msg.data.title}]`, true, false, "audience", false);
     } else if (msg.type === "lyric_line") {
       isSinging = true;
       subtitles.textContent = `♪ ${msg.data.text} ♪`;
@@ -219,12 +271,43 @@ document.addEventListener("DOMContentLoaded", () => {
     }, 6000);
   }
 
-  function addChatMessage(author, text, isAi = false, isDonation = false) {
+  function addChatMessage(author, text, isAi = false, isDonation = false, channel = "creator", isCreator = false) {
+    const isTargetCreator = (channel === "creator" || isCreator);
+    const targetHistory = isTargetCreator ? (chatHistoryCreator || chatHistory) : (chatHistoryAudience || chatHistory);
+
     const div = document.createElement("div");
-    div.className = `chat-msg ${isAi ? "neuro-msg" : ""} ${isDonation ? "donation-msg" : ""}`;
-    div.innerHTML = `<span class="author">${author}:</span><span class="text">${escapeHtml(text)}</span>`;
-    chatHistory.appendChild(div);
-    chatHistory.scrollTop = chatHistory.scrollHeight;
+    let msgClass = "chat-msg";
+    if (isAi) {
+      msgClass += " neuro-msg";
+    } else if (isTargetCreator) {
+      msgClass += " creator-msg";
+    } else {
+      msgClass += " audience-msg";
+    }
+    if (isDonation) {
+      msgClass += " donation-msg";
+    }
+
+    div.className = msgClass;
+    let authorDisplay = escapeHtml(author);
+    if (!isAi && isTargetCreator && !authorDisplay.includes("👑")) {
+      authorDisplay = `👑 ${authorDisplay}`;
+    }
+    div.innerHTML = `<span class="author">${authorDisplay}:</span><span class="text">${escapeHtml(text)}</span>`;
+
+    if (targetHistory) {
+      targetHistory.appendChild(div);
+      targetHistory.scrollTop = targetHistory.scrollHeight;
+    }
+
+    // Unread badge for audience tab when user is on creator tab
+    if (!isTargetCreator && activeChatTab !== "audience") {
+      unreadAudienceCount++;
+      if (audienceUnreadBadge) {
+        audienceUnreadBadge.textContent = unreadAudienceCount > 99 ? "99+" : unreadAudienceCount;
+        audienceUnreadBadge.style.display = "inline-block";
+      }
+    }
   }
 
   function escapeHtml(string) {
@@ -233,21 +316,45 @@ document.addEventListener("DOMContentLoaded", () => {
     return el.innerHTML;
   }
 
-  // --- Chat Submit ---
-  chatForm.addEventListener("submit", (e) => {
-    e.preventDefault();
-    const text = chatInput.value.trim();
-    if (!text) return;
-    sendMessage("ChatUser", text);
-    chatInput.value = "";
-  });
+  // --- Chat Submit Forms ---
+  if (creatorChatForm) {
+    creatorChatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = creatorChatInput ? creatorChatInput.value.trim() : "";
+      if (!text) return;
+      sendMessage("Creator", text, "creator", true);
+      if (creatorChatInput) creatorChatInput.value = "";
+    });
+  }
 
-  // Quick prompt pills
+  if (audienceChatForm) {
+    audienceChatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const user = (audienceUsernameInput && audienceUsernameInput.value.trim()) || "PenontonStream";
+      const text = audienceChatInput ? audienceChatInput.value.trim() : "";
+      if (!text) return;
+      sendMessage(user, text, "web", false);
+      if (audienceChatInput) audienceChatInput.value = "";
+    });
+  }
+
+  // Fallback for chatForm
+  if (chatForm && chatForm !== creatorChatForm) {
+    chatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const text = chatInput ? chatInput.value.trim() : "";
+      if (!text) return;
+      sendMessage("Creator", text, "creator", true);
+      if (chatInput) chatInput.value = "";
+    });
+  }
+
+  // Quick prompt pills (Sends as Creator VIP)
   document.querySelectorAll(".pill").forEach(pill => {
     pill.addEventListener("click", () => {
       const msg = pill.getAttribute("data-msg");
       if (msg) {
-        sendMessage("ChatUser", msg);
+        sendMessage("Creator", msg, "creator", true);
       }
     });
   });
@@ -299,14 +406,25 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
-  function sendMessage(user, text, source = "web") {
+  function sendMessage(user, text, source = "web", isCreator = null) {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "user_message", user: user, text: text, source: source }));
+      const payload = {
+        type: "user_message",
+        user: user,
+        text: text,
+        source: source
+      };
+      if (isCreator !== null) {
+        payload.is_creator = isCreator;
+      }
+      ws.send(JSON.stringify(payload));
     }
   }
 
   // --- Microphone Voice Listening (Speech-to-Text) ---
   const btnToggleMicHeader = document.getElementById("btn-toggle-mic-header");
+  const btnCreatorMic = document.getElementById("btn-creator-mic");
+  const creatorMicLabel = document.getElementById("creator-mic-label");
   const btnChatMic = document.getElementById("btn-chat-mic");
   const micStatusBar = document.getElementById("mic-status-bar");
   const micTranscriptPreview = document.getElementById("mic-transcript-preview");
@@ -360,7 +478,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (finalTranscript.trim()) {
         const spokenText = finalTranscript.trim();
         if (micTranscriptPreview) micTranscriptPreview.textContent = `Terkirim: "${spokenText}"`;
-        sendMessage("Creator", spokenText, "mic");
+        sendMessage("Creator", spokenText, "mic", true);
       }
     };
 
@@ -390,6 +508,15 @@ document.addEventListener("DOMContentLoaded", () => {
         btnToggleMicHeader.classList.add("active");
       } else {
         btnToggleMicHeader.classList.remove("active");
+      }
+    }
+    if (btnCreatorMic) {
+      if (listening) {
+        btnCreatorMic.classList.add("active");
+        if (creatorMicLabel) creatorMicLabel.textContent = "Mendengarkan... (Klik untuk stop)";
+      } else {
+        btnCreatorMic.classList.remove("active");
+        if (creatorMicLabel) creatorMicLabel.textContent = "Bicara ke Eve (Mic: OFF)";
       }
     }
     if (btnChatMic) {
@@ -437,6 +564,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (btnToggleMicHeader) {
     btnToggleMicHeader.addEventListener("click", toggleMic);
+  }
+  if (btnCreatorMic) {
+    btnCreatorMic.addEventListener("click", toggleMic);
   }
   if (btnChatMic) {
     btnChatMic.addEventListener("click", toggleMic);

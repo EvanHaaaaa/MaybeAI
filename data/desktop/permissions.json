@@ -21,7 +21,7 @@
     "current_volume": 0,
     "is_muted": false,
     "media_state": "playing",
-    "current_track": "Yoasobi - Racing Into the Night (Piano ver.)",
+    "current_track": "Mili - Rightfully (Eve Acoustic Cover)",
     "streaming_scene": "Just Chatting",
     "is_streaming": false
   },
@@ -276,6 +276,36 @@
       "requested_at": 1794902720.3940978,
       "requested_at_str": "15:05:20",
       "resolved_at": 1794902720.4937544,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' berhasil diluncurkan di desktop."
+    },
+    {
+      "id": "act_d7341dcd",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794903429.233949,
+      "requested_at_str": "15:17:09",
+      "resolved_at": 1794903429.3334785,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' berhasil diluncurkan di desktop."
+    },
+    {
+      "id": "act_090e2ad2",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794903647.4765985,
+      "requested_at_str": "15:20:47",
+      "resolved_at": 1794903647.5398917,
       "details": "Permintaan aksi launch_app pada sistem desktop.",
       "result_summary": "Aplikasi 'notepad.exe' berhasil diluncurkan di desktop."
     }

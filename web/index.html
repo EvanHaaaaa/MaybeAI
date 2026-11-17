@@ -68,38 +68,93 @@
         </div>
       </section>
 
-      <!-- Right: Live Chat & Control Panel -->
+      <!-- Right: Live Chat & Control Panel (Dual Panel: Creator VIP vs Stream Audience) -->
       <section class="card chat-card">
-        <div class="card-header">
-          <h2>Live Stream Chat</h2>
+        <!-- Dual Chat Header with Tab Navigation -->
+        <div class="card-header chat-tabs-header">
+          <div class="chat-tab-buttons">
+            <button type="button" id="tabCreatorChat" class="chat-tab active">
+              👑 Chat Saya <span class="tab-badge-vip">VIP</span>
+            </button>
+            <button type="button" id="tabAudienceChat" class="chat-tab">
+              👥 Stream Chat <span id="audienceUnreadBadge" class="tab-badge-unread" style="display: none;">0</span>
+            </button>
+          </div>
           <div class="chat-header-tags">
             <span id="conv-topic-badge" class="badge">Topic: Chat</span>
             <span id="conv-roleplay-badge" class="badge badge-accent" style="display: none;">🎭 Roleplay</span>
-            <span class="user-count">Twitch / Web</span>
-          </div>
-        </div>
-        
-        <div class="chat-history" id="chatHistory">
-          <div class="chat-msg system-msg">
-            <span class="author">System:</span>
-            <span class="text">Welcome to MaybeAI! Type a message below to talk to Eve.</span>
           </div>
         </div>
 
-        <div id="mic-status-bar" class="mic-status-bar" style="display: none;">
-          <span class="mic-recording-pulse">🔴</span>
-          <span id="mic-transcript-preview" class="mic-transcript">Mendengarkan suaramu...</span>
-          <select id="micLangSelect" class="select-mic-lang" title="Bahasa Pengenalan Suara">
-            <option value="id-ID" selected>🇮🇩 ID</option>
-            <option value="en-US">🇺🇸 EN</option>
-          </select>
+        <!-- Panel 1: Creator Direct Interaction (Priority VIP #1 + Integrated Voice Recognition) -->
+        <div id="panelCreatorChat" class="chat-panel active">
+          <div class="panel-info-banner creator-banner">
+            <div class="banner-left">
+              <span class="banner-icon">⚡</span>
+              <div>
+                <strong>VIP Direct Channel (Creator):</strong> Pesan kamu diprioritaskan nomor 1 & memiliki otorisasi penuh (Desktop, Game, Settings).
+              </div>
+            </div>
+            <span class="badge badge-online">Prioritas: #1 (350.0)</span>
+          </div>
+
+          <div class="chat-history" id="chatHistoryCreator">
+            <div class="chat-msg system-msg">
+              <span class="author">System:</span>
+              <span class="text">Channel VIP Creator aktif. Gunakan mikrofon di dock bawah atau ketik instruksi untuk kontrol penuh atas Eve.</span>
+            </div>
+          </div>
+
+          <!-- Relocated Voice & Speech Listening Dock in Creator Panel -->
+          <div class="creator-voice-dock">
+            <div class="voice-dock-controls">
+              <button type="button" id="btn-creator-mic" class="btn btn-mic-dock" title="Toggle Mic (Bicara langsung ke Eve)">
+                <span class="mic-icon">🎙️</span>
+                <span id="creator-mic-label">Bicara ke Eve (Mic: OFF)</span>
+              </button>
+              <select id="micLangSelect" class="select-mic-lang" title="Bahasa Pengenalan Suara">
+                <option value="id-ID" selected>🇮🇩 ID</option>
+                <option value="en-US">🇺🇸 EN</option>
+              </select>
+            </div>
+            <div id="mic-status-bar" class="mic-status-bar" style="display: none;">
+              <span class="mic-recording-pulse">🔴</span>
+              <span id="mic-transcript-preview" class="mic-transcript">Mendengarkan suaramu...</span>
+            </div>
+          </div>
+
+          <form id="creatorChatForm" class="chat-input-area creator-input-area">
+            <input type="text" id="creatorChatInput" placeholder="Ketik instruksi VIP untuk Eve..." autocomplete="off">
+            <button type="submit" class="btn btn-primary btn-creator-send">Kirim (VIP)</button>
+          </form>
         </div>
 
-        <form id="chatForm" class="chat-input-area">
-          <button type="button" id="btn-chat-mic" class="btn btn-mic-icon" title="Toggle Mic (Bicara langsung ke Eve)">🎙️</button>
-          <input type="text" id="chatInput" placeholder="Ketik pesan atau klik mic untuk bicara..." autocomplete="off">
-          <button type="submit" class="btn btn-primary">Send</button>
-        </form>
+        <!-- Panel 2: Audience Stream Chat (Twitch / Public Web Viewers) -->
+        <div id="panelAudienceChat" class="chat-panel" style="display: none;">
+          <div class="panel-info-banner audience-banner">
+            <div class="banner-left">
+              <span class="banner-icon">🛡️</span>
+              <div>
+                <strong>Public Audience Stream:</strong> Chat dari penonton Twitch & Web.
+                <small style="display:block; opacity:0.8; margin-top:2px;">Aksi krusial sistem (Desktop apps, MC Mode/Server, Reset Catur) dikunci untuk publik.</small>
+              </div>
+            </div>
+            <span class="badge badge-accent">Mode: Protected</span>
+          </div>
+
+          <div class="chat-history" id="chatHistoryAudience">
+            <div class="chat-msg system-msg">
+              <span class="author">System:</span>
+              <span class="text">Public Stream Chat. Pesan penonton masuk ke antrian kurasi reguler Eve.</span>
+            </div>
+          </div>
+
+          <form id="audienceChatForm" class="chat-input-area audience-input-area">
+            <input type="text" id="audienceUsernameInput" class="audience-user-input" placeholder="Nama Penonton" value="PenontonStream" style="max-width: 140px;">
+            <input type="text" id="audienceChatInput" placeholder="Ketik pesan sebagai penonton..." autocomplete="off">
+            <button type="submit" class="btn btn-secondary">Kirim</button>
+          </form>
+        </div>
       </section>
     </main>
 

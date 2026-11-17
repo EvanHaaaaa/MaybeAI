@@ -98,5 +98,64 @@ class TestSystemIntegrity(unittest.IsolatedAsyncioTestCase):
         await orch._execute_interaction(interaction)
         orch.tts.speak.assert_called()
 
+    async def test_creator_vip_priority_over_audience_and_donations(self):
+        orch = Orchestrator()
+        orch.tts.speak = AsyncMock()
+        orch.broadcast = AsyncMock()
+
+        # Ingest audience donation and regular chat, then Creator message
+        await orch.chat.put_message(user="AudienceFan", text="Keren banget streamnya!", source="web", is_creator=False)
+        await orch.chat.put_message(user="SultanSawer", text="Saweran 50rb!", source="web", is_donation=True, donation_amount="50000", is_creator=False)
+        await orch.chat.put_message(user="Creator", text="Eve, tolong siapkan gameplay catur sekarang ya.", source="creator", is_creator=True)
+
+        while not orch.chat.queue.empty():
+            m = await orch.chat.get_next_message()
+            await orch._ingest_message(m)
+
+        # Creator message must be dequeued FIRST before donations
+        interaction1 = orch.brain.conversation.select_next_interaction()
+        self.assertIsNotNone(interaction1)
+        self.assertTrue(interaction1.primary_message.is_creator)
+        self.assertEqual(interaction1.primary_message.user, "Creator")
+
+        # Next should be the donation
+        interaction2 = orch.brain.conversation.select_next_interaction()
+        self.assertIsNotNone(interaction2)
+        self.assertEqual(interaction2.interaction_type, "donation")
+
+    async def test_audience_crucial_actions_guardrail(self):
+        orch = Orchestrator()
+        orch.tts.speak = AsyncMock()
+        orch.broadcast = AsyncMock()
+
+        # 1. Audience trying Desktop control -> Must be refused
+        await orch.chat.put_message(user="TrollAudience", text="!desktop open calc", source="web", is_creator=False)
+        msg1 = await orch.chat.get_next_message()
+        await orch._ingest_message(msg1)
+        interaction1 = orch.brain.conversation.select_next_interaction()
+        await orch._execute_interaction(interaction1)
+        # Check that speech was refused
+        orch.tts.speak.assert_called()
+        last_speech = orch.tts.speak.call_args[0][0]
+        self.assertIn("cuma boleh diatur sama Creator", last_speech)
+
+        # 2. Audience trying Minecraft mode change -> Must be refused
+        await orch.chat.put_message(user="TrollAudience", text="!mc mode kompe", source="web", is_creator=False)
+        msg2 = await orch.chat.get_next_message()
+        await orch._ingest_message(msg2)
+        interaction2 = orch.brain.conversation.select_next_interaction()
+        await orch._execute_interaction(interaction2)
+        last_speech2 = orch.tts.speak.call_args[0][0]
+        self.assertIn("cuma boleh diubah sama Creator", last_speech2)
+
+        # 3. Audience trying Chess ELO reset -> Must be refused
+        await orch.chat.put_message(user="TrollAudience", text="!chess elo 2500", source="web", is_creator=False)
+        msg3 = await orch.chat.get_next_message()
+        await orch._ingest_message(msg3)
+        interaction3 = orch.brain.conversation.select_next_interaction()
+        await orch._execute_interaction(interaction3)
+        last_speech3 = orch.tts.speak.call_args[0][0]
+        self.assertIn("cuma Creator yang berhak atur level ELO", last_speech3)
+
 if __name__ == "__main__":
     unittest.main()

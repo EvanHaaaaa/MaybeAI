@@ -74,7 +74,8 @@ class ConversationEngine:
         source: str = "web",
         is_donation: bool = False,
         donation_amount: str = "",
-        donation_currency: str = ""
+        donation_currency: str = "",
+        is_creator: Optional[bool] = None
     ) -> LiveChatMessage:
         """Full live stream chat message ingestion with metadata and priority curation."""
         self.last_interaction_time = time.time()
@@ -99,7 +100,8 @@ class ConversationEngine:
             source=source,
             is_donation=is_donation,
             donation_amount=donation_amount,
-            donation_currency=donation_currency
+            donation_currency=donation_currency,
+            is_creator=is_creator
         )
 
     def _apply_chat_stimulus(self, user: str, text: str, is_donation: bool, donation_amount: str):

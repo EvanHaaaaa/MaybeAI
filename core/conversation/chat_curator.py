@@ -11,6 +11,7 @@ class LiveChatMessage:
     is_donation: bool = False
     donation_amount: str = ""
     donation_currency: str = ""
+    is_creator: bool = False
     timestamp: float = field(default_factory=time.time)
     msg_type: str = "general"  # donation, joke, question, mention, debate, reaction, general
     priority_score: float = 0.0
@@ -61,11 +62,16 @@ class ChatCurator:
         source: str = "web",
         is_donation: bool = False,
         donation_amount: str = "",
-        donation_currency: str = ""
+        donation_currency: str = "",
+        is_creator: Optional[bool] = None
     ) -> LiveChatMessage:
         clean_text = text.strip()
         msg_type = self._classify_message(clean_text, is_donation)
         
+        creator_flag = is_creator if is_creator is not None else (
+            source in ("creator", "mic") or user.strip().lower() in ("creator", "admin", "evanh")
+        )
+
         msg = LiveChatMessage(
             user=user.strip() or "Chatter",
             text=clean_text,
@@ -73,6 +79,7 @@ class ChatCurator:
             is_donation=is_donation,
             donation_amount=donation_amount,
             donation_currency=donation_currency,
+            is_creator=creator_flag,
             msg_type=msg_type,
             timestamp=time.time()
         )
@@ -116,15 +123,15 @@ class ChatCurator:
         return "general"
 
     def _compute_priority(self, msg: LiveChatMessage) -> float:
+        # Creator and voice input from microphone get absolute top priority
+        if msg.is_creator or msg.source in ("creator", "mic"):
+            return 350.0
+
         score = 10.0
 
-        # Donations always have top priority
+        # Donations always have top priority among audience
         if msg.is_donation:
             return 200.0
-
-        # Voice input from microphone (creator speaking directly) gets immediate response priority
-        if msg.source == "mic":
-            score += 95.0
 
         # Direct mentions of Eve
         if "mention" in msg.msg_type:
@@ -154,15 +161,28 @@ class ChatCurator:
         """
         Selects the best message or group of messages to respond to.
         Prioritizes:
-        1. Pending Donations (NEVER dropped)
-        2. Group Debates (if multiple chatters talk about contrasting things)
-        3. Highest priority unresponded chat message
+        1. Creator Messages (Always first priority)
+        2. Pending Donations (Never dropped)
+        3. Group Debates (if multiple chatters talk about contrasting things)
+        4. Highest priority unresponded chat message
         """
         unresponded = [m for m in self.message_buffer if not m.was_responded]
         if not unresponded:
             return None
 
-        # 1. Check for pending donations first!
+        # 1. ALWAYS check for Creator/Mic messages first! (Creator Priority)
+        creator_msgs = [m for m in unresponded if (m.is_creator or m.source in ("creator", "mic"))]
+        if creator_msgs:
+            c_msg = max(creator_msgs, key=lambda m: m.priority_score)
+            c_msg.was_responded = True
+            self._record_responded_user(c_msg.user)
+            return ChatInteraction(
+                interaction_type="creator_direct",
+                primary_message=c_msg,
+                topic_summary=f"Direct Communication from Creator {c_msg.user}"
+            )
+
+        # 2. Check for pending donations!
         donations = [m for m in unresponded if m.is_donation]
         if donations:
             don = donations[0]

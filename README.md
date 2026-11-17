@@ -204,9 +204,13 @@ flowchart TD
 ### 18. Speech-To-Text & Microphone Input
 - **Dukungan Input Suara Creator:** Mendengarkan suara Anda melalui mikrofon menggunakan model OpenAI Whisper (mendukung mode CPU dan GPU) sehingga Anda bisa mengobrol secara langsung dengan Eve layaknya partner nyata.
 
-### 19. Twitch IRC & Web Chat Ingestion
+### 19. Twitch IRC & Web Chat Ingestion (Dual Channel: Creator VIP & Public Stream)
 - **Koneksi Siap Pakai:** Terhubung ke server Twitch IRC port 6667 dengan dukungan token OAuth.
 - **Anti-Spam Cooldown & Mention Filter:** Mengatur jeda pesan masuk dan opsi hanya merespons saat Eve di-mention (`@EveMaybe`).
+- **Pemisahan Jalur Komunikasi (Dual Channel Tabs):**
+  - **👑 Tab Chat Saya (Creator VIP):** Jalur eksklusif streamer dengan prioritas antrian absolut (`priority_score = 350.0`, melompati antrian penonton umum dan saweran). Dilengkapi dock mikrofon bawaan (Web Speech STT / Whisper) untuk berbicara langsung secara verbal ke Eve.
+  - **👥 Tab Stream Chat (Penonton Publik):** Jalur pesan publik (Twitch & penonton web). Pesan masuk ke antrian kurasi reguler dan dievaluasi berdasarkan relevansi, saweran, atau topik perdebatan.
+- **Strict Permission Guardrails:** Perintah krusial sistem (peluncuran aplikasi Desktop Companion `!desktop`, pergantian mode gameplay/server Minecraft `!mc mode/server`, dan reset/pengaturan ELO catur `!chess elo/new`) diproteksi penuh dan hanya dapat dijalankan oleh Creator. Jika penonton mencoba mengeksekusinya, Eve akan menolak dengan nada sarkas khasnya tanpa mengeksekusi aksi fisik pada sistem.
 
 ---
 
