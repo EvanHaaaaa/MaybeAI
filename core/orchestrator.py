@@ -336,6 +336,23 @@ class Orchestrator:
                         "actions": actions
                     })
 
+        # Process active storytelling / community RPG vote or action
+        if self.brain.storytelling and self.brain.storytelling.session.status in ("active", "voting", "dice_roll"):
+            story_res = self.brain.storytelling.process_chat_input(msg.user, clean_input)
+            if story_res is not None:
+                is_handled, narrative_speech = story_res
+                await self.broadcast("story_updated", self.brain.storytelling.get_state())
+                if is_handled and narrative_speech:
+                    speech_text, emotions, actions = ActionParser.parse(narrative_speech)
+                    role_title = self.brain.storytelling.session.eve_role.replace('_', ' ').title()
+                    await self.broadcast("ai_response", {
+                        "user": f"Eve ({role_title})",
+                        "raw": narrative_speech,
+                        "speech": speech_text,
+                        "emotions": emotions,
+                        "actions": actions
+                    })
+
     async def _process_chat_loop(self):
         """
         Continuously ingests chat into ChatCurator, then selects the highest

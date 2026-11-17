@@ -133,6 +133,68 @@ async def stop_minigame():
     })
     return sess.to_dict()
 
+# --- Dynamic Storytelling & Community Roleplay Endpoints ---
+@app.get("/api/storytelling/state")
+async def get_storytelling_state():
+    return orchestrator.brain.storytelling.get_state()
+
+@app.post("/api/storytelling/start")
+async def start_storytelling(
+    preset: str = "petualangan_netherite",
+    genre: Optional[str] = None,
+    eve_role: Optional[str] = None,
+    custom_title: Optional[str] = None,
+    custom_premise: Optional[str] = None
+):
+    engine = orchestrator.brain.storytelling
+    sess, speech = engine.start_campaign(
+        campaign_preset=preset,
+        genre=genre,
+        eve_role=eve_role,
+        custom_title=custom_title,
+        custom_premise=custom_premise
+    )
+    await orchestrator.broadcast("story_updated", engine.get_state())
+    role_title = sess.eve_role.replace('_', ' ').title()
+    await orchestrator.broadcast("ai_response", {
+        "user": f"Eve ({role_title})",
+        "raw": speech,
+        "speech": speech,
+        "emotions": ["excited"],
+        "actions": ["wink"]
+    })
+    return sess.to_dict()
+
+@app.post("/api/storytelling/advance")
+async def advance_storytelling(choice_id: Optional[str] = None, custom_narrative: Optional[str] = None):
+    engine = orchestrator.brain.storytelling
+    sc, speech = engine.advance_scene(chosen_choice_id=choice_id, custom_narrative=custom_narrative)
+    await orchestrator.broadcast("story_updated", engine.get_state())
+    role_title = engine.session.eve_role.replace('_', ' ').title()
+    await orchestrator.broadcast("ai_response", {
+        "user": f"Eve ({role_title})",
+        "raw": speech,
+        "speech": speech,
+        "emotions": ["happy"],
+        "actions": ["wink"]
+    })
+    return sc.to_dict() if sc else {}
+
+@app.post("/api/storytelling/roll")
+async def roll_storytelling_dice(roller: str = "Chat"):
+    engine = orchestrator.brain.storytelling
+    res, speech = engine.roll_dice(roller=roller)
+    await orchestrator.broadcast("story_updated", engine.get_state())
+    role_title = engine.session.eve_role.replace('_', ' ').title()
+    await orchestrator.broadcast("ai_response", {
+        "user": f"Eve ({role_title})",
+        "raw": speech,
+        "speech": speech,
+        "emotions": ["excited" if res.is_success else "smug"],
+        "actions": ["wink"]
+    })
+    return res.to_dict()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -217,6 +279,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "minigame_updated",
         "data": orchestrator.brain.minigames.get_state()
+    })
+
+    # Send initial dynamic storytelling state
+    await websocket.send_json({
+        "type": "story_updated",
+        "data": orchestrator.brain.storytelling.get_state()
     })
 
     try:
@@ -659,6 +727,98 @@ async def websocket_endpoint(websocket: WebSocket):
                     user = data.get("user", "Chatter")
                     text = data.get("message", "")
                     await orchestrator.chat.put_message(user=user, text=text, source="web")
+            elif data.get("type") == "story_action":
+                act = data.get("action")
+                engine = orchestrator.brain.storytelling
+                if act == "start":
+                    preset = data.get("preset", "petualangan_netherite")
+                    genre = data.get("genre")
+                    role = data.get("eve_role")
+                    c_title = data.get("custom_title")
+                    c_premise = data.get("custom_premise")
+                    sess, speech = engine.start_campaign(
+                        campaign_preset=preset,
+                        genre=genre,
+                        eve_role=role,
+                        custom_title=c_title,
+                        custom_premise=c_premise
+                    )
+                    await orchestrator.broadcast("story_updated", engine.get_state())
+                    role_title = sess.eve_role.replace('_', ' ').title()
+                    await orchestrator.broadcast("ai_response", {
+                        "user": f"Eve ({role_title})",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["excited"],
+                        "actions": ["wink"]
+                    })
+                elif act == "vote":
+                    user = data.get("user", "Chatter")
+                    choice_id = data.get("choice_id", "opt_1")
+                    ok, speech = engine.vote_choice(user, choice_id)
+                    await orchestrator.broadcast("story_updated", engine.get_state())
+                    if speech:
+                        role_title = engine.session.eve_role.replace('_', ' ').title()
+                        await orchestrator.broadcast("ai_response", {
+                            "user": f"Eve ({role_title})",
+                            "raw": speech,
+                            "speech": speech,
+                            "emotions": ["happy"],
+                            "actions": ["nod"]
+                        })
+                elif act == "action":
+                    user = data.get("user", "Chatter")
+                    act_text = data.get("action_text", "")
+                    ok, speech = engine.submit_freeform_action(user, act_text)
+                    await orchestrator.broadcast("story_updated", engine.get_state())
+                    if speech:
+                        role_title = engine.session.eve_role.replace('_', ' ').title()
+                        await orchestrator.broadcast("ai_response", {
+                            "user": f"Eve ({role_title})",
+                            "raw": speech,
+                            "speech": speech,
+                            "emotions": ["excited"],
+                            "actions": ["wink"]
+                        })
+                elif act == "roll":
+                    roller = data.get("roller", "Chat")
+                    dc_target = data.get("dc_target")
+                    stat_type = data.get("stat_type")
+                    res, speech = engine.roll_dice(roller=roller, dc_target=dc_target, stat_type=stat_type)
+                    await orchestrator.broadcast("story_updated", engine.get_state())
+                    role_title = engine.session.eve_role.replace('_', ' ').title()
+                    await orchestrator.broadcast("ai_response", {
+                        "user": f"Eve ({role_title})",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["excited" if res.is_success else "smug"],
+                        "actions": ["wink"]
+                    })
+                elif act == "advance":
+                    choice_id = data.get("choice_id")
+                    c_narrative = data.get("custom_narrative")
+                    sc, speech = engine.advance_scene(chosen_choice_id=choice_id, custom_narrative=c_narrative)
+                    await orchestrator.broadcast("story_updated", engine.get_state())
+                    role_title = engine.session.eve_role.replace('_', ' ').title()
+                    await orchestrator.broadcast("ai_response", {
+                        "user": f"Eve ({role_title})",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["excited"],
+                        "actions": ["wink"]
+                    })
+                elif act == "end":
+                    summary = data.get("summary")
+                    sess, speech = engine.end_campaign(outcome_summary=summary)
+                    await orchestrator.broadcast("story_updated", engine.get_state())
+                    role_title = sess.eve_role.replace('_', ' ').title()
+                    await orchestrator.broadcast("ai_response", {
+                        "user": f"Eve ({role_title})",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["happy"],
+                        "actions": ["wink"]
+                    })
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:

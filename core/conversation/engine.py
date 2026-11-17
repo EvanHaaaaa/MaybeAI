@@ -13,6 +13,7 @@ from core.vision import VisionEngine
 from core.minecraft.multiplayer import MultiplayerSocialEngine
 from core.desktop import DesktopCompanionEngine
 from core.minigames import MiniGameEngine
+from core.storytelling import StoryEngine
 
 class ConversationEngine:
     """
@@ -47,6 +48,7 @@ class ConversationEngine:
         self.multiplayer = MultiplayerSocialEngine()
         self.desktop = DesktopCompanionEngine()
         self.minigames = MiniGameEngine()
+        self.storytelling = StoryEngine()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -216,6 +218,7 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
         multiplayer_directive = self.multiplayer.get_prompt_directive() if self.multiplayer else ""
         desktop_directive = self.desktop.get_prompt_directive() if self.desktop else ""
         minigame_directive = self.minigames.get_prompt_directive() if self.minigames else ""
+        storytelling_directive = self.storytelling.get_prompt_directive() if self.storytelling else ""
 
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
@@ -237,7 +240,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             visual_directive=visual_directive,
             multiplayer_directive=multiplayer_directive,
             desktop_directive=desktop_directive,
-            minigame_directive=minigame_directive
+            minigame_directive=minigame_directive,
+            storytelling_directive=storytelling_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -481,6 +485,33 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
                 top = self.minigames.get_leaderboard(1)
                 top_name = top[0].username if top else "Belum ada"
                 return f"[emotion: happy] Arena Mini-Game siap! Eve bisa adakan Trivia Quiz, Tebak Angka, Sambung Kata, Teka-Teki, Would You Rather, dan Tebak Lagu bareng penonton chat! Top player saat ini dipegang oleh {top_name}! [action: wink]"
+
+        # Dynamic Storytelling & Community Roleplay RPG
+        is_story_query = any(w in msg_lower for w in [
+            "rpg", "roleplay", "cerita interaktif", "d20", "roll dadu", "petualangan",
+            "campaign", "party hp", "guild chat", "dungeon master", "isekai", "cyberpunk heist"
+        ])
+        if is_story_query and self.storytelling:
+            if self.storytelling.session.status == "voting" or self.storytelling.session.status == "active":
+                sc = self.storytelling.session.current_scene
+                title = self.storytelling.session.title
+                if "roll" in msg_lower or "dadu" in msg_lower or "d20" in msg_lower:
+                    _, speech = self.storytelling.roll_dice(roller=user_name)
+                    return speech
+                elif "hp" in msg_lower or "darah" in msg_lower or "status" in msg_lower:
+                    p = self.storytelling.session.party
+                    return f"[emotion: happy] Status Guild: Darah Party {p.hp}/{p.max_hp} HP, Moral {p.morale}%, Gold {p.gold}G, Lokasi: {p.current_location}! Inventori: {', '.join(p.inventory[:3])}! [action: wink]"
+                else:
+                    return f"[emotion: excited] Petualangan RPG '{title}' sedang berjalan! {sc.narrative if sc else 'Ayo tentukan langkah guild kita di chat!'} [action: wink]"
+            elif "cyberpunk" in msg_lower or "heist" in msg_lower:
+                _, speech = self.storytelling.start_campaign("heist_neo_jakarta")
+                return speech
+            elif "isekai" in msg_lower or "guild noob" in msg_lower:
+                _, speech = self.storytelling.start_campaign("guild_petualang_noob")
+                return speech
+            else:
+                _, speech = self.storytelling.start_campaign("petualangan_netherite")
+                return speech
 
         # Episodic Memory & Second Brain Callbacks
         recall_res = self.episodic_memory.recall(query=message, current_user=user_name, game_context=game_context)

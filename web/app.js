@@ -127,6 +127,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateDesktopUi(msg.data);
     } else if (msg.type === "minigame_updated") {
       updateMinigameUi(msg.data);
+    } else if (msg.type === "story_updated") {
+      updateStoryUi(msg.data);
     } else if (msg.type === "goal_completed") {
       showGoalCompletedAlert(msg.data);
     } else if (msg.type === "strategy_adapted") {
@@ -3050,6 +3052,393 @@ document.addEventListener("DOMContentLoaded", () => {
           action: "chat_input",
           user: user,
           message: msg
+        });
+      }
+    });
+  });
+
+  // --- Dynamic Storytelling & Community Roleplay RPG ---
+  const storyStatusBadge = document.getElementById("story-status-badge");
+  const storyGenreBadge = document.getElementById("story-genre-badge");
+  const storyRoleBadge = document.getElementById("story-role-badge");
+  const storyHpBadge = document.getElementById("story-hp-badge");
+  const storyGoldBadge = document.getElementById("story-gold-badge");
+
+  const selectStoryPreset = document.getElementById("selectStoryPreset");
+  const selectStoryRole = document.getElementById("selectStoryRole");
+  const btnStoryStart = document.getElementById("btnStoryStart");
+  const btnStoryAdvance = document.getElementById("btnStoryAdvance");
+  const btnStoryRoll = document.getElementById("btnStoryRoll");
+  const btnStoryEnd = document.getElementById("btnStoryEnd");
+
+  const storySceneTitle = document.getElementById("storySceneTitle");
+  const storyLocationBadge = document.getElementById("storyLocationBadge");
+  const storySpeakerName = document.getElementById("storySpeakerName");
+  const storyNarrativeText = document.getElementById("storyNarrativeText");
+  const storyChoicesContainer = document.getElementById("storyChoicesContainer");
+
+  const storyD20Target = document.getElementById("storyD20Target");
+  const storyD20Dice = document.getElementById("storyD20Dice");
+  const storyD20Outcome = document.getElementById("storyD20Outcome");
+
+  const storyPartyName = document.getElementById("storyPartyName");
+  const storyHpText = document.getElementById("storyHpText");
+  const storyHpBar = document.getElementById("storyHpBar");
+  const storyMoraleText = document.getElementById("storyMoraleText");
+  const storyMoraleBar = document.getElementById("storyMoraleBar");
+  const storyInventoryList = document.getElementById("storyInventoryList");
+
+  const storyActionForm = document.getElementById("storyActionForm");
+  const storyActionUser = document.getElementById("storyActionUser");
+  const storyActionText = document.getElementById("storyActionText");
+  const storySuggestionsList = document.getElementById("storySuggestionsList");
+  const storyMemoriesList = document.getElementById("storyMemoriesList");
+  const storyHistoryTable = document.getElementById("storyHistoryTable");
+
+  function sendStoryAction(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "story_action",
+        ...payload
+      }));
+    }
+  }
+
+  function animateD20Roll(finalVal, isSuccess, isCritSuccess, isCritFail) {
+    if (!storyD20Dice) return;
+    storyD20Dice.className = "d20-dice-die rolling";
+
+    let rollTicks = 0;
+    const interval = setInterval(() => {
+      storyD20Dice.textContent = Math.floor(Math.random() * 20) + 1;
+      rollTicks++;
+      if (rollTicks > 8) {
+        clearInterval(interval);
+        storyD20Dice.textContent = finalVal;
+        storyD20Dice.className = "d20-dice-die";
+        if (isCritSuccess) {
+          storyD20Dice.classList.add("nat20");
+        } else if (isCritFail) {
+          storyD20Dice.classList.add("nat1");
+        }
+      }
+    }, 60);
+  }
+
+  function updateStoryUi(data) {
+    if (!data) return;
+    const session = data.session || {};
+    const party = session.party || {};
+    const curScene = session.current_scene || {};
+
+    // 1. Status Badges
+    if (storyStatusBadge) {
+      const st = (session.status || "idle").toUpperCase();
+      if (st === "VOTING" || st === "ACTIVE") {
+        storyStatusBadge.textContent = "Status: ACTIVE (VOTING) 🟢";
+        storyStatusBadge.className = "badge badge-online";
+      } else if (st === "DICE_ROLL") {
+        storyStatusBadge.textContent = "Status: DICE ROLL 🎲";
+        storyStatusBadge.className = "badge badge-accent";
+      } else if (st === "COMPLETED") {
+        storyStatusBadge.textContent = "Status: COMPLETED 🏁";
+        storyStatusBadge.className = "badge";
+      } else {
+        storyStatusBadge.textContent = "Status: IDLE 💤";
+        storyStatusBadge.className = "badge";
+      }
+    }
+
+    if (storyGenreBadge) {
+      const g = (session.genre || "fantasy_rpg").replace('_', ' ').toUpperCase();
+      storyGenreBadge.textContent = `Genre: ${g}`;
+    }
+
+    if (storyRoleBadge) {
+      const r = (session.eve_role || "party_mage").replace('_', ' ').toUpperCase();
+      storyRoleBadge.textContent = `Role: ${r}`;
+    }
+
+    if (storyHpBadge) {
+      const hp = party.hp !== undefined ? party.hp : 100;
+      const maxHp = party.max_hp || 100;
+      storyHpBadge.textContent = `HP: ${hp}/${maxHp}`;
+      if (hp > 50) {
+        storyHpBadge.className = "badge badge-online";
+      } else if (hp > 20) {
+        storyHpBadge.className = "badge badge-accent";
+      } else {
+        storyHpBadge.className = "badge";
+      }
+    }
+
+    if (storyGoldBadge) {
+      storyGoldBadge.textContent = `💰 ${party.gold || 0}G`;
+    }
+
+    // 2. Control Buttons State
+    const isActive = session.status === "active" || session.status === "voting" || session.status === "dice_roll";
+    if (btnStoryStart) btnStoryStart.disabled = isActive;
+    if (btnStoryAdvance) btnStoryAdvance.disabled = !isActive;
+    if (btnStoryRoll) btnStoryRoll.disabled = !isActive;
+    if (btnStoryEnd) btnStoryEnd.disabled = !isActive;
+
+    // 3. Scene Theater
+    if (storySceneTitle) {
+      storySceneTitle.textContent = curScene.title || session.title || "Babak 1: Reruntuhan Kuno";
+    }
+
+    if (storyLocationBadge) {
+      storyLocationBadge.textContent = `📍 ${party.current_location || "Ancient Ruins"}`;
+    }
+
+    if (storySpeakerName) {
+      storySpeakerName.textContent = curScene.speaker_name || `Eve Maybe (${(session.eve_role || 'Party Host').replace('_', ' ').toUpperCase()}):`;
+    }
+
+    if (storyNarrativeText) {
+      storyNarrativeText.textContent = curScene.narrative || "Pilih skenario petualangan dan mulai campaign untuk berpetualang bareng Guild Chat!";
+    }
+
+    // 4. Choices Cards
+    if (storyChoicesContainer) {
+      storyChoicesContainer.innerHTML = "";
+      const choices = curScene.choices || [];
+      const totalVotes = choices.reduce((acc, c) => acc + (c.votes ? c.votes.length : 0), 0);
+
+      if (choices.length === 0) {
+        storyChoicesContainer.innerHTML = `<div class="story-choice-card"><p class="choice-desc">Belum ada pilihan keputusan pada adegan ini.</p></div>`;
+      } else {
+        choices.forEach((c, idx) => {
+          const card = document.createElement("div");
+          card.className = "story-choice-card";
+          const voteCount = c.votes ? c.votes.length : 0;
+          const votePct = totalVotes > 0 ? Math.round((voteCount / totalVotes) * 100) : 0;
+          const optKey = `!${idx + 1}`;
+
+          card.innerHTML = `
+            <div class="choice-header">
+              <span class="choice-key-tag">${optKey}</span>
+              <span class="choice-label">${c.label}</span>
+              <span class="choice-dc-badge">DC ${c.dc_check || 10} (${c.stat_affinity || 'Luck'})</span>
+            </div>
+            <p class="choice-desc">${c.description}</p>
+            <div class="choice-vote-row">
+              <span>Votes: <strong>${voteCount}</strong> (${votePct}%)</span>
+              <div class="choice-vote-bar">
+                <div class="choice-vote-fill" style="width: ${votePct}%;"></div>
+              </div>
+              <button type="button" class="btn btn-secondary btn-sm btn-vote-choice" style="font-size: 10px; padding: 2px 8px;">Vote ${optKey}</button>
+            </div>
+          `;
+
+          const voteBtn = card.querySelector(".btn-vote-choice");
+          if (voteBtn) {
+            voteBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              const u = storyActionUser ? (storyActionUser.value.trim() || "Chatter") : "Chatter";
+              sendStoryAction({
+                action: "vote",
+                user: u,
+                choice_id: c.id
+              });
+            });
+          }
+
+          card.addEventListener("click", () => {
+            const u = storyActionUser ? (storyActionUser.value.trim() || "Chatter") : "Chatter";
+            sendStoryAction({
+              action: "vote",
+              user: u,
+              choice_id: c.id
+            });
+          });
+
+          storyChoicesContainer.appendChild(card);
+        });
+      }
+    }
+
+    // 5. D20 Dice Target & Last Roll
+    if (storyD20Target) {
+      const dc = curScene.dc_check || 12;
+      const stat = curScene.stat_affinity || "Agility";
+      storyD20Target.textContent = `Target: DC ${dc} (${stat})`;
+    }
+
+    if (session.last_dice_roll) {
+      const r = session.last_dice_roll;
+      if (storyD20Dice) {
+        storyD20Dice.textContent = r.d20_value;
+        storyD20Dice.className = "d20-dice-die";
+        if (r.is_critical_success) storyD20Dice.classList.add("nat20");
+        else if (r.is_critical_fail) storyD20Dice.classList.add("nat1");
+      }
+      if (storyD20Outcome) {
+        storyD20Outcome.innerHTML = `
+          <strong>${r.roller} melempar D20:</strong> [Dadu ${r.d20_value} + ${r.modifier} Bonus = <strong>${r.total}</strong> vs DC ${r.dc_target}]<br>
+          <span style="color: ${r.is_success ? '#4ade80' : '#f87171'}; font-weight: 600;">${r.outcome_text}</span>
+        `;
+      }
+    }
+
+    // 6. Party Vitals
+    if (storyPartyName) {
+      storyPartyName.textContent = party.name || "Guild Chat & Eve";
+    }
+
+    if (storyHpText && storyHpBar) {
+      const hp = party.hp !== undefined ? party.hp : 100;
+      const maxHp = party.max_hp || 100;
+      storyHpText.textContent = `${hp}/${maxHp}`;
+      const hpPct = Math.min(100, Math.max(0, Math.round((hp / maxHp) * 100)));
+      storyHpBar.style.width = `${hpPct}%`;
+      if (hpPct <= 25) {
+        storyHpBar.className = "gauge-bar-fill gauge-fill-annoy";
+      } else {
+        storyHpBar.className = "gauge-bar-fill gauge-fill-happy";
+      }
+    }
+
+    if (storyMoraleText && storyMoraleBar) {
+      const morale = party.morale !== undefined ? party.morale : 100;
+      storyMoraleText.textContent = `${morale}%`;
+      storyMoraleBar.style.width = `${Math.min(100, Math.max(0, morale))}%`;
+    }
+
+    if (storyInventoryList) {
+      storyInventoryList.innerHTML = "";
+      const inv = party.inventory || [];
+      if (inv.length === 0) {
+        storyInventoryList.innerHTML = `<span class="inv-pill">Tas Kosong</span>`;
+      } else {
+        inv.forEach(item => {
+          const sp = document.createElement("span");
+          sp.className = "inv-pill";
+          sp.textContent = item;
+          storyInventoryList.appendChild(sp);
+        });
+      }
+    }
+
+    // 7. Freeform Community Suggestions
+    if (storySuggestionsList) {
+      storySuggestionsList.innerHTML = "";
+      const suggs = session.freeform_suggestions || [];
+      if (suggs.length === 0) {
+        storySuggestionsList.innerHTML = `<div class="suggestion-item">Belum ada usulan taktik bebas diajukan. Ketik !action di chat!</div>`;
+      } else {
+        suggs.forEach(s => {
+          const div = document.createElement("div");
+          div.className = "suggestion-item";
+          div.innerHTML = `<strong>${s.user}</strong>: "${s.action}" <small style="color: #64748b;">(${s.time})</small>`;
+          storySuggestionsList.appendChild(div);
+        });
+      }
+    }
+
+    // 8. Episodic Lore & Memories
+    if (storyMemoriesList) {
+      storyMemoriesList.innerHTML = "";
+      const mems = session.key_memories || [];
+      mems.forEach(m => {
+        const li = document.createElement("li");
+        li.textContent = m;
+        storyMemoriesList.appendChild(li);
+      });
+    }
+
+    // 9. Campaign History Table
+    if (storyHistoryTable && data.campaigns_history) {
+      storyHistoryTable.innerHTML = "";
+      data.campaigns_history.forEach(h => {
+        const row = document.createElement("div");
+        row.className = "history-item-row";
+        row.innerHTML = `
+          <div class="history-meta">
+            <span class="history-title">${h.title}</span>
+            <small class="history-sub">${h.summary || ''}</small>
+          </div>
+          <div class="history-stats">${h.final_hp || '-'}HP | ${h.final_gold || '-'}G</div>
+        `;
+        storyHistoryTable.appendChild(row);
+      });
+    }
+  }
+
+  // Event Listeners for Story Controls
+  if (btnStoryStart) {
+    btnStoryStart.addEventListener("click", () => {
+      const preset = selectStoryPreset ? selectStoryPreset.value : "petualangan_netherite";
+      const role = selectStoryRole ? selectStoryRole.value : "party_mage";
+      sendStoryAction({
+        action: "start",
+        preset: preset,
+        eve_role: role
+      });
+    });
+  }
+
+  if (btnStoryAdvance) {
+    btnStoryAdvance.addEventListener("click", () => {
+      sendStoryAction({ action: "advance" });
+    });
+  }
+
+  if (btnStoryRoll) {
+    btnStoryRoll.addEventListener("click", () => {
+      const u = storyActionUser ? (storyActionUser.value.trim() || "Chat") : "Chat";
+      sendStoryAction({ action: "roll", roller: u });
+    });
+  }
+
+  if (btnStoryEnd) {
+    btnStoryEnd.addEventListener("click", () => {
+      sendStoryAction({ action: "end" });
+    });
+  }
+
+  // Freeform Action Proposal Form
+  if (storyActionForm && storyActionText) {
+    storyActionForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const u = storyActionUser ? (storyActionUser.value.trim() || "HeroChatter") : "HeroChatter";
+      const txt = storyActionText.value.trim();
+      if (txt) {
+        sendStoryAction({
+          action: "action",
+          user: u,
+          action_text: txt
+        });
+        storyActionText.value = "";
+      }
+    });
+  }
+
+  // Quick Action Simulation Buttons
+  document.querySelectorAll(".btn-story-quick").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const user = btn.dataset.user || "Chatter";
+      const msg = btn.dataset.msg || "";
+      if (msg.startsWith("!action ")) {
+        const actTxt = msg.replace("!action ", "");
+        sendStoryAction({
+          action: "action",
+          user: user,
+          action_text: actTxt
+        });
+      } else if (msg === "!roll") {
+        sendStoryAction({
+          action: "roll",
+          roller: user
+        });
+      } else {
+        // Vote !1 or !2
+        const choiceId = msg === "!1" ? "opt_1" : (msg === "!2" ? "opt_2" : "opt_3");
+        sendStoryAction({
+          action: "vote",
+          user: user,
+          choice_id: choiceId
         });
       }
     });

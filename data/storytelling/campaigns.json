@@ -1,0 +1,108 @@
+{
+  "active_session": {
+    "id": "campaign_a871cb",
+    "title": "Misteri Mahkota Netherite Terkutuk",
+    "genre": "minecraft_quest",
+    "eve_role": "party_mage",
+    "status": "voting",
+    "current_scene": {
+      "id": "scene_netherite_1",
+      "title": "Bisikan dari Balik Sculk Shrieker",
+      "narrative": "Kalian melangkah turun ke kedalaman Ancient City. Udara dingin dan lembap menusuk tulang. Cahaya biru sculk menyala remang-remang di dinding batu. Di hadapan kalian, ada lorong sempit menuju ruang tahta, tetapi tiga Sculk Sensor berderit sensitif di lantai! Di kejauhan, terdengar dengkuran berat Warden yang mengerikan. Eve menatap kalian dengan was-was: 'Ssst! Jangan berisik chat, kalau kalian kepentok batu terus Warden bangun, aku teleport duluan ya!'",
+      "speaker_name": "Eve Maybe (Elven Mage)",
+      "eve_emotion": "scared",
+      "eve_action": "tilt",
+      "choices": [
+        {
+          "id": "opt_1",
+          "label": "Gelar Karpet Wol & Menyelinap Diam-Diam",
+          "description": "Berjalan jongkok di atas wol agar sensor suara tidak terpicu sama sekali.",
+          "dc_check": 10,
+          "stat_affinity": "Agility",
+          "votes": [],
+          "vote_count": 0,
+          "hp_impact": 0,
+          "morale_impact": 10,
+          "gold_impact": 0,
+          "item_reward": "Sculk Catalyst Mini",
+          "consequence_text": "Langkah kalian seringan bulu ayam! Sculk sensor tertidur pulas dan kalian berhasil melewati jebakan tanpa suara!"
+        },
+        {
+          "id": "opt_2",
+          "label": "Pasang TNT & Ledakkan Lorong!",
+          "description": "Taktik barbar khas chat: hancurkan semua sculk dengan sekali ledakan dahsyat!",
+          "dc_check": 14,
+          "stat_affinity": "Strength",
+          "votes": [],
+          "vote_count": 0,
+          "hp_impact": -15,
+          "morale_impact": 15,
+          "gold_impact": 20,
+          "item_reward": "Pecahan Batuan Netherite",
+          "consequence_text": "KABOOM! Lorong runtuh dan sculk hancur lebur! Sayangnya serpihan batu mengenai helm kalian (-15 HP), tapi jalan terbuka lebar!"
+        },
+        {
+          "id": "opt_3",
+          "label": "Lempar Biskuit Keberuntungan ke Sudut Ruangan",
+          "description": "Membuat distraksi suara palsu dengan melempar biskuit renyah ke dinding seberang.",
+          "dc_check": 11,
+          "stat_affinity": "Luck",
+          "votes": [],
+          "vote_count": 0,
+          "hp_impact": 0,
+          "morale_impact": 5,
+          "gold_impact": 10,
+          "item_reward": null,
+          "consequence_text": "Biskuit mendarat dengan bunyi 'kriuk!'. Sensor sculk berbelok ke arah biskuit dan kalian melesat ke depan!"
+        }
+      ],
+      "requires_dice_roll": true,
+      "dc_check": 11,
+      "stat_affinity": "Agility",
+      "resolved_choice_id": null,
+      "dice_result": null,
+      "time_str": "08:00:54"
+    },
+    "scenes_history": [],
+    "party": {
+      "name": "Guild Misteri & Eve",
+      "hp": 100,
+      "max_hp": 100,
+      "morale": 100,
+      "gold": 50,
+      "inventory": [
+        "Pedang Besi Tajam",
+        "Obor Redstone",
+        "Karpet Wol x16",
+        "Ramuan Penglihatan Malam"
+      ],
+      "current_location": "Gerbang Reruntuhan Ancient City (Y=-58)",
+      "members": [
+        "Eve Maybe (Party Host / Mage)",
+        "Creator (Guildmaster)",
+        "DiamondHunter (Scout)",
+        "Chat Army (Vanguard)"
+      ]
+    },
+    "freeform_suggestions": [],
+    "last_dice_roll": null,
+    "total_episodes_completed": 0,
+    "key_memories": [
+      "Guild Chat pernah mengalahkan Mimic berkat voting lempar biskuit",
+      "Eve hampir membakar jenggot kurcaci dengan spell api level 1"
+    ],
+    "created_at_str": "2026-11-17 08:00:54",
+    "updated_at_str": "08:00:54"
+  },
+  "history": [
+    {
+      "id": "campaign_arch_001",
+      "title": "Pelarian dari Penjara Dungeon Abyss",
+      "genre": "fantasy_rpg",
+      "episodes": 4,
+      "winner": "Guild Chat & Eve",
+      "summary": "Chat memilih menjebol dinding sendok dan Eve melempar glitter blind spell ke sipir ogre.",
+      "completed_at": "2026-11-17"
+    }
+  ]
+}

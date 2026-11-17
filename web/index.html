@@ -1333,6 +1333,204 @@
       </div>
     </section>
 
+    <!-- Dynamic Storytelling & Community Roleplay RPG -->
+    <section class="card story-card" id="storyCard">
+      <div class="card-header">
+        <div class="story-title">
+          <span class="story-icon">📖</span>
+          <div>
+            <h2>Dynamic Storytelling & Community Roleplay (RPG)</h2>
+            <small class="story-subtitle">Interactive Narrative Engine, Community Voting, D20 Dice Checks & Persistent Second Brain Chronicles</small>
+          </div>
+        </div>
+        <div class="story-status-bar">
+          <span id="story-status-badge" class="badge">Status: IDLE</span>
+          <span id="story-genre-badge" class="badge badge-accent">Genre: MINECRAFT QUEST</span>
+          <span id="story-role-badge" class="badge">Role: PARTY MAGE 🧙‍♀️</span>
+          <span id="story-hp-badge" class="badge badge-online">HP: 100/100</span>
+          <span id="story-gold-badge" class="badge">💰 50G</span>
+        </div>
+      </div>
+
+      <div class="story-content">
+        <!-- Row 1: Campaign Selector & Controls -->
+        <div class="story-controls-header">
+          <div class="story-selectors-wrap">
+            <div class="story-select-group">
+              <label for="selectStoryPreset">Pilih Skenario:</label>
+              <select id="selectStoryPreset" class="select-server">
+                <option value="petualangan_netherite" selected>🟩 Netherite Terkutuk (Minecraft Quest)</option>
+                <option value="heist_neo_jakarta">🏙️ Heist Neo-Jakarta 2099 (Cyberpunk)</option>
+                <option value="guild_petualang_noob">🛡️ Guild Petualang Noob & Slime (Isekai Comedy)</option>
+                <option value="custom">✨ Petualangan Bebas Komunitas (Custom)</option>
+              </select>
+            </div>
+            <div class="story-select-group">
+              <label for="selectStoryRole">Peran Eve:</label>
+              <select id="selectStoryRole" class="select-server">
+                <option value="party_mage" selected>🧙‍♀️ Elven Mage (Party Companion)</option>
+                <option value="party_rogue">🗡️ Cheeky Rogue (Party Companion)</option>
+                <option value="dungeon_master">📜 Dungeon Master (Narator Utama)</option>
+                <option value="eccentric_npc">☕ NPC Resepsionis / Pedagang Aneh</option>
+                <option value="villain_boss">👑 Ratu Iblis / Rival Boss</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="story-action-bar">
+            <button type="button" id="btnStoryStart" class="btn btn-primary btn-sm">▶️ Mulai Campaign</button>
+            <button type="button" id="btnStoryAdvance" class="btn btn-secondary btn-sm" disabled>⏭️ Lanjut Babak</button>
+            <button type="button" id="btnStoryRoll" class="btn btn-secondary btn-sm" disabled>🎲 Lempar D20</button>
+            <button type="button" id="btnStoryEnd" class="btn btn-danger btn-sm" disabled>🏁 Selesai</button>
+          </div>
+        </div>
+
+        <!-- Row 2: Split Theater & RPG Dashboard -->
+        <div class="story-arena-grid">
+          <!-- Left Column: Scene Theater & Choices -->
+          <div class="story-box story-theater-box">
+            <div class="scene-header-bar">
+              <h3 id="storySceneTitle" class="scene-title">Babak 1: Reruntuhan Kuno</h3>
+              <span id="storyLocationBadge" class="badge badge-accent">📍 Gerbang Ancient City</span>
+            </div>
+
+            <!-- Narrator Dialogue Card -->
+            <div class="story-narrator-card">
+              <div class="narrator-meta">
+                <span class="narrator-avatar">✨</span>
+                <span id="storySpeakerName" class="narrator-name">Eve Maybe (Elven Mage):</span>
+              </div>
+              <p id="storyNarrativeText" class="narrative-paragraph">
+                "Pilih skenario petualangan di atas dan tekan 'Mulai Campaign' untuk memulai petualangan RPG bersama Guild Chat!"
+              </p>
+            </div>
+
+            <!-- Branching Choices List -->
+            <div class="story-choices-wrapper">
+              <div class="choices-title-bar">
+                <span>⚔️ Pilihan Keputusan Komunitas (Vote di Chat dengan !1, !2, !3):</span>
+              </div>
+              <div id="storyChoicesContainer" class="story-choices-grid">
+                <!-- Dynamically populated choices -->
+              </div>
+            </div>
+
+            <!-- D20 Dice Arena -->
+            <div class="story-dice-arena">
+              <div class="dice-arena-header">
+                <span class="dt-box-title">🎲 D20 Dice Check</span>
+                <span id="storyD20Target" class="badge">Target: DC 12 (Agility)</span>
+              </div>
+              <div class="dice-roller-row">
+                <div class="d20-visual-box">
+                  <div id="storyD20Dice" class="d20-dice-die">20</div>
+                </div>
+                <div class="dice-info-column">
+                  <div id="storyD20Outcome" class="dice-outcome-text">
+                    Belum ada lemparan dadu. Tekan 'Lempar D20' atau ketik '!roll' di chat!
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Party Vitals & Community Strategy -->
+          <div class="story-box story-side-box">
+            <!-- Party Status -->
+            <div class="mg-box-header">
+              <span class="dt-box-title">🛡️ Status Guild & Perlengkapan</span>
+              <span id="storyPartyName" class="dt-hint">Guild Chat & Eve</span>
+            </div>
+
+            <div class="party-gauges-block">
+              <div class="party-gauge-row">
+                <div class="gauge-label-wrap">
+                  <span>❤️ Darah Party (HP):</span>
+                  <span id="storyHpText" class="gauge-value">100/100</span>
+                </div>
+                <div class="gauge-bar-track">
+                  <div id="storyHpBar" class="gauge-bar-fill gauge-fill-happy" style="width: 100%;"></div>
+                </div>
+              </div>
+              <div class="party-gauge-row">
+                <div class="gauge-label-wrap">
+                  <span>🔥 Semangat & Moral:</span>
+                  <span id="storyMoraleText" class="gauge-value">100%</span>
+                </div>
+                <div class="gauge-bar-track">
+                  <div id="storyMoraleBar" class="gauge-bar-fill gauge-fill-curious" style="width: 100%;"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Inventory Pills -->
+            <div class="inventory-section">
+              <span class="inv-label">🎒 Inventori Barang & Artefak:</span>
+              <div id="storyInventoryList" class="inventory-pills">
+                <span class="inv-pill">Pedang Kayu Legendaris</span>
+                <span class="inv-pill">Ramuan HP x2</span>
+                <span class="inv-pill">Obor Abadi</span>
+              </div>
+            </div>
+
+            <!-- Freeform Action Proposal Form -->
+            <div class="mg-box-header" style="margin-top: 14px;">
+              <span class="dt-box-title">💡 Usulkan Aksi Kreatif Komunitas</span>
+              <small class="dt-hint">Ketik !action di chat</small>
+            </div>
+            <form id="storyActionForm" class="mg-submit-form">
+              <div class="mg-form-row">
+                <input type="text" id="storyActionUser" placeholder="Nama Petualang" value="HeroChatter" required>
+                <input type="text" id="storyActionText" placeholder="Aksi kreatif (misal: lempar martabak ke monster)" required>
+              </div>
+              <button type="submit" class="btn btn-secondary btn-sm">🚀 Kirim Usulan Aksi</button>
+            </form>
+
+            <!-- Quick Action Pills -->
+            <div class="story-quick-actions">
+              <span class="sim-label">Aksi Cepat Chat:</span>
+              <div class="story-quick-pills">
+                <button type="button" class="btn-story-quick pill" data-user="DiamondHunter" data-msg="!1">💎 DiamondHunter: "!1"</button>
+                <button type="button" class="btn-story-quick pill" data-user="Alex" data-msg="!2">🛡️ Alex: "!2"</button>
+                <button type="button" class="btn-story-quick pill" data-user="Steve" data-msg="!roll">🎲 Steve: "!roll"</button>
+                <button type="button" class="btn-story-quick pill" data-user="TrollPro" data-msg="!action sogok musuh dengan biskuit">🍪 Troll: "!action sogok biskuit"</button>
+              </div>
+            </div>
+
+            <!-- Suggestions Stream -->
+            <div class="suggestions-section">
+              <span class="inv-label">📜 Usulan Taktik Komunitas:</span>
+              <div id="storySuggestionsList" class="suggestions-list">
+                <div class="suggestion-item">Belum ada usulan taktik bebas diajukan.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 3: Episodic Lore & Second Brain Chronicles -->
+        <div class="story-box story-lore-box">
+          <div class="mg-box-header">
+            <span class="dt-box-title">🧠 Memori Episodik & Catatan Second Brain (Campaign History)</span>
+            <small class="dt-hint">Eve mengingat kejadian, keputusan, dan blunder dari campaign sebelumnya!</small>
+          </div>
+          <div class="lore-grid">
+            <div class="lore-column">
+              <h4 class="lore-subhead">📜 Kenangan Epik yang Diingat Eve:</h4>
+              <ul id="storyMemoriesList" class="story-memories-ul">
+                <!-- Dynamically populated memories -->
+              </ul>
+            </div>
+            <div class="lore-column">
+              <h4 class="lore-subhead">🏆 Arsip Campaign Terdahulu:</h4>
+              <div id="storyHistoryTable" class="story-history-table">
+                <!-- Dynamically populated history -->
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">
