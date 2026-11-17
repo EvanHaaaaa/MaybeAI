@@ -195,6 +195,35 @@ async def roll_storytelling_dice(roller: str = "Chat"):
     })
     return res.to_dict()
 
+# --- Dynamic Performance Director Endpoints ---
+@app.get("/api/performance/state")
+async def get_performance_state():
+    return orchestrator.brain.performance.get_state()
+
+@app.post("/api/performance/plan")
+async def plan_performance_setlist(title: Optional[str] = None):
+    director = orchestrator.brain.performance
+    setlist = director.plan_concert_setlist(title)
+    await orchestrator.broadcast("performance_updated", director.get_state())
+    return [it.to_dict() for it in setlist]
+
+@app.post("/api/performance/start")
+async def start_performance_show(song_id: Optional[str] = None, dedication_user: Optional[str] = None):
+    asyncio.create_task(orchestrator.perform_song(song_id, dedication_user))
+    return {"status": "started", "song_id": song_id}
+
+@app.post("/api/performance/cheer")
+async def cheer_performance(user: str = "Chatter", cheer_type: str = "glowstick"):
+    director = orchestrator.brain.performance
+    cnt = director.record_audience_cheer(user, cheer_type)
+    await orchestrator.broadcast("performance_updated", director.get_state())
+    await orchestrator.broadcast("audience_cheer", {
+        "user": user,
+        "type": cheer_type,
+        "total_glowsticks": cnt
+    })
+    return {"total_glowsticks": cnt}
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -285,6 +314,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "story_updated",
         "data": orchestrator.brain.storytelling.get_state()
+    })
+
+    # Send initial dynamic performance director state
+    await websocket.send_json({
+        "type": "performance_updated",
+        "data": orchestrator.brain.performance.get_state()
     })
 
     try:
@@ -818,6 +853,31 @@ async def websocket_endpoint(websocket: WebSocket):
                         "speech": speech,
                         "emotions": ["happy"],
                         "actions": ["wink"]
+                    })
+            elif data.get("type") == "performance_action":
+                act = data.get("action")
+                director = orchestrator.brain.performance
+                if act == "start":
+                    song_id = data.get("song_id")
+                    dedication = data.get("dedication_user")
+                    asyncio.create_task(orchestrator.perform_song(song_id, dedication_user=dedication))
+                elif act == "stop":
+                    orchestrator.singer.stop()
+                    director.session.status = "idle"
+                    await orchestrator.broadcast("performance_updated", director.get_state())
+                elif act == "plan":
+                    title = data.get("title")
+                    director.plan_concert_setlist(title)
+                    await orchestrator.broadcast("performance_updated", director.get_state())
+                elif act == "cheer":
+                    u = data.get("user", "Chatter")
+                    c_type = data.get("cheer_type", "glowstick")
+                    cnt = director.record_audience_cheer(u, c_type)
+                    await orchestrator.broadcast("performance_updated", director.get_state())
+                    await orchestrator.broadcast("audience_cheer", {
+                        "user": u,
+                        "type": c_type,
+                        "total_glowsticks": cnt
                     })
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)

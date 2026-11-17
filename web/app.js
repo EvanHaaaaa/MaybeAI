@@ -103,6 +103,17 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (msg.type === "lyric_line") {
       isSinging = true;
       subtitles.textContent = `♪ ${msg.data.text} ♪`;
+      if (typeof perfLiveLyrics !== "undefined" && perfLiveLyrics) {
+        perfLiveLyrics.textContent = `♪ "${msg.data.text}" ♪`;
+      }
+      if (typeof perfCrowdCallout !== "undefined" && perfCrowdCallout) {
+        if (msg.data.crowd_callout) {
+          perfCrowdCallout.textContent = `🎤 Eve: "${msg.data.crowd_callout}"`;
+          perfCrowdCallout.style.display = "inline-block";
+        } else {
+          perfCrowdCallout.style.display = "none";
+        }
+      }
       if (msg.data.emotion) {
         setEmotion(msg.data.emotion);
       }
@@ -129,6 +140,12 @@ document.addEventListener("DOMContentLoaded", () => {
       updateMinigameUi(msg.data);
     } else if (msg.type === "story_updated") {
       updateStoryUi(msg.data);
+    } else if (msg.type === "performance_updated") {
+      updatePerformanceUi(msg.data);
+    } else if (msg.type === "audience_cheer") {
+      triggerCheerEffect(msg.data);
+    } else if (msg.type === "avatar_movement") {
+      triggerAvatarChoreography(msg.data);
     } else if (msg.type === "goal_completed") {
       showGoalCompletedAlert(msg.data);
     } else if (msg.type === "strategy_adapted") {
@@ -3443,6 +3460,330 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   });
+
+  // --- Dynamic Performance Director & AI Idol Stage ---
+  const perfStatusBadge = document.getElementById("perf-status-badge");
+  const perfMoodBadge = document.getElementById("perf-mood-badge");
+  const perfSongBadge = document.getElementById("perf-song-badge");
+  const perfGlowsticksBadge = document.getElementById("perf-glowsticks-badge");
+  const perfScoreBadge = document.getElementById("perf-score-badge");
+
+  const selectPerfSong = document.getElementById("selectPerfSong");
+  const perfDedicationInput = document.getElementById("perfDedicationInput");
+  const btnPerfAutoPick = document.getElementById("btnPerfAutoPick");
+  const btnPerfPlanSetlist = document.getElementById("btnPerfPlanSetlist");
+  const btnPerfStart = document.getElementById("btnPerfStart");
+  const btnPerfStop = document.getElementById("btnPerfStop");
+
+  const perfCurrentTitle = document.getElementById("perfCurrentTitle");
+  const perfMoodReason = document.getElementById("perfMoodReason");
+  const perfSectionBadge = document.getElementById("perfSectionBadge");
+  const perfLightingBadge = document.getElementById("perfLightingBadge");
+  const perfMovementBadge = document.getElementById("perfMovementBadge");
+  const perfEmotionBadge = document.getElementById("perfEmotionBadge");
+  const perfActionBadge = document.getElementById("perfActionBadge");
+
+  const perfStageMonitor = document.getElementById("perfStageMonitor");
+  const perfLiveLyrics = document.getElementById("perfLiveLyrics");
+  const perfCrowdCallout = document.getElementById("perfCrowdCallout");
+  const perfMcBubble = document.getElementById("perfMcBubble");
+  const perfMcText = document.getElementById("perfMcText");
+
+  const perfSetlistContainer = document.getElementById("perfSetlistContainer");
+  const btnPerfGlowstick = document.getElementById("btnPerfGlowstick");
+  const btnPerfEncore = document.getElementById("btnPerfEncore");
+  const perfHypeVal = document.getElementById("perfHypeVal");
+  const perfGlowstickMeter = document.getElementById("perfGlowstickMeter");
+  const perfCheersList = document.getElementById("perfCheersList");
+  const perfHistoryTable = document.getElementById("perfHistoryTable");
+
+  function sendPerformanceAction(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "performance_action",
+        ...payload
+      }));
+    }
+  }
+
+  function triggerAvatarChoreography(data) {
+    if (!data) return;
+    const movement = data.movement || "sway_left";
+    const lighting = data.lighting || "neon_cyan";
+
+    // Update 2D canvas avatar motion
+    if (movement === "sway_left") {
+      headTilt = -0.06;
+    } else if (movement === "sway_right") {
+      headTilt = 0.06;
+    } else if (movement === "bounce") {
+      headTilt = 0.0;
+    } else if (movement === "head_tilt") {
+      headTilt = 0.1;
+    } else if (movement === "sparkle_pose") {
+      headTilt = -0.04;
+    }
+
+    // Apply stage monitor lighting class
+    if (perfStageMonitor) {
+      perfStageMonitor.className = `perf-screen-monitor lighting-${lighting}`;
+    }
+  }
+
+  function triggerCheerEffect(data) {
+    if (!perfStageMonitor) return;
+    const isEncore = data.type === "encore";
+    const icon = isEncore ? "💖 ENCORE!" : "🪄 ✨";
+
+    const floater = document.createElement("div");
+    floater.textContent = `${data.user}: ${icon}`;
+    floater.style.position = "absolute";
+    floater.style.left = `${Math.random() * 70 + 15}%`;
+    floater.style.bottom = "10px";
+    floater.style.fontSize = "13px";
+    floater.style.fontWeight = "bold";
+    floater.style.color = isEncore ? "#ec4899" : "#38bdf8";
+    floater.style.textShadow = "0 0 8px rgba(0,0,0,0.8)";
+    floater.style.pointerEvents = "none";
+    floater.style.transition = "all 1.5s ease-out";
+    floater.style.zIndex = "10";
+
+    perfStageMonitor.appendChild(floater);
+
+    requestAnimationFrame(() => {
+      floater.style.transform = `translateY(-${Math.random() * 60 + 60}px) scale(1.2)`;
+      floater.style.opacity = "0";
+    });
+
+    setTimeout(() => {
+      floater.remove();
+    }, 1600);
+  }
+
+  function updatePerformanceUi(data) {
+    if (!data) return;
+    const session = data.session || {};
+    const step = session.current_step || {};
+
+    // 1. Status Badges
+    const isPerforming = session.status === "performing" || session.status === "mc_intro";
+    if (perfStatusBadge) {
+      const st = (session.status || "idle").toUpperCase();
+      if (st === "PERFORMING") {
+        perfStatusBadge.textContent = "Status: LIVE ON STAGE 🔴";
+        perfStatusBadge.className = "badge badge-online";
+      } else if (st === "MC_INTRO") {
+        perfStatusBadge.textContent = "Status: MC INTRO 🎤";
+        perfStatusBadge.className = "badge badge-accent";
+      } else if (st === "MC_OUTRO") {
+        perfStatusBadge.textContent = "Status: MC OUTRO 🏁";
+        perfStatusBadge.className = "badge";
+      } else {
+        perfStatusBadge.textContent = "Status: STANDBY 💤";
+        perfStatusBadge.className = "badge";
+      }
+    }
+
+    if (perfMoodBadge) {
+      perfMoodBadge.textContent = `Mood: ${(session.dominant_mood || 'HYPE_EXCITED').replace('_', ' ')}`;
+    }
+
+    if (perfSongBadge) {
+      perfSongBadge.textContent = `Song: ${session.current_title || 'Digital World'}`;
+    }
+
+    if (perfGlowsticksBadge) {
+      perfGlowsticksBadge.textContent = `✨ ${session.audience_glowsticks || 0} Glowsticks`;
+    }
+
+    if (perfScoreBadge) {
+      perfScoreBadge.textContent = `Score: ${session.performance_score || 95}/100 🏆`;
+    }
+
+    // 2. Control Buttons State
+    if (btnPerfStart) btnPerfStart.disabled = isPerforming;
+    if (btnPerfStop) btnPerfStop.disabled = !isPerforming;
+
+    // 3. Stage Header & Choreography Indicators
+    if (perfCurrentTitle) {
+      perfCurrentTitle.textContent = session.current_title || "Digital World";
+    }
+
+    if (perfMoodReason) {
+      perfMoodReason.textContent = `"${session.mood_reason || 'Eve bersemangat menyapa para penonton!'}"`;
+    }
+
+    if (perfSectionBadge) {
+      const sec = (session.current_section || step.section || "intro").toUpperCase();
+      perfSectionBadge.textContent = `BAGIAN: ${sec}`;
+    }
+
+    if (perfLightingBadge) {
+      const light = (step.stage_lighting || "neon_cyan").replace('_', ' ').toUpperCase();
+      perfLightingBadge.textContent = `💡 ${light}`;
+    }
+
+    if (perfMovementBadge) {
+      const move = (step.movement || "sway_left").replace('_', ' ').toUpperCase();
+      perfMovementBadge.textContent = `💃 ${move}`;
+    }
+
+    if (perfEmotionBadge) {
+      const emo = (step.emotion || "happy").toUpperCase();
+      perfEmotionBadge.textContent = `😊 ${emo}`;
+    }
+
+    if (perfActionBadge) {
+      const act = (step.action || "wink").toUpperCase();
+      perfActionBadge.textContent = `✨ ${act}`;
+    }
+
+    // 4. MC Speech Bubble
+    if (perfMcText) {
+      if (session.status === "mc_intro" && session.last_mc_intro) {
+        perfMcText.textContent = session.last_mc_intro;
+      } else if (session.status === "mc_outro" && session.last_mc_outro) {
+        perfMcText.textContent = session.last_mc_outro;
+      }
+    }
+
+    // 5. Crowd Callout Banner
+    if (perfCrowdCallout) {
+      if (step.crowd_callout) {
+        perfCrowdCallout.textContent = `🎤 Eve: "${step.crowd_callout}"`;
+        perfCrowdCallout.style.display = "inline-block";
+      } else {
+        perfCrowdCallout.style.display = "none";
+      }
+    }
+
+    // 6. Setlist Manager
+    if (perfSetlistContainer && session.setlist) {
+      perfSetlistContainer.innerHTML = "";
+      session.setlist.forEach(item => {
+        const row = document.createElement("div");
+        row.className = `setlist-card-item ${item.status}`;
+        let statusBadge = "⏳ Queued";
+        if (item.status === "current") statusBadge = "🟢 Now Playing";
+        else if (item.status === "completed") statusBadge = "✅ Completed";
+
+        row.innerHTML = `
+          <div class="setlist-meta">
+            <span class="setlist-song-name">#${item.order} ${item.title}</span>
+            <small class="setlist-desc">${item.reason}</small>
+          </div>
+          <span class="badge" style="font-size: 10px;">${statusBadge}</span>
+        `;
+        perfSetlistContainer.appendChild(row);
+      });
+    }
+
+    // 7. Glowstick Hype Meter
+    const cheers = session.audience_glowsticks || 0;
+    if (perfHypeVal) {
+      perfHypeVal.textContent = `${cheers} Glowsticks`;
+    }
+    if (perfGlowstickMeter) {
+      const pct = Math.min(100, Math.max(10, Math.round((cheers / 100) * 100)));
+      perfGlowstickMeter.style.width = `${pct}%`;
+    }
+
+    // 8. Cheers List
+    if (perfCheersList && session.cheers_history) {
+      perfCheersList.innerHTML = "";
+      const history = session.cheers_history || [];
+      if (history.length === 0) {
+        perfCheersList.innerHTML = `<div class="suggestion-item">Belum ada sorakan glowstick penonton.</div>`;
+      } else {
+        history.slice(-4).forEach(c => {
+          const div = document.createElement("div");
+          div.className = "suggestion-item";
+          const icon = c.type === "encore" ? "💖" : "✨";
+          div.innerHTML = `<strong>${c.user}</strong>: ${icon} bersorak di panggung! <small style="color: #64748b;">(${c.time})</small>`;
+          perfCheersList.appendChild(div);
+        });
+      }
+    }
+
+    // 9. Showcase History Table
+    if (perfHistoryTable && data.concert_history) {
+      perfHistoryTable.innerHTML = "";
+      data.concert_history.forEach(h => {
+        const div = document.createElement("div");
+        div.className = "history-item-row";
+        div.innerHTML = `
+          <div class="history-meta">
+            <span class="history-title">${h.concert_title || h.title}</span>
+            <small class="history-sub">${h.completed_at || ''}</small>
+          </div>
+          <div class="history-stats">Score: ${h.score || 95}/100 • ✨ ${h.glowsticks || 0}</div>
+        `;
+        perfHistoryTable.appendChild(div);
+      });
+    }
+  }
+
+  // Event Listeners for Performance Controls
+  if (btnPerfAutoPick) {
+    btnPerfAutoPick.addEventListener("click", () => {
+      if (selectPerfSong) selectPerfSong.value = "auto";
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+          type: "user_message",
+          user: "Creator",
+          text: "Eve, mood kamu lagi gimana dan rekomendasi lagu apa buat konser sekarang?",
+          source: "web"
+        }));
+      }
+    });
+  }
+
+  if (btnPerfPlanSetlist) {
+    btnPerfPlanSetlist.addEventListener("click", () => {
+      sendPerformanceAction({ action: "plan" });
+    });
+  }
+
+  if (btnPerfStart) {
+    btnPerfStart.addEventListener("click", () => {
+      const selectedSong = selectPerfSong ? selectPerfSong.value : "auto";
+      const songId = selectedSong === "auto" ? null : selectedSong;
+      const dedication = perfDedicationInput ? perfDedicationInput.value.trim() : null;
+      sendPerformanceAction({
+        action: "start",
+        song_id: songId,
+        dedication_user: dedication
+      });
+    });
+  }
+
+  if (btnPerfStop) {
+    btnPerfStop.addEventListener("click", () => {
+      sendPerformanceAction({ action: "stop" });
+    });
+  }
+
+  if (btnPerfGlowstick) {
+    btnPerfGlowstick.addEventListener("click", () => {
+      const u = perfDedicationInput ? (perfDedicationInput.value.trim() || "ViewerPro") : "ViewerPro";
+      sendPerformanceAction({
+        action: "cheer",
+        cheer_type: "glowstick",
+        user: u
+      });
+    });
+  }
+
+  if (btnPerfEncore) {
+    btnPerfEncore.addEventListener("click", () => {
+      const u = perfDedicationInput ? (perfDedicationInput.value.trim() || "ViewerPro") : "ViewerPro";
+      sendPerformanceAction({
+        action: "cheer",
+        cheer_type: "encore",
+        user: u
+      });
+    });
+  }
 
   // --- 2D Animated Avatar Renderer ---
   function render() {

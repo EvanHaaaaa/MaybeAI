@@ -1,0 +1,65 @@
+{
+  "active_session": {
+    "id": "show_da4289",
+    "status": "idle",
+    "current_song_id": "digital_world",
+    "current_title": "Digital World",
+    "current_section": "intro",
+    "current_step": null,
+    "dominant_mood": "HYPE_EXCITED",
+    "mood_reason": "Eve bersemangat menyapa para penonton!",
+    "setlist": [
+      {
+        "order": 1,
+        "song_id": "digital_world",
+        "title": "Digital World",
+        "mood_category": "hype_energetic",
+        "status": "current",
+        "reason": "Lagu Pembuka: Membakar antusiasme penonton dengan cyber-pop banger."
+      },
+      {
+        "order": 2,
+        "song_id": "midnight_starlight",
+        "title": "Midnight Starlight",
+        "mood_category": "emotional_chill",
+        "status": "queued",
+        "reason": "Lagu Kedua: Intermisi emosional yang syahdu dan hangat."
+      },
+      {
+        "order": 3,
+        "song_id": "glitch_overclock",
+        "title": "Glitch Overclock",
+        "mood_category": "sassy_competitive",
+        "status": "queued",
+        "reason": "Klimaks Konser: Ledakan tempo cepat dan vokal intens."
+      },
+      {
+        "order": 4,
+        "song_id": "tsundere_anthem",
+        "title": "Tsundere Anthem (B-Baka!)",
+        "mood_category": "cute_playful",
+        "status": "queued",
+        "reason": "Encore Pamungkas: Penutup manis penuh godaan buat chat tercinta!"
+      }
+    ],
+    "audience_glowsticks": 50,
+    "performance_score": 95,
+    "cheers_history": [],
+    "encore_requested": false,
+    "total_shows_completed": 1,
+    "last_mc_intro": "Selamat datang di panggung musik Eve Maybe! Siapin glowstick kalian ya!",
+    "last_mc_outro": "Terima kasih semuanya sudah menyanyi bersama Eve! Penampilan tadi kuberi nilai 95/100!",
+    "started_at_str": "08:18:12",
+    "updated_at_str": "08:18:12"
+  },
+  "history": [
+    {
+      "concert_title": "Grand Debut Showcase",
+      "song_id": "digital_world",
+      "title": "Digital World",
+      "score": 96,
+      "glowsticks": 120,
+      "completed_at": "2026-11-17"
+    }
+  ]
+}

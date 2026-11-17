@@ -1531,6 +1531,181 @@
       </div>
     </section>
 
+    <!-- Dynamic Performance Director & AI Idol Stage -->
+    <section class="card perf-card" id="performanceCard">
+      <div class="card-header">
+        <div class="perf-title">
+          <span class="perf-icon">🎤</span>
+          <div>
+            <h2>Dynamic Performance Director & AI Idol Stage</h2>
+            <small class="perf-subtitle">Autonomous Song Curation by Mood, Line Choreography, Avatar Stage Movements & Crowd Glowstick Cheers</small>
+          </div>
+        </div>
+        <div class="perf-status-bar">
+          <span id="perf-status-badge" class="badge">Status: STANDBY 💤</span>
+          <span id="perf-mood-badge" class="badge badge-accent">Mood: HYPE EXCITED 🔥</span>
+          <span id="perf-song-badge" class="badge">Song: Digital World</span>
+          <span id="perf-glowsticks-badge" class="badge badge-online">✨ 50 Glowsticks</span>
+          <span id="perf-score-badge" class="badge">Score: 95/100 🏆</span>
+        </div>
+      </div>
+
+      <div class="perf-content">
+        <!-- Row 1: Autonomous Curation & Song Controls -->
+        <div class="perf-controls-header">
+          <div class="perf-selectors-wrap">
+            <div class="perf-select-group">
+              <label for="selectPerfSong">Pilih Lagu:</label>
+              <select id="selectPerfSong" class="select-server">
+                <option value="auto" selected>✨ (Rekomendasi Otomatis Berdasarkan Mood)</option>
+                <option value="digital_world">⚡ Digital World (Cyber Pop - Hype)</option>
+                <option value="midnight_starlight">🌌 Midnight Starlight (Lofi Ballad - Chill)</option>
+                <option value="glitch_overclock">🔥 Glitch Overclock (Cyber Rock - Fast)</option>
+                <option value="tsundere_anthem">🎀 Tsundere Anthem (J-Pop - Sassy/Cute)</option>
+                <option value="minecraft_creeper_lullaby">⛏️ Creeper Lullaby (Minecraft Parody)</option>
+              </select>
+            </div>
+            <div class="perf-select-group">
+              <label for="perfDedicationInput">Dedikasi:</label>
+              <input type="text" id="perfDedicationInput" placeholder="Nama Penonton (opsional)" value="Creator" class="input-server" style="width: 140px;">
+            </div>
+          </div>
+
+          <div class="perf-action-bar">
+            <button type="button" id="btnPerfAutoPick" class="btn btn-secondary btn-sm">🎯 Tanya Mood Eve</button>
+            <button type="button" id="btnPerfPlanSetlist" class="btn btn-secondary btn-sm">📋 Rancang Setlist</button>
+            <button type="button" id="btnPerfStart" class="btn btn-primary btn-sm">▶️ Mulai Nyanyi</button>
+            <button type="button" id="btnPerfStop" class="btn btn-danger btn-sm" disabled>⏹️ Hentikan</button>
+          </div>
+        </div>
+
+        <!-- Row 2: Split Concert Stage Arena -->
+        <div class="perf-arena-grid">
+          <!-- Left Column: Stage Spotlight & Live Choreography Monitor -->
+          <div class="perf-box perf-stage-box">
+            <div class="stage-header-bar">
+              <div>
+                <h3 id="perfCurrentTitle" class="stage-song-title">Digital World</h3>
+                <small id="perfMoodReason" class="stage-mood-reason">"Eve merasa penuh energi hype bareng chat!"</small>
+              </div>
+              <div class="stage-meta-badges">
+                <span id="perfSectionBadge" class="badge badge-accent">BAGIAN: INTRO</span>
+                <span id="perfLightingBadge" class="badge">💡 NEON CYAN</span>
+              </div>
+            </div>
+
+            <!-- Avatar Choreography & Movement Indicator -->
+            <div class="choreography-status-row">
+              <div class="choreo-indicator">
+                <span class="choreo-label">Gerakan Avatar:</span>
+                <strong id="perfMovementBadge" class="choreo-val">💃 SWAY LEFT</strong>
+              </div>
+              <div class="choreo-indicator">
+                <span class="choreo-label">Ekspresi Wajah:</span>
+                <strong id="perfEmotionBadge" class="choreo-val">😊 HAPPY</strong>
+              </div>
+              <div class="choreo-indicator">
+                <span class="choreo-label">Aksi Panggung:</span>
+                <strong id="perfActionBadge" class="choreo-val">✨ WINK</strong>
+              </div>
+            </div>
+
+            <!-- Real-time Animated Stage & Karaoke Subtitle Screen -->
+            <div class="perf-screen-monitor" id="perfStageMonitor">
+              <div class="monitor-top-decor">
+                <span class="stage-lights-dot"></span>
+                <span class="stage-lights-dot"></span>
+                <span class="stage-lights-dot"></span>
+              </div>
+              <div class="karaoke-lyrics-wrap">
+                <p id="perfLiveLyrics" class="karaoke-lyrics-text">
+                  ♪ "Welcome to my world of wires and light~" ♪
+                </p>
+              </div>
+              <div id="perfCrowdCallout" class="crowd-callout-banner" style="display: none;">
+                🎤 Eve: "Mana suara glowstick-nya chat?!"
+              </div>
+            </div>
+
+            <!-- MC Dialogue & Performance Review Bubble -->
+            <div class="perf-mc-bubble" id="perfMcBubble">
+              <div class="mc-header">
+                <span class="mc-avatar">🎤</span>
+                <span class="mc-name">Eve Maybe (AI Idol MC):</span>
+              </div>
+              <p id="perfMcText" class="mc-speech">
+                "Selamat datang di panggung musik Eve Maybe! Pilih lagu atau biarkan Eve memilih lagu sesuai mood hari ini!"
+              </p>
+            </div>
+          </div>
+
+          <!-- Right Column: Concert Setlist & Audience Glowstick Arena -->
+          <div class="perf-box perf-side-box">
+            <!-- Setlist Manager -->
+            <div class="mg-box-header">
+              <span class="dt-box-title">📋 Urutan Setlist Konser (Concert Schedule)</span>
+              <small class="dt-hint">Eve menyusun alur tensi pertunjukan</small>
+            </div>
+            <div id="perfSetlistContainer" class="perf-setlist-list">
+              <!-- Dynamically populated setlist items -->
+            </div>
+
+            <!-- Interactive Audience Glowstick Hype Station -->
+            <div class="mg-box-header" style="margin-top: 14px;">
+              <span class="dt-box-title">✨ Sorak & Glowstick Penonton (Audience Hype)</span>
+              <small class="dt-hint">Ketik !glowstick atau !encore di chat</small>
+            </div>
+            <div class="glowstick-action-grid">
+              <button type="button" id="btnPerfGlowstick" class="btn-glowstick-cheer">
+                <span class="cheer-icon">🪄</span>
+                <div class="cheer-text-wrap">
+                  <strong>Goyangkan Glowstick!</strong>
+                  <small>+1 Sorakan Penonton (!glowstick)</small>
+                </div>
+              </button>
+              <button type="button" id="btnPerfEncore" class="btn-encore-cheer">
+                <span class="cheer-icon">💖</span>
+                <div class="cheer-text-wrap">
+                  <strong>Minta ENCORE!</strong>
+                  <small>Lagu Tambahan (!encore)</small>
+                </div>
+              </button>
+            </div>
+
+            <!-- Glowstick Hype Meter -->
+            <div class="glowstick-meter-wrap">
+              <div class="meter-label-row">
+                <span>⚡ Hype Panggung:</span>
+                <span id="perfHypeVal" class="gauge-value">50 Glowsticks</span>
+              </div>
+              <div class="gauge-bar-track">
+                <div id="perfGlowstickMeter" class="gauge-bar-fill gauge-fill-happy" style="width: 50%;"></div>
+              </div>
+            </div>
+
+            <!-- Cheers Ticker -->
+            <div class="suggestions-section" style="margin-top: 10px;">
+              <span class="inv-label">🌟 Sorakan Terkini:</span>
+              <div id="perfCheersList" class="suggestions-list" style="max-height: 90px;">
+                <div class="suggestion-item">Creator menggoyangkan glowstick warna cyan! ✨</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 3: Past Showcase History -->
+        <div class="perf-box perf-lore-box">
+          <div class="mg-box-header">
+            <span class="dt-box-title">📜 Catatan Second Brain: Arsip Penampilan Idol (Showcase History)</span>
+            <small class="dt-hint">Nilai ulasan panggung dan jumlah glowstick yang terkumpul</small>
+          </div>
+          <div id="perfHistoryTable" class="perf-history-table">
+            <!-- Dynamically populated showcase history -->
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">

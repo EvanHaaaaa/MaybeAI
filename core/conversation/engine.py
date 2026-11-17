@@ -14,6 +14,7 @@ from core.minecraft.multiplayer import MultiplayerSocialEngine
 from core.desktop import DesktopCompanionEngine
 from core.minigames import MiniGameEngine
 from core.storytelling import StoryEngine
+from core.performance import PerformanceDirector
 
 class ConversationEngine:
     """
@@ -49,6 +50,7 @@ class ConversationEngine:
         self.desktop = DesktopCompanionEngine()
         self.minigames = MiniGameEngine()
         self.storytelling = StoryEngine()
+        self.performance = PerformanceDirector()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -219,6 +221,7 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
         desktop_directive = self.desktop.get_prompt_directive() if self.desktop else ""
         minigame_directive = self.minigames.get_prompt_directive() if self.minigames else ""
         storytelling_directive = self.storytelling.get_prompt_directive() if self.storytelling else ""
+        performance_directive = self.performance.get_prompt_directive() if self.performance else ""
 
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
@@ -241,7 +244,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             multiplayer_directive=multiplayer_directive,
             desktop_directive=desktop_directive,
             minigame_directive=minigame_directive,
-            storytelling_directive=storytelling_directive
+            storytelling_directive=storytelling_directive,
+            performance_directive=performance_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -404,7 +408,7 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
         # Desktop Companion & Computer Interaction
         is_desktop_query = any(w in msg_lower for w in [
             "volume", "suara", "kecilin", "besarin", "mute", "unmute",
-            "musik", "lagu", "media", "spotify", "next lagu", "ganti lagu",
+            "media player", "spotify", "next lagu", "ganti lagu", "puter musik", "setel musik", "pause lagu",
             "buka aplikasi", "buka notepad", "buka obs", "buka discord", "buka calc",
             "desktop companion", "izin desktop", "notifikasi", "scene obs"
         ])
@@ -512,6 +516,25 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             else:
                 _, speech = self.storytelling.start_campaign("petualangan_netherite")
                 return speech
+
+        # Dynamic Performance Director & Idol Singing
+        is_performance_query = any(w in msg_lower for w in [
+            "konser", "setlist", "glowstick", "encore", "nyanyi", "sing",
+            "lagu apa", "lagu selanjutnya", "jadwal lagu", "idol", "rekomendasi lagu", "karaoke"
+        ])
+        if is_performance_query and self.performance:
+            dominant_mood, _ = self.mood.get_dominant_mood()
+            rec_id, rec_reason = self.performance.get_autonomous_song_recommendation(dominant_mood)
+            rec_title = self.performance.songs_catalog.get(rec_id, {}).get("title", rec_id)
+
+            if "setlist" in msg_lower or "urutan" in msg_lower or "jadwal" in msg_lower:
+                titles = [f"#{it.order} {it.title}" for it in self.performance.session.setlist]
+                return f"[emotion: happy] Setlist konser idol Eve hari ini: {', '.join(titles)}! Eve atur urutannya biar tensi stream makin membara! [action: wink]"
+            elif "glowstick" in msg_lower or "cheer" in msg_lower:
+                cnt = self.performance.record_audience_cheer(user_name)
+                return f"[emotion: excited] Waaah! Terima kasih {user_name}! Glowstick panggung bertambah jadi {cnt} buah! Hype banget! [action: giggle]"
+            else:
+                return f"[emotion: happy] Karena mood Eve lagi **{dominant_mood}**, Eve memilih lagu '{rec_title}'! {rec_reason} Mau Eve bawain sekarang? Ketik '!sing'! [action: wink]"
 
         # Episodic Memory & Second Brain Callbacks
         recall_res = self.episodic_memory.recall(query=message, current_user=user_name, game_context=game_context)

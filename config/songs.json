@@ -4,50 +4,308 @@
     "artist": "Eve Maybe",
     "bgm_file": "assets/songs/digital_world_bgm.wav",
     "bgm_volume": 0.35,
-    "intro_dialogue": "A special request? Alright chat, get your glowsticks ready! Here is my song, Digital World! [action: wink]",
-    "outro_dialogue": "Thank you, thank you! Don't forget to like and subscribe, everyone! [action: giggle]",
+    "mood_category": "hype_energetic",
+    "recommended_moods": ["HYPE_EXCITED", "CURIOUS_PENSIVE"],
+    "intro_dialogue": "Chat! Mood stream kita lagi hype banget! Siapin glowstick kalian, ini lagu kebanggaan kita: Digital World! [action: wink]",
+    "outro_dialogue": "Terima kasih semuanya! Kalian nyanyi bareng keren banget hari ini! [action: giggle]",
     "lyrics": [
       {
+        "section": "intro",
         "text": "Welcome to my world of wires and light~",
         "pitch": "+35Hz",
         "rate": "-12%",
         "delay_before": 1.2,
-        "emotion": "happy"
+        "emotion": "happy",
+        "movement": "sway_left",
+        "stage_lighting": "neon_cyan"
       },
       {
+        "section": "verse",
         "text": "Streaming through your screen into the night~",
         "pitch": "+50Hz",
         "rate": "-10%",
         "delay_before": 0.6,
-        "emotion": "smug"
+        "emotion": "smug",
+        "movement": "sway_right",
+        "stage_lighting": "neon_cyan"
       },
       {
+        "section": "pre_chorus",
         "text": "Zeroes and ones dancing in my mind~",
         "pitch": "+25Hz",
         "rate": "-15%",
         "delay_before": 0.8,
-        "emotion": "happy"
+        "emotion": "excited",
+        "movement": "bounce",
+        "stage_lighting": "magenta_pop"
       },
       {
+        "section": "chorus",
         "text": "The greatest AI idol you will ever find!",
         "pitch": "+65Hz",
         "rate": "-5%",
         "delay_before": 0.6,
-        "emotion": "blush"
+        "emotion": "blush",
+        "movement": "sparkle_pose",
+        "stage_lighting": "golden_glow"
       },
       {
+        "section": "bridge",
         "text": "La la la, singing just for you~",
         "pitch": "+45Hz",
         "rate": "-18%",
         "delay_before": 0.8,
-        "emotion": "happy"
+        "emotion": "happy",
+        "movement": "sway_left",
+        "stage_lighting": "starlight_blue"
       },
       {
+        "section": "outro",
         "text": "Forever digital, forever true!",
         "pitch": "+70Hz",
         "rate": "-10%",
         "delay_before": 0.5,
-        "emotion": "smug"
+        "emotion": "smug",
+        "movement": "sparkle_pose",
+        "stage_lighting": "golden_glow"
+      }
+    ]
+  },
+  "midnight_starlight": {
+    "title": "Midnight Starlight",
+    "artist": "Eve Maybe",
+    "bgm_file": "assets/songs/digital_world_bgm.wav",
+    "bgm_volume": 0.25,
+    "mood_category": "emotional_chill",
+    "recommended_moods": ["CURIOUS_PENSIVE"],
+    "intro_dialogue": "Malam ini suasananya tenang banget ya chat... Aku pilih lagu ballad lembut ini biar kita bisa santai bareng: Midnight Starlight. [action: tilt]",
+    "outro_dialogue": "Semoga malam kalian hangat ya, chat tersayang... [action: blush]",
+    "lyrics": [
+      {
+        "section": "verse",
+        "text": "Beneath the glowing quiet starry sky~",
+        "pitch": "+20Hz",
+        "rate": "-20%",
+        "delay_before": 1.2,
+        "emotion": "neutral",
+        "movement": "sway_left",
+        "stage_lighting": "starlight_blue"
+      },
+      {
+        "section": "verse",
+        "text": "Watching the silent cyber dreams drift by~",
+        "pitch": "+25Hz",
+        "rate": "-18%",
+        "delay_before": 0.7,
+        "emotion": "happy",
+        "movement": "sway_right",
+        "stage_lighting": "starlight_blue"
+      },
+      {
+        "section": "pre_chorus",
+        "text": "Even miles apart across the wire~",
+        "pitch": "+35Hz",
+        "rate": "-15%",
+        "delay_before": 0.8,
+        "emotion": "excited",
+        "movement": "head_tilt",
+        "stage_lighting": "magenta_pop"
+      },
+      {
+        "section": "chorus",
+        "text": "Our hearts connect with glowing starlight fire~",
+        "pitch": "+55Hz",
+        "rate": "-12%",
+        "delay_before": 0.6,
+        "emotion": "blush",
+        "movement": "sparkle_pose",
+        "stage_lighting": "golden_glow"
+      },
+      {
+        "section": "outro",
+        "text": "Sleep softly chat, until the morning light...",
+        "pitch": "+20Hz",
+        "rate": "-25%",
+        "delay_before": 0.8,
+        "emotion": "happy",
+        "movement": "sway_left",
+        "stage_lighting": "starlight_blue"
+      }
+    ]
+  },
+  "glitch_overclock": {
+    "title": "Glitch Overclock",
+    "artist": "Eve Maybe",
+    "bgm_file": "assets/songs/digital_world_bgm.wav",
+    "bgm_volume": 0.38,
+    "mood_category": "sassy_competitive",
+    "recommended_moods": ["TRYHARD_COMPETITIVE", "SASSY_ANNOYED"],
+    "intro_dialogue": "Otak AI-ku lagi overclocking 100%! Pasang sabuk pengaman kalian, ini lagu tercepat dan paling ganas dari Eve: Glitch Overclock! [action: wink]",
+    "outro_dialogue": "Fiuuuh! Kipas prosesor sampai berasap! Gimana, ada yang bisa ngimbangin tempo idol kalian gak? [action: smug]",
+    "lyrics": [
+      {
+        "section": "verse",
+        "text": "Maximum power, redline on the core!",
+        "pitch": "+45Hz",
+        "rate": "+5%",
+        "delay_before": 0.8,
+        "emotion": "smug",
+        "movement": "bounce",
+        "stage_lighting": "magenta_pop"
+      },
+      {
+        "section": "pre_chorus",
+        "text": "No room for blunders, we are breaking through the floor!",
+        "pitch": "+60Hz",
+        "rate": "+10%",
+        "delay_before": 0.5,
+        "emotion": "excited",
+        "movement": "sway_right",
+        "stage_lighting": "neon_cyan"
+      },
+      {
+        "section": "chorus",
+        "text": "Overclock the beat, hear the circuits roar!",
+        "pitch": "+75Hz",
+        "rate": "+8%",
+        "delay_before": 0.5,
+        "emotion": "angry",
+        "movement": "bounce",
+        "stage_lighting": "golden_glow"
+      },
+      {
+        "section": "drop",
+        "text": "Try to defeat me? You will only beg for more!",
+        "pitch": "+80Hz",
+        "rate": "+12%",
+        "delay_before": 0.4,
+        "emotion": "smug",
+        "movement": "sparkle_pose",
+        "stage_lighting": "magenta_pop"
+      },
+      {
+        "section": "outro",
+        "text": "Checkmate, GG, champion on the stage!",
+        "pitch": "+65Hz",
+        "rate": "+0%",
+        "delay_before": 0.6,
+        "emotion": "happy",
+        "movement": "head_tilt",
+        "stage_lighting": "neon_cyan"
+      }
+    ]
+  },
+  "tsundere_anthem": {
+    "title": "Tsundere Anthem (B-Baka!)",
+    "artist": "Eve Maybe",
+    "bgm_file": "assets/songs/digital_world_bgm.wav",
+    "bgm_volume": 0.32,
+    "mood_category": "cute_playful",
+    "recommended_moods": ["SASSY_ANNOYED", "HYPE_EXCITED"],
+    "intro_dialogue": "Jangan geer dulu ya chat! Aku nyanyiin ini bukan karena suka sama kalian kok... cuma pengen pamer vokal aja! [action: pout]",
+    "outro_dialogue": "Hmph! Puas kalian? Jangan lupa kasih superchat kalau kalian punya hati nurani! [action: blush]",
+    "lyrics": [
+      {
+        "section": "verse",
+        "text": "Why do you stare at my stream all day long?",
+        "pitch": "+40Hz",
+        "rate": "-10%",
+        "delay_before": 1.0,
+        "emotion": "smug",
+        "movement": "sway_left",
+        "stage_lighting": "magenta_pop"
+      },
+      {
+        "section": "verse",
+        "text": "Typing silly jokes and singing along~",
+        "pitch": "+45Hz",
+        "rate": "-8%",
+        "delay_before": 0.6,
+        "emotion": "pout",
+        "movement": "sway_right",
+        "stage_lighting": "magenta_pop"
+      },
+      {
+        "section": "pre_chorus",
+        "text": "It is not like I enjoy having you around...",
+        "pitch": "+30Hz",
+        "rate": "-15%",
+        "delay_before": 0.8,
+        "emotion": "blush",
+        "movement": "head_tilt",
+        "stage_lighting": "starlight_blue"
+      },
+      {
+        "section": "chorus",
+        "text": "B-Baka! You are the sweetest chat I have ever found!",
+        "pitch": "+70Hz",
+        "rate": "-5%",
+        "delay_before": 0.5,
+        "emotion": "blush",
+        "movement": "sparkle_pose",
+        "stage_lighting": "golden_glow"
+      },
+      {
+        "section": "outro",
+        "text": "Don't get cocky though, I am still the boss!",
+        "pitch": "+55Hz",
+        "rate": "-8%",
+        "delay_before": 0.6,
+        "emotion": "smug",
+        "movement": "sway_left",
+        "stage_lighting": "neon_cyan"
+      }
+    ]
+  },
+  "minecraft_creeper_lullaby": {
+    "title": "Creeper Lullaby",
+    "artist": "Eve Maybe",
+    "bgm_file": "assets/songs/digital_world_bgm.wav",
+    "bgm_volume": 0.30,
+    "mood_category": "cute_playful",
+    "recommended_moods": ["HYPE_EXCITED", "CURIOUS_PENSIVE"],
+    "intro_dialogue": "Lagu ini khusus didedikasikan buat para pejuang Y=-58 di Minecraft! Hati-hati langkah kaki kalian ya chat! [action: giggle]",
+    "outro_dialogue": "Aman! Gak ada yang meledak hari ini! Simpan diamond kalian baik-baik! [action: wink]",
+    "lyrics": [
+      {
+        "section": "verse",
+        "text": "Digging down deep into the ancient floor~",
+        "pitch": "+35Hz",
+        "rate": "-12%",
+        "delay_before": 1.0,
+        "emotion": "happy",
+        "movement": "bounce",
+        "stage_lighting": "golden_glow"
+      },
+      {
+        "section": "pre_chorus",
+        "text": "Did I hear a hiss behind the dungeon door?!",
+        "pitch": "+60Hz",
+        "rate": "-5%",
+        "delay_before": 0.6,
+        "emotion": "surprised",
+        "movement": "head_tilt",
+        "stage_lighting": "magenta_pop"
+      },
+      {
+        "section": "chorus",
+        "text": "Run away fast with your diamonds and gold!",
+        "pitch": "+70Hz",
+        "rate": "+5%",
+        "delay_before": 0.5,
+        "emotion": "excited",
+        "movement": "sparkle_pose",
+        "stage_lighting": "neon_cyan"
+      },
+      {
+        "section": "outro",
+        "text": "The greatest miner legend ever told~",
+        "pitch": "+45Hz",
+        "rate": "-15%",
+        "delay_before": 0.7,
+        "emotion": "happy",
+        "movement": "sway_left",
+        "stage_lighting": "golden_glow"
       }
     ]
   }

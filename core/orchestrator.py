@@ -353,6 +353,17 @@ class Orchestrator:
                         "actions": actions
                     })
 
+        # Process performance audience cheers (glowstick / encore)
+        if any(w in clean_input.lower() for w in ["!glowstick", "!cheer", "!clap", "!encore", "glowstick", "encore"]):
+            cheer_type = "encore" if "encore" in clean_input.lower() else "glowstick"
+            cnt = self.brain.performance.record_audience_cheer(msg.user, cheer_type)
+            await self.broadcast("performance_updated", self.brain.performance.get_state())
+            await self.broadcast("audience_cheer", {
+                "user": msg.user,
+                "type": cheer_type,
+                "total_glowsticks": cnt
+            })
+
     async def _process_chat_loop(self):
         """
         Continuously ingests chat into ChatCurator, then selects the highest
@@ -398,11 +409,11 @@ class Orchestrator:
 
         # Check for sing command / request
         if msg_lower.startswith("!sing") or "sing a song" in msg_lower or "nyanyi" in msg_lower or "coba nyanyi" in msg_lower:
-            song_id = "digital_world"
             parts = clean_input.split()
+            requested_song = None
             if len(parts) > 1 and parts[1] in self.singer.songs:
-                song_id = parts[1]
-            await self.perform_song(song_id)
+                requested_song = parts[1]
+            await self.perform_song(requested_song, dedication_user=primary.user)
             return
 
         # Check for Minecraft command / request
@@ -593,24 +604,33 @@ class Orchestrator:
         await self.broadcast("conversation_state", self.brain.get_conversation_state())
         await self.broadcast("mood_updated", self.brain.mood.get_state())
 
-    async def perform_song(self, song_id: str):
-        song = self.singer.songs.get(song_id)
+    async def perform_song(self, song_id: Optional[str] = None, dedication_user: Optional[str] = None):
+        dominant_mood, _ = self.brain.mood.get_dominant_mood()
+        director = self.brain.performance
+
+        # 1. Autonomous Song Selection & Pre-Show MC
+        actual_song_id, pre_show_mc = director.start_performance(
+            song_id=song_id,
+            dominant_mood=dominant_mood,
+            dedication_user=dedication_user
+        )
+
+        song = self.singer.songs.get(actual_song_id)
         if not song:
-            print(f"[Singer] Song '{song_id}' not found.")
+            print(f"[Singer] Song '{actual_song_id}' not found.")
             return
 
-        title = song.get("title", song_id)
-        intro = song.get("intro_dialogue", f"Alright chat! Let me sing {title} for you! [action: wink]")
-        outro = song.get("outro_dialogue", "Thank you everyone for listening! [action: giggle]")
+        title = song.get("title", actual_song_id)
+        await self.broadcast("performance_updated", director.get_state())
 
-        print(f"[Karaoke] Eve is starting song: {title}")
+        print(f"[Karaoke Director] Eve is starting performance: {title} (Mood: {dominant_mood})")
 
-        # 1. Intro Speech
-        speech_text, emotions, actions = ActionParser.parse(intro)
+        # 2. Pre-Show MC Speech
+        speech_text, emotions, actions = ActionParser.parse(pre_show_mc)
         primary_emotion = emotions[0] if emotions else "happy"
         await self.broadcast("ai_response", {
-            "user": "System",
-            "raw": intro,
+            "user": "Eve (AI Idol)",
+            "raw": pre_show_mc,
             "speech": speech_text,
             "emotions": emotions,
             "actions": actions
@@ -625,17 +645,38 @@ class Orchestrator:
 
         await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
 
-        # 2. Singing Performance
-        await self.broadcast("song_started", {"song_id": song_id, "title": title})
+        # 3. Synchronized Choreography Performance
+        await self.broadcast("song_started", {"song_id": actual_song_id, "title": title})
 
-        async def on_lyric_update(line_text: str, emotion: str):
-            print(f"[Singing] [{emotion}] ♪ {line_text} ♪")
+        line_counter = 0
+
+        async def on_lyric_update(line_text: str, default_emotion: str):
+            nonlocal line_counter
+            step = director.get_choreography_step_for_line(actual_song_id, line_counter)
+            line_counter += 1
+
+            emotion = step.emotion or default_emotion
+            print(f"[Stage Choreography] [{step.section.upper()}] [{emotion}] [{step.movement}] ♪ {line_text} ♪")
+
             if self.vts.connected:
                 await self.vts.trigger_expression(emotion)
+
+            await self.broadcast("performance_updated", director.get_state())
             await self.broadcast("lyric_line", {
                 "text": line_text,
                 "emotion": emotion,
+                "section": step.section,
+                "movement": step.movement,
+                "stage_lighting": step.stage_lighting,
+                "crowd_callout": step.crowd_callout,
                 "is_singing": True
+            })
+
+            # Broadcast avatar dance movement and lighting
+            await self.broadcast("avatar_movement", {
+                "movement": step.movement,
+                "action": step.action,
+                "lighting": step.stage_lighting
             })
 
         async def on_sing_mouth(val: float):
@@ -644,19 +685,22 @@ class Orchestrator:
             await self.broadcast("avatar_state", {"mouth_open": val, "is_singing": True})
 
         await self.singer.sing(
-            song_id=song_id,
+            song_id=actual_song_id,
             on_lyric_update=on_lyric_update,
             on_mouth_update=lambda val: asyncio.create_task(on_sing_mouth(val))
         )
 
-        await self.broadcast("song_ended", {"song_id": song_id, "title": title})
+        await self.broadcast("song_ended", {"song_id": actual_song_id, "title": title})
 
-        # 3. Outro Speech
-        speech_text, emotions, actions = ActionParser.parse(outro)
+        # 4. Post-Show MC & Self Evaluation
+        outro_speech, score = director.finish_performance()
+        await self.broadcast("performance_updated", director.get_state())
+
+        speech_text, emotions, actions = ActionParser.parse(outro_speech)
         primary_emotion = emotions[0] if emotions else "blush"
         await self.broadcast("ai_response", {
-            "user": "System",
-            "raw": outro,
+            "user": "Eve (AI Idol)",
+            "raw": outro_speech,
             "speech": speech_text,
             "emotions": emotions,
             "actions": actions

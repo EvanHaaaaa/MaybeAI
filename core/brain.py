@@ -65,6 +65,10 @@ class Brain:
     def storytelling(self):
         return self.conversation.storytelling
 
+    @property
+    def performance(self):
+        return self.conversation.performance
+
     def _load_json(self, path_str: str) -> Dict[str, Any]:
         p = Path(path_str)
         if p.exists():
@@ -102,7 +106,8 @@ class Brain:
             "multiplayer": self.multiplayer.get_state(),
             "desktop": self.desktop.get_state(),
             "minigames": self.minigames.get_state(),
-            "storytelling": self.storytelling.get_state()
+            "storytelling": self.storytelling.get_state(),
+            "performance": self.performance.get_state()
         }
 
     async def generate_response(
