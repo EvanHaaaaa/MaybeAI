@@ -1123,6 +1123,216 @@
       </div>
     </section>
 
+    <!-- Interactive Mini-Game Engine & Crowd Play (Audience Participation) -->
+    <section class="card minigame-card" id="minigameCard">
+      <div class="card-header">
+        <div class="minigame-title">
+          <span class="minigame-icon">🎮</span>
+          <div>
+            <h2>Interactive Mini-Game Engine & Crowd Play</h2>
+            <small class="minigame-subtitle">Live Audience Participation: Trivia, Guess Number, Riddles, Would You Rather & Guess Song</small>
+          </div>
+        </div>
+        <div class="minigame-status-bar">
+          <span id="mg-status-badge" class="badge">Status: IDLE</span>
+          <span id="mg-mode-badge" class="badge badge-accent">Mode: TRIVIA QUIZ</span>
+          <span id="mg-round-badge" class="badge">Round: 1/3</span>
+          <span id="mg-timer-badge" class="badge badge-online">⏱️ 35s</span>
+          <span id="mg-score-badge" class="badge">Eve: 0 | Chat: 0</span>
+        </div>
+      </div>
+
+      <div class="minigame-content">
+        <!-- Row 1: Game Mode Selector & Host Controls -->
+        <div class="mg-controls-header">
+          <div class="mg-mode-pills">
+            <button type="button" class="btn-mg-mode pill active" data-game="trivia">❓ Trivia Quiz</button>
+            <button type="button" class="btn-mg-mode pill" data-game="guess_number">🔢 Guess the Number</button>
+            <button type="button" class="btn-mg-mode pill" data-game="would_you_rather">🤔 Would You Rather</button>
+            <button type="button" class="btn-mg-mode pill" data-game="riddle">🧩 Teka-Teki (Riddle)</button>
+            <button type="button" class="btn-mg-mode pill" data-game="word_association">🔗 Sambung Kata</button>
+            <button type="button" class="btn-mg-mode pill" data-game="guess_song">🎵 Tebak Lagu</button>
+          </div>
+
+          <div class="mg-action-bar">
+            <div class="mg-rounds-select-wrap">
+              <label for="selectMgRounds">Ronde:</label>
+              <select id="selectMgRounds" class="select-server">
+                <option value="3" selected>3 Ronde</option>
+                <option value="5">5 Ronde</option>
+                <option value="1">1 Ronde (Fast Play)</option>
+              </select>
+            </div>
+            <button type="button" id="btnMgStart" class="btn btn-primary btn-sm">▶️ Mulai Game</button>
+            <button type="button" id="btnMgNextRound" class="btn btn-secondary btn-sm" disabled>⏭️ Ronde Baru</button>
+            <button type="button" id="btnMgHint" class="btn btn-secondary btn-sm" disabled>💡 Minta Hint</button>
+            <button type="button" id="btnMgStop" class="btn btn-danger btn-sm" disabled>⏹️ Selesai</button>
+          </div>
+        </div>
+
+        <!-- Row 2: Live Arena & Split Dashboard -->
+        <div class="mg-arena-grid">
+          <!-- Left Column: Active Challenge Arena Viewport -->
+          <div class="mg-box mg-arena-box">
+            <!-- Host Commentary Bubble -->
+            <div class="mg-host-bubble">
+              <div class="host-header">
+                <span class="host-avatar">✨</span>
+                <span class="host-name">Eve Maybe (Game Host):</span>
+              </div>
+              <p id="mgHostSpeech" class="host-speech">
+                "Halo semuanya! Pilih mini-game di atas dan klik 'Mulai Game' buat seru-seruan bareng Eve dan chat!"
+              </p>
+            </div>
+
+            <!-- Dynamic Challenge Card Containers -->
+            <div class="mg-challenge-container">
+              <!-- 1. Trivia View -->
+              <div id="viewMgTrivia" class="mg-game-view active">
+                <div class="challenge-category-badge" id="mgTriviaCategory">Minecraft</div>
+                <h3 id="mgTriviaQuestion" class="challenge-question">
+                  Berapa tinggi koordinat Y paling optimal untuk menambang Diamond di Minecraft versi modern?
+                </h3>
+                <div class="trivia-options-grid" id="mgTriviaOptions">
+                  <button type="button" class="btn-trivia-opt" data-opt="A"><span class="opt-key">A</span> <span class="opt-txt">Y = 11</span></button>
+                  <button type="button" class="btn-trivia-opt" data-opt="B"><span class="opt-key">B</span> <span class="opt-txt">Y = -58</span></button>
+                  <button type="button" class="btn-trivia-opt" data-opt="C"><span class="opt-key">C</span> <span class="opt-txt">Y = 0</span></button>
+                  <button type="button" class="btn-trivia-opt" data-opt="D"><span class="opt-key">D</span> <span class="opt-txt">Y = -32</span></button>
+                </div>
+              </div>
+
+              <!-- 2. Guess Number View -->
+              <div id="viewMgGuessNumber" class="mg-game-view" style="display: none;">
+                <h3 class="challenge-question">🔢 Tebak Angka Rahasia Eve!</h3>
+                <div class="guess-range-display">
+                  <span>Rentang Aktif: <strong id="mgNumRangeText">[1 ... 100]</strong></span>
+                </div>
+                <div class="guess-bar-track">
+                  <div id="mgNumBarFill" class="guess-bar-fill" style="width: 50%;"></div>
+                </div>
+                <div class="last-guess-banner" id="mgLastGuessFeedback">
+                  Tebak angka antara 1 sampai 100 di chat!
+                </div>
+              </div>
+
+              <!-- 3. Would You Rather View -->
+              <div id="viewMgWouldYouRather" class="mg-game-view" style="display: none;">
+                <div class="challenge-category-badge" id="mgWyrTopic">Gaya Hidup Gamer</div>
+                <h3 class="challenge-question">🤔 Mana yang Bakal Kamu Pilih? (Ketik !A atau !B)</h3>
+                <div class="wyr-options-container">
+                  <div class="wyr-option-card" id="wyrCardA">
+                    <div class="wyr-card-header">
+                      <span class="wyr-tag">OPSI A</span>
+                      <span id="wyrPctA" class="wyr-pct">50%</span>
+                    </div>
+                    <p id="wyrTextA" class="wyr-text">Bermain game favorit selamanya tapi di 24 FPS</p>
+                    <button type="button" class="btn btn-secondary btn-sm btn-wyr-vote" data-vote="A">👍 Vote Opsi A (!A)</button>
+                  </div>
+                  <div class="wyr-vs-badge">VS</div>
+                  <div class="wyr-option-card" id="wyrCardB">
+                    <div class="wyr-card-header">
+                      <span class="wyr-tag">OPSI B</span>
+                      <span id="wyrPctB" class="wyr-pct">50%</span>
+                    </div>
+                    <p id="wyrTextB" class="wyr-text">Bermain game yang paling kamu benci di monitor 240Hz RTX 5090</p>
+                    <button type="button" class="btn btn-secondary btn-sm btn-wyr-vote" data-vote="B">👍 Vote Opsi B (!B)</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. Riddle View -->
+              <div id="viewMgRiddle" class="mg-game-view" style="display: none;">
+                <div class="challenge-category-badge">🧩 Teka-Teki Asah Otak</div>
+                <h3 id="mgRiddleText" class="challenge-question">
+                  Aku punya leher tapi tidak punya kepala, punya badan tapi tidak punya kaki. Siapakah aku?
+                </h3>
+                <div class="hints-box">
+                  <span class="hints-label">Petunjuk Terbuka (Revealed Hints):</span>
+                  <div id="mgHintsList" class="hints-pills">
+                    <span class="hint-pill">Belum ada hint dibuka.</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 5. Word Association View -->
+              <div id="viewMgWordAssociation" class="mg-game-view" style="display: none;">
+                <div class="challenge-category-badge">🔗 Tema: <strong id="mgThemeText">Gaming</strong></div>
+                <h3 class="challenge-question">Sambung kata yang berkaitan dengan kata sebelumnya!</h3>
+                <div class="word-chain-box">
+                  <span class="chain-label">Rantai Kata Terkumpul:</span>
+                  <div id="mgWordChainList" class="word-chain-pills">
+                    <span class="chain-pill initial">Controller</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 6. Guess Song View -->
+              <div id="viewMgGuessSong" class="mg-game-view" style="display: none;">
+                <div class="challenge-category-badge" id="mgSongGenre">Anime Opening</div>
+                <h3 class="challenge-question">🎶 Tebak Judul Lagu dari Petunjuk Lirik Ini:</h3>
+                <blockquote id="mgSongClue" class="song-lyrics-quote">
+                  "Gently hold my hand, in the midst of bloody sand..."
+                </blockquote>
+                <div class="hints-box">
+                  <span class="hints-label">Petunjuk:</span>
+                  <div id="mgSongHintsList" class="hints-pills">
+                    <span class="hint-pill">Opening salah satu anime dark fantasy populer!</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Live Leaderboard & Crowd Input Simulator -->
+          <div class="mg-box mg-side-box">
+            <!-- Mini-Game Leaderboard -->
+            <div class="mg-box-header">
+              <span class="dt-box-title">🏆 Papan Peringkat Penonton (Hall of Fame)</span>
+              <small class="dt-hint">Poin dari jawaban benar & streak</small>
+            </div>
+            <div class="mg-leaderboard-list" id="mgLeaderboardList">
+              <!-- Dynamically populated leaderboard rows -->
+            </div>
+
+            <!-- Crowd Play Chat Simulation Box -->
+            <div class="mg-box-header" style="margin-top: 10px;">
+              <span class="dt-box-title">💬 Kirim Jawaban / Vote Penonton</span>
+              <small class="dt-hint">Simulasi chat Twitch/Web</small>
+            </div>
+            <form id="mgChatSubmitForm" class="mg-submit-form">
+              <div class="mg-form-row">
+                <input type="text" id="mgChatUser" placeholder="Nama Penonton" value="ChatterPro" required>
+                <input type="text" id="mgChatMessage" placeholder="Jawaban (misal: B, 42, Botol)" required>
+              </div>
+              <button type="submit" class="btn btn-primary btn-sm">🚀 Kirim Jawaban Chat</button>
+            </form>
+
+            <!-- Quick Answer Simulation Pills -->
+            <div class="mg-quick-sim-bar">
+              <span class="sim-label">Aksi Cepat Penonton:</span>
+              <div class="mg-quick-pills">
+                <button type="button" class="btn-mg-quick pill" data-user="DiamondHunter" data-msg="B">💎 DiamondHunter: "B"</button>
+                <button type="button" class="btn-mg-quick pill" data-user="Alex" data-msg="42">🛡️ Alex: "42"</button>
+                <button type="button" class="btn-mg-quick pill" data-user="Steve" data-msg="!A">🏡 Steve: "!A"</button>
+                <button type="button" class="btn-mg-quick pill" data-user="Viewer1" data-msg="Botol">🥤 Viewer1: "Botol"</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 3: Live Game Event History & Commentary Feed -->
+        <div class="mg-box mg-event-box">
+          <div class="mg-box-header">
+            <span class="dt-box-title">📜 Ticker Event Permainan & Reaksi Host</span>
+            <small class="dt-hint">Catatan waktu nyata dari setiap tebakan & skor ronde</small>
+          </div>
+          <div id="mgEventHistoryList" class="mg-events-list">
+            <!-- Dynamically populated event rows -->
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- Second Brain & Episodic Memory (Andrej Karpathy BrainMap) -->
     <section class="card memory-card" id="memoryCard">
       <div class="card-header">

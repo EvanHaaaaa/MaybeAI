@@ -320,6 +320,22 @@ class Orchestrator:
         await self.broadcast("mood_updated", self.brain.mood.get_state())
         await self.broadcast("relationship_updated", self.brain.relationships.get_state())
 
+        # Process active interactive minigame input
+        if self.brain.minigames and self.brain.minigames.session.status == "active":
+            game_res = self.brain.minigames.process_chat_input(msg.user, clean_input)
+            if game_res is not None:
+                is_handled, host_speech = game_res
+                await self.broadcast("minigame_updated", self.brain.minigames.get_state())
+                if is_handled and host_speech:
+                    speech_text, emotions, actions = ActionParser.parse(host_speech)
+                    await self.broadcast("ai_response", {
+                        "user": "Eve (Game Host)",
+                        "raw": host_speech,
+                        "speech": speech_text,
+                        "emotions": emotions,
+                        "actions": actions
+                    })
+
     async def _process_chat_loop(self):
         """
         Continuously ingests chat into ChatCurator, then selects the highest

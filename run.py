@@ -103,6 +103,36 @@ async def get_multiplayer_social_state():
 async def get_desktop_state():
     return orchestrator.brain.desktop.get_state()
 
+@app.get("/api/minigames/state")
+async def get_minigames_state():
+    return orchestrator.brain.minigames.get_state()
+
+@app.post("/api/minigames/start")
+async def start_minigame(game_type: str = "trivia", total_rounds: int = 3):
+    sess, speech = orchestrator.brain.minigames.start_game(game_type, total_rounds)
+    await orchestrator.broadcast("minigame_updated", orchestrator.brain.minigames.get_state())
+    await orchestrator.broadcast("ai_response", {
+        "user": "Eve (Game Host)",
+        "raw": speech,
+        "speech": speech,
+        "emotions": ["excited"],
+        "actions": ["wink"]
+    })
+    return sess.to_dict()
+
+@app.post("/api/minigames/stop")
+async def stop_minigame():
+    sess, speech = orchestrator.brain.minigames.stop_game()
+    await orchestrator.broadcast("minigame_updated", orchestrator.brain.minigames.get_state())
+    await orchestrator.broadcast("ai_response", {
+        "user": "Eve (Game Host)",
+        "raw": speech,
+        "speech": speech,
+        "emotions": ["happy"],
+        "actions": ["wink"]
+    })
+    return sess.to_dict()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
@@ -181,6 +211,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "desktop_updated",
         "data": orchestrator.brain.desktop.get_state()
+    })
+
+    # Send initial interactive mini-game state
+    await websocket.send_json({
+        "type": "minigame_updated",
+        "data": orchestrator.brain.minigames.get_state()
     })
 
     try:
@@ -573,6 +609,56 @@ async def websocket_endpoint(websocket: WebSocket):
                         "emotions": ["happy" if approved else "neutral"],
                         "actions": ["nod"]
                     })
+            elif data.get("type") == "minigame_action":
+                act = data.get("action")
+                engine = orchestrator.brain.minigames
+                if act == "start":
+                    g_type = data.get("game_type", "trivia")
+                    rounds = int(data.get("total_rounds", 3))
+                    sess, speech = engine.start_game(g_type, rounds)
+                    await orchestrator.broadcast("minigame_updated", engine.get_state())
+                    await orchestrator.broadcast("ai_response", {
+                        "user": "Eve (Game Host)",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["excited"],
+                        "actions": ["wink"]
+                    })
+                elif act == "stop":
+                    sess, speech = engine.stop_game()
+                    await orchestrator.broadcast("minigame_updated", engine.get_state())
+                    await orchestrator.broadcast("ai_response", {
+                        "user": "Eve (Game Host)",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["happy"],
+                        "actions": ["wink"]
+                    })
+                elif act == "next_round":
+                    sess, speech = engine.next_round()
+                    await orchestrator.broadcast("minigame_updated", engine.get_state())
+                    await orchestrator.broadcast("ai_response", {
+                        "user": "Eve (Game Host)",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["excited"],
+                        "actions": ["wink"]
+                    })
+                elif act == "hint":
+                    hint_text = engine.request_hint()
+                    await orchestrator.broadcast("minigame_updated", engine.get_state())
+                    speech = f"[emotion: smug] Nih hint dari Eve buat kalian: '{hint_text}'! Ayo tebak lagi! [action: wink]"
+                    await orchestrator.broadcast("ai_response", {
+                        "user": "Eve (Game Host)",
+                        "raw": speech,
+                        "speech": speech,
+                        "emotions": ["smug"],
+                        "actions": ["wink"]
+                    })
+                elif act == "chat_input":
+                    user = data.get("user", "Chatter")
+                    text = data.get("message", "")
+                    await orchestrator.chat.put_message(user=user, text=text, source="web")
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:

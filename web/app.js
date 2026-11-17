@@ -125,6 +125,8 @@ document.addEventListener("DOMContentLoaded", () => {
       updateMultiplayerUi(msg.data);
     } else if (msg.type === "desktop_updated") {
       updateDesktopUi(msg.data);
+    } else if (msg.type === "minigame_updated") {
+      updateMinigameUi(msg.data);
     } else if (msg.type === "goal_completed") {
       showGoalCompletedAlert(msg.data);
     } else if (msg.type === "strategy_adapted") {
@@ -2596,6 +2598,458 @@ document.addEventListener("DOMContentLoaded", () => {
           category: "streaming_ops",
           action_type: "switch_scene",
           params: { scene_name: "Gaming Mode (Speedrun)" }
+        });
+      }
+    });
+  });
+
+  // --- Interactive Mini-Game Engine & Crowd Play ---
+  const mgStatusBadge = document.getElementById("mg-status-badge");
+  const mgModeBadge = document.getElementById("mg-mode-badge");
+  const mgRoundBadge = document.getElementById("mg-round-badge");
+  const mgTimerBadge = document.getElementById("mg-timer-badge");
+  const mgScoreBadge = document.getElementById("mg-score-badge");
+
+  const selectMgRounds = document.getElementById("selectMgRounds");
+  const btnMgStart = document.getElementById("btnMgStart");
+  const btnMgNextRound = document.getElementById("btnMgNextRound");
+  const btnMgHint = document.getElementById("btnMgHint");
+  const btnMgStop = document.getElementById("btnMgStop");
+  const mgHostSpeech = document.getElementById("mgHostSpeech");
+
+  const viewMgTrivia = document.getElementById("viewMgTrivia");
+  const mgTriviaCategory = document.getElementById("mgTriviaCategory");
+  const mgTriviaQuestion = document.getElementById("mgTriviaQuestion");
+  const mgTriviaOptions = document.getElementById("mgTriviaOptions");
+
+  const viewMgGuessNumber = document.getElementById("viewMgGuessNumber");
+  const mgNumRangeText = document.getElementById("mgNumRangeText");
+  const mgNumBarFill = document.getElementById("mgNumBarFill");
+  const mgLastGuessFeedback = document.getElementById("mgLastGuessFeedback");
+
+  const viewMgWouldYouRather = document.getElementById("viewMgWouldYouRather");
+  const mgWyrTopic = document.getElementById("mgWyrTopic");
+  const wyrTextA = document.getElementById("wyrTextA");
+  const wyrTextB = document.getElementById("wyrTextB");
+  const wyrPctA = document.getElementById("wyrPctA");
+  const wyrPctB = document.getElementById("wyrPctB");
+
+  const viewMgRiddle = document.getElementById("viewMgRiddle");
+  const mgRiddleText = document.getElementById("mgRiddleText");
+  const mgHintsList = document.getElementById("mgHintsList");
+
+  const viewMgWordAssociation = document.getElementById("viewMgWordAssociation");
+  const mgThemeText = document.getElementById("mgThemeText");
+  const mgWordChainList = document.getElementById("mgWordChainList");
+
+  const viewMgGuessSong = document.getElementById("viewMgGuessSong");
+  const mgSongGenre = document.getElementById("mgSongGenre");
+  const mgSongClue = document.getElementById("mgSongClue");
+  const mgSongHintsList = document.getElementById("mgSongHintsList");
+
+  const mgLeaderboardList = document.getElementById("mgLeaderboardList");
+  const mgChatSubmitForm = document.getElementById("mgChatSubmitForm");
+  const mgChatUser = document.getElementById("mgChatUser");
+  const mgChatMessage = document.getElementById("mgChatMessage");
+  const mgEventHistoryList = document.getElementById("mgEventHistoryList");
+
+  let selectedMiniGameMode = "trivia";
+  let minigameTimerTicker = null;
+  let minigameExpiresAt = 0;
+
+  function sendMinigameAction(payload) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "minigame_action",
+        ...payload
+      }));
+    }
+  }
+
+  function switchMiniGameView(gameType) {
+    const views = {
+      "trivia": viewMgTrivia,
+      "guess_number": viewMgGuessNumber,
+      "would_you_rather": viewMgWouldYouRather,
+      "riddle": viewMgRiddle,
+      "word_association": viewMgWordAssociation,
+      "guess_song": viewMgGuessSong
+    };
+
+    Object.entries(views).forEach(([type, el]) => {
+      if (!el) return;
+      if (type === gameType) {
+        el.style.display = "block";
+        el.classList.add("active");
+      } else {
+        el.style.display = "none";
+        el.classList.remove("active");
+      }
+    });
+
+    document.querySelectorAll(".btn-mg-mode").forEach(pill => {
+      if (pill.dataset.game === gameType) {
+        pill.classList.add("active");
+      } else {
+        pill.classList.remove("active");
+      }
+    });
+  }
+
+  function startMiniGameLocalTimer(remainingSec) {
+    if (minigameTimerTicker) {
+      clearInterval(minigameTimerTicker);
+      minigameTimerTicker = null;
+    }
+
+    if (remainingSec <= 0) {
+      if (mgTimerBadge) {
+        mgTimerBadge.textContent = "⏱️ Waktu Habis!";
+        mgTimerBadge.className = "badge";
+      }
+      return;
+    }
+
+    minigameExpiresAt = Date.now() + (remainingSec * 1000);
+
+    const tick = () => {
+      const leftMs = minigameExpiresAt - Date.now();
+      const leftSec = Math.max(0, Math.ceil(leftMs / 1000));
+      if (mgTimerBadge) {
+        mgTimerBadge.textContent = `⏱️ ${leftSec}s`;
+        if (leftSec > 10) {
+          mgTimerBadge.className = "badge badge-online";
+        } else if (leftSec > 0) {
+          mgTimerBadge.className = "badge badge-accent";
+        } else {
+          mgTimerBadge.textContent = "⏱️ Waktu Habis!";
+          mgTimerBadge.className = "badge";
+          clearInterval(minigameTimerTicker);
+          minigameTimerTicker = null;
+        }
+      }
+    };
+
+    tick();
+    minigameTimerTicker = setInterval(tick, 1000);
+  }
+
+  function updateMinigameUi(data) {
+    if (!data) return;
+    const session = data.session || {};
+    const gameType = session.game_type || selectedMiniGameMode || "trivia";
+    selectedMiniGameMode = gameType;
+
+    // 1. Status Badge
+    if (mgStatusBadge) {
+      const st = (session.status || "idle").toUpperCase();
+      if (st === "ACTIVE") {
+        mgStatusBadge.textContent = "Status: ACTIVE 🟢";
+        mgStatusBadge.className = "badge badge-online";
+      } else if (st === "ROUND_END") {
+        mgStatusBadge.textContent = "Status: RONDE SELESAI ⏳";
+        mgStatusBadge.className = "badge badge-accent";
+      } else if (st === "GAME_OVER") {
+        mgStatusBadge.textContent = "Status: GAME OVER 🏁";
+        mgStatusBadge.className = "badge";
+      } else {
+        mgStatusBadge.textContent = "Status: IDLE 💤";
+        mgStatusBadge.className = "badge";
+      }
+    }
+
+    // 2. Mode Badge
+    if (mgModeBadge) {
+      const modeLabels = {
+        "trivia": "TRIVIA QUIZ",
+        "guess_number": "GUESS THE NUMBER",
+        "would_you_rather": "WOULD YOU RATHER",
+        "riddle": "TEKA-TEKI (RIDDLE)",
+        "word_association": "SAMBUNG KATA",
+        "guess_song": "TEBAK LAGU"
+      };
+      mgModeBadge.textContent = `Mode: ${modeLabels[gameType] || gameType.toUpperCase()}`;
+    }
+
+    // 3. Round Badge
+    if (mgRoundBadge) {
+      const rNum = session.round_number || 1;
+      const rTot = session.total_rounds || 3;
+      mgRoundBadge.textContent = `Round: ${rNum}/${rTot}`;
+    }
+
+    // 4. Scoreboard Badge
+    if (mgScoreBadge) {
+      const ai = session.ai_score !== undefined ? session.ai_score : (data.ai_score || 0);
+      const chat = session.chat_score !== undefined ? session.chat_score : (data.chat_score || 0);
+      mgScoreBadge.textContent = `Eve: ${ai} | Chat: ${chat}`;
+    }
+
+    // 5. Host Commentary Speech
+    if (mgHostSpeech) {
+      mgHostSpeech.textContent = session.last_host_commentary || "Ayo tebak atau kirim jawaban di chat!";
+    }
+
+    // 6. Action Control Buttons
+    const isActive = session.status === "active";
+    const isRoundEnd = session.status === "round_end";
+    const isGameOver = session.status === "game_over" || session.status === "idle";
+
+    if (btnMgStart) btnMgStart.disabled = isActive;
+    if (btnMgNextRound) btnMgNextRound.disabled = !isRoundEnd;
+    if (btnMgHint) {
+      const canHint = isActive && (gameType === "riddle" || gameType === "guess_song");
+      btnMgHint.disabled = !canHint;
+    }
+    if (btnMgStop) btnMgStop.disabled = isGameOver;
+
+    // 7. Timer Handling
+    if (isActive) {
+      let rem = 35;
+      if (session.start_time && session.time_limit_sec) {
+        const elapsed = Math.floor((Date.now() / 1000) - session.start_time);
+        rem = Math.max(0, session.time_limit_sec - elapsed);
+      }
+      startMiniGameLocalTimer(rem);
+    } else {
+      if (minigameTimerTicker) {
+        clearInterval(minigameTimerTicker);
+        minigameTimerTicker = null;
+      }
+      if (mgTimerBadge) {
+        if (session.status === "round_end") {
+          mgTimerBadge.textContent = "⏱️ Ronde Selesai";
+          mgTimerBadge.className = "badge badge-accent";
+        } else if (session.status === "game_over") {
+          mgTimerBadge.textContent = "⏱️ Selesai";
+          mgTimerBadge.className = "badge";
+        } else {
+          mgTimerBadge.textContent = "⏱️ Standby";
+          mgTimerBadge.className = "badge";
+        }
+      }
+    }
+
+    // 8. Active Challenge Arena
+    switchMiniGameView(gameType);
+    const c = session.current_challenge || {};
+
+    if (gameType === "trivia") {
+      if (mgTriviaCategory) mgTriviaCategory.textContent = c.category || "General";
+      if (mgTriviaQuestion) mgTriviaQuestion.textContent = c.question || "Menunggu soal trivia...";
+      if (mgTriviaOptions && c.options) {
+        mgTriviaOptions.innerHTML = "";
+        Object.entries(c.options).forEach(([optKey, optText]) => {
+          const btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "btn-trivia-opt";
+          btn.dataset.opt = optKey;
+
+          if (isRoundEnd || session.status === "game_over") {
+            if (optKey.toUpperCase() === (c.answer || "").toUpperCase()) {
+              btn.classList.add("correct");
+            }
+          }
+
+          btn.innerHTML = `<span class="opt-key">${optKey}</span> <span class="opt-txt">${optText}</span>`;
+          btn.addEventListener("click", () => {
+            const user = mgChatUser ? (mgChatUser.value.trim() || "ChatterPro") : "ChatterPro";
+            sendMinigameAction({
+              action: "chat_input",
+              user: user,
+              message: optKey
+            });
+          });
+          mgTriviaOptions.appendChild(btn);
+        });
+      }
+    } else if (gameType === "guess_number") {
+      const bounds = session.number_bounds || [1, 100];
+      if (mgNumRangeText) mgNumRangeText.textContent = `[${bounds[0]} ... ${bounds[1]}]`;
+      if (mgNumBarFill) {
+        const span = Math.max(1, bounds[1] - bounds[0]);
+        const pct = Math.min(100, Math.max(5, Math.round((span / 100) * 100)));
+        mgNumBarFill.style.width = `${pct}%`;
+      }
+      if (mgLastGuessFeedback) {
+        if (session.round_guesses && session.round_guesses.length > 0) {
+          const lastG = session.round_guesses[session.round_guesses.length - 1];
+          mgLastGuessFeedback.textContent = `Tebakan terakhir: ${lastG.user} menebak ${lastG.guess} -> ${lastG.feedback}`;
+        } else {
+          mgLastGuessFeedback.textContent = "Tebak angka antara 1 sampai 100 di chat!";
+        }
+      }
+    } else if (gameType === "would_you_rather") {
+      if (mgWyrTopic) mgWyrTopic.textContent = c.topic || "Dilema Kehidupan";
+      if (wyrTextA) wyrTextA.textContent = c.option_a || "Pilihan A";
+      if (wyrTextB) wyrTextB.textContent = c.option_b || "Pilihan B";
+
+      const pcts = session.vote_percentages || { "A": 50, "B": 50 };
+      const votes = session.votes || { "A": [], "B": [] };
+      const pctA = Math.round(pcts.A || 50);
+      const pctB = Math.round(pcts.B || 50);
+
+      if (wyrPctA) wyrPctA.textContent = `${pctA}% (${(votes.A || []).length} vote)`;
+      if (wyrPctB) wyrPctB.textContent = `${pctB}% (${(votes.B || []).length} vote)`;
+    } else if (gameType === "riddle") {
+      if (mgRiddleText) mgRiddleText.textContent = c.riddle || "Menunggu teka-teki dari Eve...";
+      if (mgHintsList) {
+        mgHintsList.innerHTML = "";
+        const hints = session.revealed_hints || [];
+        if (hints.length === 0) {
+          mgHintsList.innerHTML = `<span class="hint-pill">Belum ada hint dibuka. Tekan 'Minta Hint'!</span>`;
+        } else {
+          hints.forEach(h => {
+            const sp = document.createElement("span");
+            sp.className = "hint-pill";
+            sp.textContent = `💡 ${h}`;
+            mgHintsList.appendChild(sp);
+          });
+        }
+      }
+    } else if (gameType === "word_association") {
+      if (mgThemeText) mgThemeText.textContent = c.theme || "Gaming";
+      if (mgWordChainList) {
+        mgWordChainList.innerHTML = "";
+        const chain = session.word_chain || ["Mulai"];
+        chain.forEach((w, idx) => {
+          const sp = document.createElement("span");
+          sp.className = `chain-pill ${idx === 0 ? 'initial' : ''}`;
+          sp.textContent = `${idx + 1}. ${w}`;
+          mgWordChainList.appendChild(sp);
+        });
+      }
+    } else if (gameType === "guess_song") {
+      if (mgSongGenre) mgSongGenre.textContent = c.genre || "Anime Opening";
+      if (mgSongClue) mgSongClue.textContent = `"${c.clue_lyrics || 'Lirik lagu rahasia...'}"`;
+      if (mgSongHintsList) {
+        mgSongHintsList.innerHTML = "";
+        const hints = session.revealed_hints || [];
+        if (hints.length === 0) {
+          mgSongHintsList.innerHTML = `<span class="hint-pill">Belum ada hint. Minta hint jika kesulitan!</span>`;
+        } else {
+          hints.forEach(h => {
+            const sp = document.createElement("span");
+            sp.className = "hint-pill";
+            sp.textContent = `🎵 ${h}`;
+            mgSongHintsList.appendChild(sp);
+          });
+        }
+      }
+    }
+
+    // 9. Audience Leaderboard (Hall of Fame)
+    if (mgLeaderboardList && data.leaderboard) {
+      mgLeaderboardList.innerHTML = "";
+      const medals = ["🥇", "🥈", "🥉"];
+      data.leaderboard.forEach((p, idx) => {
+        const item = document.createElement("div");
+        item.className = "mg-leaderboard-item";
+        const medal = idx < 3 ? medals[idx] : `#${idx + 1}`;
+        item.innerHTML = `
+          <div class="mg-leader-rank">${medal}</div>
+          <div class="mg-leader-info">
+            <span class="mg-leader-name">${p.username}</span>
+            <small class="mg-leader-sub">Benar: ${p.correct_answers || 0} • Menang: ${p.games_won || 0} • Streak: 🔥${p.streak || 0}</small>
+          </div>
+          <div class="mg-leader-pts"><strong>${p.score || 0}</strong> <small>pts</small></div>
+        `;
+        mgLeaderboardList.appendChild(item);
+      });
+    }
+
+    // 10. Live Event History Ticker
+    if (mgEventHistoryList && data.event_log) {
+      mgEventHistoryList.innerHTML = "";
+      data.event_log.forEach(ev => {
+        const div = document.createElement("div");
+        div.className = "mg-event-row";
+        div.textContent = ev;
+        mgEventHistoryList.appendChild(div);
+      });
+    }
+  }
+
+  // Event Listeners for Mini-Game Controls
+  document.querySelectorAll(".btn-mg-mode").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const mode = btn.dataset.game;
+      if (mode) {
+        selectedMiniGameMode = mode;
+        switchMiniGameView(mode);
+      }
+    });
+  });
+
+  if (btnMgStart) {
+    btnMgStart.addEventListener("click", () => {
+      const rounds = selectMgRounds ? parseInt(selectMgRounds.value, 10) : 3;
+      sendMinigameAction({
+        action: "start",
+        game_type: selectedMiniGameMode,
+        total_rounds: rounds
+      });
+    });
+  }
+
+  if (btnMgNextRound) {
+    btnMgNextRound.addEventListener("click", () => {
+      sendMinigameAction({ action: "next_round" });
+    });
+  }
+
+  if (btnMgHint) {
+    btnMgHint.addEventListener("click", () => {
+      sendMinigameAction({ action: "hint" });
+    });
+  }
+
+  if (btnMgStop) {
+    btnMgStop.addEventListener("click", () => {
+      sendMinigameAction({ action: "stop" });
+    });
+  }
+
+  // Would You Rather Vote Buttons
+  document.querySelectorAll(".btn-wyr-vote").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const voteChoice = btn.dataset.vote; // "A" or "B"
+      const user = mgChatUser ? (mgChatUser.value.trim() || "Viewer") : "Viewer";
+      sendMinigameAction({
+        action: "chat_input",
+        user: user,
+        message: `!${voteChoice}`
+      });
+    });
+  });
+
+  // Chat Submission Form
+  if (mgChatSubmitForm && mgChatMessage) {
+    mgChatSubmitForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const user = mgChatUser ? (mgChatUser.value.trim() || "Chatter") : "Chatter";
+      const msg = mgChatMessage.value.trim();
+      if (msg) {
+        sendMinigameAction({
+          action: "chat_input",
+          user: user,
+          message: msg
+        });
+        mgChatMessage.value = "";
+      }
+    });
+  }
+
+  // Quick Simulation Buttons
+  document.querySelectorAll(".btn-mg-quick").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const user = btn.dataset.user || "Chatter";
+      const msg = btn.dataset.msg || "";
+      if (msg) {
+        sendMinigameAction({
+          action: "chat_input",
+          user: user,
+          message: msg
         });
       }
     });

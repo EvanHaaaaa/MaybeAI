@@ -1,0 +1,36 @@
+{
+  "players": {
+    "diamondhunter": {
+      "username": "DiamondHunter",
+      "score": 120,
+      "correct_answers": 9,
+      "games_won": 3,
+      "streak": 2,
+      "last_active_str": "07:46:15"
+    },
+    "alex": {
+      "username": "Alex",
+      "score": 95,
+      "correct_answers": 7,
+      "games_won": 2,
+      "streak": 1,
+      "last_active_str": "07:46:15"
+    },
+    "steve": {
+      "username": "Steve",
+      "score": 80,
+      "correct_answers": 6,
+      "games_won": 1,
+      "streak": 0,
+      "last_active_str": "07:46:15"
+    },
+    "creator": {
+      "username": "Creator",
+      "score": 150,
+      "correct_answers": 11,
+      "games_won": 4,
+      "streak": 3,
+      "last_active_str": "07:46:15"
+    }
+  }
+}

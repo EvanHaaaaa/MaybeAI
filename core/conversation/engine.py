@@ -12,6 +12,7 @@ from core.relationship import RelationshipEngine
 from core.vision import VisionEngine
 from core.minecraft.multiplayer import MultiplayerSocialEngine
 from core.desktop import DesktopCompanionEngine
+from core.minigames import MiniGameEngine
 
 class ConversationEngine:
     """
@@ -45,6 +46,7 @@ class ConversationEngine:
         self.vision = VisionEngine()
         self.multiplayer = MultiplayerSocialEngine()
         self.desktop = DesktopCompanionEngine()
+        self.minigames = MiniGameEngine()
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
@@ -213,6 +215,7 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
 
         multiplayer_directive = self.multiplayer.get_prompt_directive() if self.multiplayer else ""
         desktop_directive = self.desktop.get_prompt_directive() if self.desktop else ""
+        minigame_directive = self.minigames.get_prompt_directive() if self.minigames else ""
 
         return MasterPromptBuilder.build_system_prompt(
             character=self.character,
@@ -233,7 +236,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             relationship_directive=relationship_directive,
             visual_directive=visual_directive,
             multiplayer_directive=multiplayer_directive,
-            desktop_directive=desktop_directive
+            desktop_directive=desktop_directive,
+            minigame_directive=minigame_directive
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -444,6 +448,39 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             else:
                 st = "AKTIF" if self.desktop.config.master_enabled else "MATI"
                 return f"[emotion: happy] Mode Desktop Companion lagi {st}! Eve bisa bantu atur volume ({self.desktop.config.current_volume}%), kontrol musik, buka aplikasi, dan cek notifikasi sesuai izin kamu! [action: wink]"
+
+        # Interactive Mini-Game Engine & Crowd Play
+        is_minigame_query = any(w in msg_lower for w in [
+            "mini game", "minigame", "trivia", "tebak angka", "tebak lagu",
+            "teka-teki", "teka teki", "riddle", "pilih mana", "would you rather",
+            "sambung kata", "asosiasi kata", "skor game", "leaderboard game", "juara game"
+        ])
+        if is_minigame_query and self.minigames:
+            if self.minigames.session.status == "active":
+                g_type = self.minigames.session.game_type.replace('_', ' ').title()
+                return f"[emotion: excited] Kita lagi main {g_type} ronde {self.minigames.session.round_number}/{self.minigames.session.total_rounds}! {self.minigames.session.host_speech} [action: wink]"
+            elif "trivia" in msg_lower:
+                _, speech = self.minigames.start_game("trivia", total_rounds=3)
+                return speech
+            elif "tebak angka" in msg_lower or "guess number" in msg_lower:
+                _, speech = self.minigames.start_game("guess_number", total_rounds=1)
+                return speech
+            elif "teka-teki" in msg_lower or "teka teki" in msg_lower or "riddle" in msg_lower:
+                _, speech = self.minigames.start_game("riddle", total_rounds=1)
+                return speech
+            elif "pilih mana" in msg_lower or "would you rather" in msg_lower:
+                _, speech = self.minigames.start_game("would_you_rather", total_rounds=1)
+                return speech
+            elif "tebak lagu" in msg_lower or "guess song" in msg_lower:
+                _, speech = self.minigames.start_game("guess_song", total_rounds=1)
+                return speech
+            elif "sambung kata" in msg_lower or "asosiasi" in msg_lower:
+                _, speech = self.minigames.start_game("word_association", total_rounds=1)
+                return speech
+            else:
+                top = self.minigames.get_leaderboard(1)
+                top_name = top[0].username if top else "Belum ada"
+                return f"[emotion: happy] Arena Mini-Game siap! Eve bisa adakan Trivia Quiz, Tebak Angka, Sambung Kata, Teka-Teki, Would You Rather, dan Tebak Lagu bareng penonton chat! Top player saat ini dipegang oleh {top_name}! [action: wink]"
 
         # Episodic Memory & Second Brain Callbacks
         recall_res = self.episodic_memory.recall(query=message, current_user=user_name, game_context=game_context)

@@ -39,7 +39,8 @@ class MasterPromptBuilder:
         relationship_directive: str = "",
         visual_directive: str = "",
         multiplayer_directive: str = "",
-        desktop_directive: str = ""
+        desktop_directive: str = "",
+        minigame_directive: str = ""
     ) -> str:
         name = character.get("name", "Eve Maybe")
         nickname = character.get("nickname", "Eve")
@@ -117,6 +118,8 @@ CURRENT STREAM SITUATION & CONTEXT:
 {multiplayer_directive if multiplayer_directive else ""}
 
 {desktop_directive if desktop_directive else ""}
+
+{minigame_directive if minigame_directive else ""}
 
 CORE CHARACTER LORE:
 {lore}
