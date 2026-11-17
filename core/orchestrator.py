@@ -20,16 +20,25 @@ class Orchestrator:
     """
 
     def __init__(self, config_dir: str = "config"):
-        self.moderator = Moderator(f"{config_dir}/filter_words.json")
+        self.config_dir = config_dir
         self.brain = Brain(f"{config_dir}/settings.json", f"{config_dir}/character.json")
+        settings = self.brain.settings
+
+        # Load Moderator config
+        mod_cfg = settings.get("moderator", {})
+        self.moderator = Moderator(
+            f"{config_dir}/filter_words.json",
+            max_message_length=mod_cfg.get("max_message_length", 250),
+            strict_mode=mod_cfg.get("strict_mode", True)
+        )
         
         # Load TTS config
-        settings = self.brain.settings
         tts_cfg = settings.get("tts", {})
         self.tts = TTSEngine(
             voice=tts_cfg.get("voice", "en-US-AnaNeural"),
             rate=tts_cfg.get("rate", "+5%"),
-            pitch=tts_cfg.get("pitch", "+10Hz")
+            pitch=tts_cfg.get("pitch", "+10Hz"),
+            enabled=tts_cfg.get("enabled", True)
         )
 
         # Load VTS config
@@ -108,6 +117,61 @@ class Orchestrator:
         asyncio.create_task(self._idle_banter_loop())
         # Start visual perception / screen awareness loop
         asyncio.create_task(self._visual_perception_loop())
+
+    async def apply_configuration_hot_reload(self, new_settings: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Applies runtime configuration updates cleanly without requiring app restart.
+        Hot-reloads: LLM settings, TTS voice/speed/pitch/toggle, VTS connection, Twitch listener, Moderator rules.
+        """
+        self.brain.reload_settings(new_settings)
+
+        # 1. Update TTS
+        tts_cfg = new_settings.get("tts", {})
+        self.tts.update_config(
+            enabled=tts_cfg.get("enabled"),
+            voice=tts_cfg.get("voice"),
+            rate=tts_cfg.get("rate"),
+            pitch=tts_cfg.get("pitch")
+        )
+        if tts_cfg.get("voice"):
+            self.singer.voice = tts_cfg["voice"]
+
+        # 2. Update VTS
+        vts_cfg = new_settings.get("vts", {})
+        if vts_cfg.get("enabled") is False and self.vts.connected:
+            await self.vts.disconnect()
+        elif vts_cfg.get("enabled") is True and not self.vts.connected:
+            asyncio.create_task(self.vts.connect())
+        elif vts_cfg.get("enabled") is True and (vts_cfg.get("host") != self.vts.host or vts_cfg.get("port") != self.vts.port):
+            asyncio.create_task(self.vts.reconnect(host=vts_cfg.get("host"), port=vts_cfg.get("port")))
+
+        # 3. Update Twitch
+        twitch_cfg = new_settings.get("twitch", {})
+        if twitch_cfg.get("enabled") is False and self.chat.is_running:
+            self.chat.stop()
+        elif twitch_cfg.get("enabled") is True and not self.chat.is_running and twitch_cfg.get("channel"):
+            asyncio.create_task(
+                self.chat.start_twitch_listener(
+                    channel=twitch_cfg["channel"],
+                    bot_nick=twitch_cfg.get("bot_nick", ""),
+                    oauth=twitch_cfg.get("oauth_token", "")
+                )
+            )
+
+        # 4. Update Moderator
+        mod_cfg = new_settings.get("moderator", {})
+        self.moderator.update_config(
+            strict_mode=mod_cfg.get("strict_mode"),
+            max_message_length=mod_cfg.get("max_message_length")
+        )
+
+        # Broadcast live event to all connected WebSocket clients
+        await self.broadcast("configuration_updated", {
+            "settings": new_settings,
+            "status": "applied_live"
+        })
+
+        return {"status": "success", "hot_reloaded": True}
 
     async def _idle_banter_loop(self):
         """

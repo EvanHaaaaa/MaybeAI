@@ -29,8 +29,19 @@ class ChatReceiver:
         self.twitch_channel = twitch_channel
         self.queue: asyncio.Queue[ChatMessage] = asyncio.Queue()
         self.is_running = False
+        self.is_connected = False
+        self.last_error: Optional[str] = None
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
+
+    def get_status(self) -> Dict[str, Any]:
+        return {
+            "is_running": self.is_running,
+            "is_connected": self.is_connected,
+            "channel": self.twitch_channel,
+            "queue_size": self.queue.qsize(),
+            "last_error": self.last_error
+        }
 
     async def put_message(
         self,
@@ -81,6 +92,8 @@ class ChatReceiver:
                 writer.write(f"NICK {nick_str}\r\n".encode())
                 writer.write(f"JOIN #{self.twitch_channel}\r\n".encode())
                 await writer.drain()
+                self.is_connected = True
+                self.last_error = None
 
                 print(f"[Twitch] Joined #{self.twitch_channel} chat!")
 
@@ -104,10 +117,17 @@ class ChatReceiver:
                         await self.put_message(user=user, text=text, source="twitch")
 
             except Exception as e:
+                self.is_connected = False
+                self.last_error = str(e)
                 print(f"[Twitch] Disconnected ({e}), reconnecting in 5s...")
                 await asyncio.sleep(5)
 
     def stop(self):
         self.is_running = False
+        self.is_connected = False
         if self._writer:
-            self._writer.close()
+            try:
+                self._writer.close()
+            except Exception:
+                pass
+            self._writer = None

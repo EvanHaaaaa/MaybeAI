@@ -4,6 +4,7 @@ import json
 import asyncio
 import argparse
 from pathlib import Path
+from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -19,8 +20,10 @@ load_dotenv()
 sys.path.insert(0, str(Path(__file__).parent))
 
 from core.orchestrator import Orchestrator
+from core.config_manager import ConfigManager
 
 orchestrator = Orchestrator()
+config_mgr = ConfigManager()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +38,53 @@ app.mount("/static", StaticFiles(directory="web"), name="static")
 @app.get("/")
 async def get_index():
     return FileResponse("web/index.html")
+
+@app.get("/settings")
+async def get_settings_page():
+    return FileResponse("web/settings.html")
+
+# --- Centralized Configuration Center Endpoints ---
+@app.get("/api/config")
+async def get_configuration():
+    return config_mgr.get_public_config()
+
+@app.get("/api/config/schema")
+async def get_configuration_schema():
+    return config_mgr.get_schema()
+
+@app.put("/api/config")
+async def update_configuration(payload: Dict[str, Any]):
+    success, errors, restart_required = config_mgr.save_config(payload)
+    if not success:
+        return {"success": False, "errors": errors}
+    await orchestrator.apply_configuration_hot_reload(config_mgr.settings)
+    return {
+        "success": True,
+        "errors": errors,
+        "restart_required": restart_required,
+        "config": config_mgr.get_public_config()
+    }
+
+@app.post("/api/config/validate")
+async def validate_configuration(payload: Dict[str, Any]):
+    valid, errors = config_mgr.validate_config(payload)
+    return {"valid": valid, "errors": errors}
+
+@app.post("/api/config/reset")
+async def reset_configuration(req: Optional[Dict[str, Any]] = None):
+    category = req.get("category") if req else None
+    cfg = config_mgr.reset_to_defaults(category)
+    await orchestrator.apply_configuration_hot_reload(config_mgr.settings)
+    return {"success": True, "config": cfg}
+
+@app.post("/api/config/test/{feature}")
+async def test_feature_diagnostic(feature: str, req: Optional[Dict[str, Any]] = None):
+    payload = req or {}
+    return await config_mgr.test_feature(feature, orchestrator, payload)
+
+@app.get("/api/system/diagnostics")
+async def get_system_diagnostics_report():
+    return config_mgr.get_system_diagnostics(orchestrator)
 
 @app.get("/api/status")
 async def get_status():
@@ -349,6 +399,12 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "personality_updated",
         "data": orchestrator.brain.personality.get_state()
+    })
+
+    # Send initial system diagnostics report
+    await websocket.send_json({
+        "type": "system_diagnostics",
+        "data": config_mgr.get_system_diagnostics(orchestrator)
     })
 
     try:
@@ -923,6 +979,29 @@ async def websocket_endpoint(websocket: WebSocket):
                     p_engine.sync_to_mood_baselines(orchestrator.brain.mood)
                     await orchestrator.broadcast("personality_updated", p_engine.get_state())
                     await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
+            elif data.get("type") == "config_action":
+                act = data.get("action")
+                if act == "save":
+                    payload = data.get("config", {})
+                    success, errors, restart = config_mgr.save_config(payload)
+                    if success:
+                        await orchestrator.apply_configuration_hot_reload(config_mgr.settings)
+                    await websocket.send_json({
+                        "type": "config_saved",
+                        "data": {"success": success, "errors": errors, "restart_required": restart}
+                    })
+                elif act == "test":
+                    feat = data.get("feature", "llm")
+                    res = await config_mgr.test_feature(feat, orchestrator, data.get("payload", {}))
+                    await websocket.send_json({
+                        "type": "feature_test_result",
+                        "data": res
+                    })
+                elif act == "get_diagnostics":
+                    await websocket.send_json({
+                        "type": "system_diagnostics",
+                        "data": config_mgr.get_system_diagnostics(orchestrator)
+                    })
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:

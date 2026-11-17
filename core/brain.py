@@ -80,6 +80,9 @@ class Brain:
                 return json.load(f)
         return {}
 
+    def reload_settings(self, new_settings: Dict[str, Any]):
+        self.settings = new_settings
+
     def set_provider(self, provider: str) -> str:
         prov = provider.lower().strip()
         if prov in ["mock", "gemini", "openai", "ollama"]:
@@ -180,7 +183,8 @@ class Brain:
             return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
 
         model = self.settings.get("llm", {}).get("model", "gpt-4o-mini")
-        temperature = self.settings.get("llm", {}).get("temperature", 0.85)
+        temperature = float(self.settings.get("llm", {}).get("temperature", 0.85))
+        max_tokens = int(self.settings.get("llm", {}).get("max_tokens", 150))
 
         messages = [{"role": "system", "content": system_prompt}]
         for item in self.conversation.context_memory.get_history_for_llm():
@@ -209,7 +213,7 @@ class Brain:
             "model": model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 150
+            "max_tokens": max_tokens
         }
 
         try:
@@ -292,12 +296,14 @@ class Brain:
             })
         contents.append({"role": "user", "parts": user_parts})
 
+        cfg_temp = float(self.settings.get("llm", {}).get("temperature", 0.85))
+        cfg_max_tokens = int(self.settings.get("llm", {}).get("max_tokens", 800))
         payload = {
             "systemInstruction": {"parts": [{"text": system_prompt}]},
             "contents": contents,
             "generationConfig": {
-                "temperature": 0.85,
-                "maxOutputTokens": 800,
+                "temperature": cfg_temp,
+                "maxOutputTokens": cfg_max_tokens,
                 "thinkingConfig": {"thinkingBudget": 50}
             }
         }

@@ -3,7 +3,12 @@
     "name": "MaybeAI",
     "version": "1.0.0",
     "host": "127.0.0.1",
-    "port": 7860
+    "port": 7860,
+    "bot_enabled": true,
+    "autonomous_mode": true,
+    "debug_mode": true,
+    "language": "id-ID",
+    "response_timeout_sec": 15
   },
   "llm": {
     "provider": "gemini",
@@ -11,36 +16,107 @@
     "model": "gpt-4o-mini",
     "temperature": 0.8,
     "max_tokens": 150,
+    "context_window_turns": 16,
     "ollama_url": "http://localhost:11434",
-    "ollama_model": "llama3.2"
+    "ollama_model": "llama3.2",
+    "fallback_provider": "mock",
+    "streaming_enabled": false,
+    "retry_attempts": 2
+  },
+  "personality": {
+    "enabled": true,
+    "humor_intensity": 75,
+    "sarcasm_intensity": 60,
+    "friendliness": 70,
+    "curiosity": 65,
+    "confidence": 60,
+    "roasting_level": 55,
+    "response_creativity": 80,
+    "custom_instructions": ""
+  },
+  "memory": {
+    "enabled": true,
+    "short_term_turns": 16,
+    "episodic_memory_enabled": true,
+    "second_brain_sync": true,
+    "retrieval_limit": 5,
+    "similarity_threshold": 0.7,
+    "auto_extract": true
+  },
+  "mood": {
+    "enabled": true,
+    "decay_rate_multiplier": 1.0,
+    "mood_sensitivity": 1.0,
+    "default_baseline_happiness": 0.6,
+    "default_baseline_annoyance": 0.1,
+    "default_baseline_curiosity": 0.5,
+    "default_baseline_excitement": 0.4,
+    "default_baseline_competitiveness": 0.3
   },
   "tts": {
+    "enabled": true,
     "provider": "edge-tts",
     "voice": "en-US-AnaNeural",
     "rate": "+5%",
     "pitch": "+12Hz",
-    "volume": "+0%"
-  },
-  "stt": {
-    "enabled": false,
-    "model": "base",
-    "device": "cpu"
+    "volume": "+0%",
+    "interruptible": true,
+    "lipsync_sensitivity": 1.0
   },
   "vts": {
     "enabled": true,
     "host": "localhost",
     "port": 8001,
     "plugin_name": "MaybeAI-VTuber",
-    "plugin_developer": "MaybeAI Dev"
+    "plugin_developer": "MaybeAI Dev",
+    "auto_reconnect": true,
+    "movement_intensity": 1.0
+  },
+  "karaoke": {
+    "singing_enabled": true,
+    "bgm_volume": 75,
+    "vocal_volume": 100,
+    "glowsticks_enabled": true
   },
   "twitch": {
     "enabled": false,
     "channel": "",
     "bot_nick": "",
-    "oauth_token": ""
+    "oauth_token": "",
+    "message_cooldown_sec": 3.0,
+    "mention_only": false
   },
   "moderator": {
     "strict_mode": true,
-    "max_message_length": 250
+    "max_message_length": 250,
+    "prompt_injection_filter": true,
+    "spam_rate_limit": 5
+  },
+  "minecraft": {
+    "enabled": true,
+    "default_mode": "santai",
+    "casual_follow_player": true,
+    "casual_head_tracking": true,
+    "follow_distance": 3.5,
+    "speedrun_autonomous": true,
+    "guard_radius": 15.0,
+    "health_retreat_threshold": 6
+  },
+  "autonomous_agent": {
+    "enabled": true,
+    "goal_planning_enabled": true,
+    "idle_banter_interval_sec": 40,
+    "max_planning_steps": 5,
+    "human_approval_required": false
+  },
+  "performance": {
+    "max_concurrent_tasks": 3,
+    "websocket_ping_interval_sec": 30,
+    "audio_buffer_size_kb": 256
+  },
+  "stt": {
+    "enabled": false,
+    "model": "base",
+    "device": "cpu"
   }
 }

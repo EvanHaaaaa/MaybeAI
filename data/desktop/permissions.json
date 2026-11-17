@@ -21,7 +21,7 @@
     "current_volume": 0,
     "is_muted": false,
     "media_state": "playing",
-    "current_track": "Yoasobi - Racing Into the Night (Piano ver.)",
+    "current_track": "ChilledCow - Lofi Girl Beats",
     "streaming_scene": "Just Chatting",
     "is_streaming": false
   },
@@ -201,6 +201,21 @@
       "requested_at": 1794879409.7849884,
       "requested_at_str": "08:36:49",
       "resolved_at": 1794879409.7849884,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_52f473d8",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794880360.4394727,
+      "requested_at_str": "08:52:40",
+      "resolved_at": 1794880360.4394727,
       "details": "Permintaan aksi launch_app pada sistem desktop.",
       "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
     }

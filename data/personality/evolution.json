@@ -1,16 +1,16 @@
 {
-  "level": 1,
-  "exp": 96,
-  "exp_to_next_level": 100,
+  "level": 2,
+  "exp": 28,
+  "exp_to_next_level": 200,
   "traits": {
-    "competitiveness": 0.3882,
-    "confidence": 0.5435,
-    "warmth": 0.6869,
-    "sassiness": 0.5016,
+    "competitiveness": 0.4004,
+    "confidence": 0.557,
+    "warmth": 0.7114,
+    "sassiness": 0.5315,
     "intellect": 0.5
   },
-  "archetype": "Rookie Streamer 🌸 (Lv. 1)",
-  "archetype_desc": "Idol streamer pemula yang ramah, sedikit pemalu, namun penuh potensi.",
+  "archetype": "Community Darling 💖 (Lv. 2)",
+  "archetype_desc": "Sangat hangat, protektif terhadap kawan mabar, dan dekat dengan komunitas.",
   "milestones": [],
   "history": [
     {
@@ -117,6 +117,42 @@
       "trait_changes": {
         "warmth": 0.013,
         "confidence": 0.007
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_2714993b",
+      "timestamp": 1794880361.4843776,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.0125,
+        "confidence": 0.0068
+      },
+      "exp_gained": 10,
+      "narrative": "Obrolan bersahabat dengan Alice membuat Eve merasa nyaman dan semakin ramah pada chat."
+    },
+    {
+      "id": "exp_fb842931",
+      "timestamp": 1794880361.4901164,
+      "category": "banter",
+      "trigger": "troll_encountered",
+      "trait_changes": {
+        "sassiness": 0.0299,
+        "competitiveness": 0.0122
+      },
+      "exp_gained": 12,
+      "narrative": "Komentar usil dari Troll dibalas dengan sentilan cerdas, mempertajam gaya sarkastis Eve."
+    },
+    {
+      "id": "exp_e5372016",
+      "timestamp": 1794880362.2816591,
+      "category": "social",
+      "trigger": "friendly_interaction",
+      "trait_changes": {
+        "warmth": 0.012,
+        "confidence": 0.0067
       },
       "exp_gained": 10,
       "narrative": "Obrolan bersahabat dengan NewFan membuat Eve merasa nyaman dan semakin ramah pada chat."

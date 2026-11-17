@@ -11,12 +11,46 @@ class TTSEngine:
     Default provider: edge-tts (High quality, free, realistic voices).
     """
 
-    def __init__(self, voice: str = "en-US-AnaNeural", rate: str = "+5%", pitch: str = "+10Hz"):
+    def __init__(
+        self,
+        voice: str = "en-US-AnaNeural",
+        rate: str = "+5%",
+        pitch: str = "+10Hz",
+        enabled: bool = True
+    ):
         self.voice = voice
         self.rate = rate
         self.pitch = pitch
+        self.enabled = enabled
+        self.last_error: Optional[str] = None
         self.temp_dir = Path(tempfile.gettempdir()) / "maybeai_audio"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+    def update_config(
+        self,
+        enabled: Optional[bool] = None,
+        voice: Optional[str] = None,
+        rate: Optional[str] = None,
+        pitch: Optional[str] = None
+    ):
+        if enabled is not None:
+            self.enabled = bool(enabled)
+        if voice:
+            self.voice = voice.strip()
+        if rate:
+            self.rate = rate.strip()
+        if pitch:
+            self.pitch = pitch.strip()
+
+    def get_status(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "provider": "edge-tts",
+            "voice": self.voice,
+            "rate": self.rate,
+            "pitch": self.pitch,
+            "last_error": self.last_error
+        }
 
     async def speak(self, text: str, on_mouth_update: Optional[Callable[[float], None]] = None) -> Optional[str]:
         """
@@ -24,6 +58,18 @@ class TTSEngine:
         Returns path to generated audio file.
         """
         if not text.strip():
+            return None
+
+        # If TTS is disabled, skip audio synthesis and gracefully simulate mouth flap if needed
+        if not self.enabled:
+            if on_mouth_update:
+                words = len(text.split())
+                est_duration = max(0.5, min(3.0, words / 3.0))
+                steps = int(est_duration / 0.1)
+                for i in range(steps):
+                    await asyncio.sleep(0.1)
+                    on_mouth_update(0.6 if i % 2 == 0 else 0.1)
+                on_mouth_update(0.0)
             return None
 
         output_file = str(self.temp_dir / f"speech_{asyncio.get_event_loop().time():.2f}.mp3")
@@ -39,8 +85,10 @@ class TTSEngine:
 
             # Play audio and simulate lip sync
             await self._play_and_lipsync(output_file, text, on_mouth_update)
+            self.last_error = None
             return output_file
         except Exception as e:
+            self.last_error = str(e)
             print(f"[TTS Error] {e}")
             return None
 

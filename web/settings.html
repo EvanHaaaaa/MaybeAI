@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Configuration Center - MaybeAI (Eve Maybe)</title>
+  <link rel="stylesheet" href="/static/settings.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="settings-app">
+    <!-- Top Cyberpunk Bar -->
+    <header class="settings-header">
+      <div class="brand">
+        <a href="/" class="brand-link" title="Return to Live Studio">
+          <span class="neon-indicator"></span>
+          <h2>MaybeAI <span>// CONFIG CENTER</span></h2>
+        </a>
+        <span class="version-tag">v1.0.0-PROD</span>
+      </div>
+
+      <!-- Search Bar -->
+      <div class="search-box">
+        <span class="search-icon">🔍</span>
+        <input type="text" id="configSearchInput" placeholder="Search parameters (e.g. temperature, rate, voice, oauth, follow)..." autocomplete="off">
+        <button id="clearSearchBtn" class="clear-search" style="display: none;">✕</button>
+      </div>
+
+      <!-- Header Actions -->
+      <div class="header-actions">
+        <div id="connectionStatusBadge" class="status-pill status-online">
+          <span class="status-dot"></span>
+          <span id="connectionText">SYSTEM ONLINE</span>
+        </div>
+        <a href="/" class="btn btn-studio-nav">
+          <span>📺</span>
+          <span>Live Studio</span>
+        </a>
+      </div>
+    </header>
+
+    <!-- Main Settings Layout -->
+    <div class="settings-layout">
+      <!-- Left Sidebar Navigation -->
+      <aside class="settings-sidebar">
+        <div class="sidebar-header">
+          <span>SETTINGS CATEGORIES</span>
+        </div>
+        <nav class="sidebar-nav" id="sidebarNav">
+          <!-- Diagnostics Special View -->
+          <button class="nav-item active" data-category="diagnostics">
+            <span class="nav-icon">📊</span>
+            <span class="nav-label">System Diagnostics</span>
+            <span class="nav-badge pulse">LIVE</span>
+          </button>
+
+          <div class="nav-divider"></div>
+
+          <!-- Configuration Categories -->
+          <button class="nav-item" data-category="general">
+            <span class="nav-icon">⚙️</span>
+            <span class="nav-label">General Settings</span>
+          </button>
+          <button class="nav-item" data-category="brain">
+            <span class="nav-icon">🧠</span>
+            <span class="nav-label">AI & Brain (LLM)</span>
+          </button>
+          <button class="nav-item" data-category="personality">
+            <span class="nav-icon">🎭</span>
+            <span class="nav-label">Personality & Persona</span>
+          </button>
+          <button class="nav-item" data-category="memory">
+            <span class="nav-icon">💾</span>
+            <span class="nav-label">Memory & Second Brain</span>
+          </button>
+          <button class="nav-item" data-category="mood">
+            <span class="nav-icon">💖</span>
+            <span class="nav-label">Mood & Affective State</span>
+          </button>
+          <button class="nav-item" data-category="voice">
+            <span class="nav-icon">🎙️</span>
+            <span class="nav-label">Voice & Speech (TTS)</span>
+          </button>
+          <button class="nav-item" data-category="avatar">
+            <span class="nav-icon">👤</span>
+            <span class="nav-label">Avatar & VTube Studio</span>
+          </button>
+          <button class="nav-item" data-category="karaoke">
+            <span class="nav-icon">🎤</span>
+            <span class="nav-label">Karaoke & Music</span>
+          </button>
+          <button class="nav-item" data-category="twitch">
+            <span class="nav-icon">💬</span>
+            <span class="nav-label">Twitch & Chat Stream</span>
+          </button>
+          <button class="nav-item" data-category="moderator">
+            <span class="nav-icon">🛡️</span>
+            <span class="nav-label">Moderation & Safety</span>
+          </button>
+          <button class="nav-item" data-category="minecraft">
+            <span class="nav-icon">⛏️</span>
+            <span class="nav-label">Minecraft Engine</span>
+          </button>
+          <button class="nav-item" data-category="autonomous">
+            <span class="nav-icon">🤖</span>
+            <span class="nav-label">Autonomous Agent</span>
+          </button>
+          <button class="nav-item" data-category="performance">
+            <span class="nav-icon">⚡</span>
+            <span class="nav-label">Performance & Network</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <button id="btnResetAll" class="btn btn-danger-outline btn-block">
+            <span>🔄</span> Reset to Defaults
+          </button>
+        </div>
+      </aside>
+
+      <!-- Center Main Content -->
+      <main class="settings-content" id="settingsContent">
+        <!-- Content dynamically rendered via settings.js -->
+        <div class="loading-state" id="loadingState">
+          <div class="cyber-spinner"></div>
+          <p>Loading Configuration Center & Telemetry...</p>
+        </div>
+      </main>
+    </div>
+
+    <!-- Floating Unsaved Changes Footer Banner -->
+    <div id="unsavedBanner" class="unsaved-banner" style="display: none;">
+      <div class="unsaved-info">
+        <span class="warning-icon">⚠️</span>
+        <div>
+          <strong>Unsaved Changes Detected</strong>
+          <p id="unsavedCountText">You have modified 0 parameter(s).</p>
+        </div>
+      </div>
+      <div class="unsaved-actions">
+        <button id="btnDiscardChanges" class="btn btn-secondary">Discard</button>
+        <button id="btnSaveAllChanges" class="btn btn-primary">
+          <span>💾</span> Save & Apply Changes (Ctrl+S)
+        </button>
+      </div>
+    </div>
+
+    <!-- Generic Confirmation Modal -->
+    <div id="confirmModal" class="modal-backdrop" style="display: none;">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 id="modalTitle">Confirm Action</h3>
+          <button class="modal-close" id="btnModalClose">✕</button>
+        </div>
+        <div class="modal-body">
+          <p id="modalMessage">Are you sure you want to proceed?</p>
+        </div>
+        <div class="modal-footer">
+          <button id="btnModalCancel" class="btn btn-secondary">Cancel</button>
+          <button id="btnModalConfirm" class="btn btn-danger">Confirm</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div id="toastContainer" class="toast-container"></div>
+  </div>
+
+  <script src="/static/settings.js"></script>
+</body>
+</html>

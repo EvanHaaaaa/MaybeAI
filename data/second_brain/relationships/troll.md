@@ -1,14 +1,14 @@
 # 👤 Viewer Dossier: Troll
-*Last Updated: 2026-11-17 08:36:50*
+*Last Updated: 2026-11-17 08:52:41*
 
 **Relationship Archetype:** Rival Sengit ⚔️
 **Special Title:** Rival Abadi
-**Total Interactions:** 10 messages
+**Total Interactions:** 11 messages
 
 ## 📊 Social Affinity Metrics
-- **Familiarity:** 30%
+- **Familiarity:** 32%
 - **Trust & Rapport:** 20%
-- **Rivalry & Competition:** 85%
+- **Rivalry & Competition:** 93%
 - **Gaming Synergy:** 5%
 - **Affection:** 30%
 

@@ -10,22 +10,61 @@ class VTSClient:
     """
 
     def __init__(self, host: str = "localhost", port: int = 8001, plugin_name: str = "MaybeAI-VTuber"):
+        self.host = host
+        self.port = port
         self.uri = f"ws://{host}:{port}"
         self.plugin_name = plugin_name
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.auth_token: Optional[str] = None
         self.connected = False
         self.is_running = False
+        self.last_error: Optional[str] = None
+        self.last_connected_time: Optional[float] = None
 
-    async def connect(self):
+    async def disconnect(self):
+        self.connected = False
+        if self.ws:
+            try:
+                await self.ws.close()
+            except Exception:
+                pass
+            self.ws = None
+
+    async def reconnect(self, host: Optional[str] = None, port: Optional[int] = None) -> bool:
+        await self.disconnect()
+        if host:
+            self.host = host
+        if port:
+            self.port = int(port)
+        self.uri = f"ws://{self.host}:{self.port}"
+        return await self.connect()
+
+    def get_status(self) -> Dict[str, Any]:
+        return {
+            "connected": self.connected,
+            "host": self.host,
+            "port": self.port,
+            "plugin_name": self.plugin_name,
+            "authenticated": bool(self.auth_token and self.connected),
+            "last_connected_time": self.last_connected_time,
+            "last_error": self.last_error
+        }
+
+    async def connect(self) -> bool:
         try:
-            self.ws = await websockets.connect(self.uri)
+            self.ws = await websockets.connect(self.uri, open_timeout=3.0)
             self.connected = True
+            import time
+            self.last_connected_time = time.time()
+            self.last_error = None
             print(f"[VTS] Connected to VTube Studio at {self.uri}")
             await self._authenticate()
+            return True
         except Exception as e:
             self.connected = False
+            self.last_error = str(e)
             print(f"[VTS] VTube Studio not detected ({e}). Running in standalone/virtual avatar mode.")
+            return False
 
     async def _authenticate(self):
         if not self.connected or not self.ws:
