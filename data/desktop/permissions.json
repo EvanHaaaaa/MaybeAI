@@ -18,10 +18,10 @@
       "notepad.exe",
       "calc.exe"
     ],
-    "current_volume": 10,
+    "current_volume": 0,
     "is_muted": false,
     "media_state": "playing",
-    "current_track": "ChilledCow - Lofi Girl Beats",
+    "current_track": "Kavinsky - Nightcall (Synthwave Remix)",
     "streaming_scene": "Just Chatting",
     "is_streaming": false
   },
@@ -96,6 +96,36 @@
       "requested_at": 1794841774.799597,
       "requested_at_str": "22:09:34",
       "resolved_at": 1794841774.799597,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_bdc52aa6",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794876373.941754,
+      "requested_at_str": "07:46:13",
+      "resolved_at": 1794876373.941754,
+      "details": "Permintaan aksi launch_app pada sistem desktop.",
+      "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
+    },
+    {
+      "id": "act_b794e41b",
+      "category": "app_launch",
+      "action_type": "launch_app",
+      "params": {
+        "app_name": "notepad.exe"
+      },
+      "risk_level": "medium",
+      "status": "executed",
+      "requested_at": 1794877252.8534713,
+      "requested_at_str": "08:00:52",
+      "resolved_at": 1794877252.8534713,
       "details": "Permintaan aksi launch_app pada sistem desktop.",
       "result_summary": "Aplikasi 'notepad.exe' diluncurkan / diaktifkan di desktop."
     }

@@ -1,16 +1,16 @@
 # 👤 Viewer Dossier: Alice
-*Last Updated: 2026-11-16 22:09:35*
+*Last Updated: 2026-11-17 08:00:53*
 
 **Relationship Archetype:** New Friend 🌟
 **Special Title:** -
-**Total Interactions:** 3 messages
+**Total Interactions:** 5 messages
 
 ## 📊 Social Affinity Metrics
-- **Familiarity:** 16%
-- **Trust & Rapport:** 32%
+- **Familiarity:** 20%
+- **Trust & Rapport:** 40%
 - **Rivalry & Competition:** 5%
 - **Gaming Synergy:** 5%
-- **Affection:** 45%
+- **Affection:** 55%
 
 ## 🎭 Shared Inside Jokes & Running Gags
 *(Belum ada inside joke yang terbentuk)*
