@@ -125,14 +125,25 @@
                 <span class="mic-icon">🎙️</span>
                 <span id="creator-mic-label">Bicara ke Eve (Mic: OFF)</span>
               </button>
+              <label class="barge-in-toggle" title="Otomatis potong suara Eve saat kamu mulai bicara">
+                <input type="checkbox" id="chk-barge-in" checked>
+                <span>⚡ Auto Barge-In</span>
+              </label>
               <select id="micLangSelect" class="select-mic-lang" title="Bahasa Pengenalan Suara">
                 <option value="id-ID" selected>🇮🇩 ID</option>
                 <option value="en-US">🇺🇸 EN</option>
               </select>
+              <span id="barge-in-badge" class="badge badge-barge-in" style="display: none;">⚡ Barge-In!</span>
             </div>
             <div id="mic-status-bar" class="mic-status-bar" style="display: none;">
-              <span class="mic-recording-pulse">🔴</span>
-              <span id="mic-transcript-preview" class="mic-transcript">Mendengarkan suaramu...</span>
+              <div class="mic-status-top">
+                <span class="mic-recording-pulse">🔴</span>
+                <span id="mic-transcript-preview" class="mic-transcript">Mendengarkan suaramu...</span>
+                <span id="vad-rms-label" class="vad-rms-label">VAD: 0.000</span>
+              </div>
+              <div class="vad-energy-track" title="Real-time Microphone VAD Energy">
+                <div id="vad-energy-fill" class="vad-energy-fill" style="width: 0%;"></div>
+              </div>
             </div>
           </div>
 
@@ -345,6 +356,65 @@
         </div>
       </div>
     </section>
+
+    <!-- Long-Term Pillar 3: AI VTuber Collab & Community Plugin SDK Cards -->
+    <div class="collab-plugins-grid">
+      <!-- AI VTuber Collab Card -->
+      <section class="card collab-card" id="collabCard">
+        <div class="card-header">
+          <div class="collab-title">
+            <span class="collab-icon">🤝</span>
+            <div>
+              <h2>AI VTuber Collab</h2>
+              <small class="collab-subtitle">Cross-Agent Turn-Taking Protocol &amp; Duet Sync</small>
+            </div>
+          </div>
+          <div class="collab-status-bar">
+            <span id="collab-floor-badge" class="badge">Floor: IDLE</span>
+            <span id="collab-turn-badge" class="badge badge-accent">Turns: 0/6</span>
+          </div>
+        </div>
+        <div class="collab-body">
+          <div class="collab-conn-row">
+            <input type="text" id="collabPeerUrl" class="collab-input" placeholder="Peer WS URL (ws://localhost:8001/ws/collab)">
+            <input type="text" id="collabPeerName" class="collab-input collab-input-sm" placeholder="Peer Name" value="NeuroPeer">
+            <button type="button" id="btn-collab-connect" class="btn btn-primary btn-sm">🔌 Connect</button>
+            <button type="button" id="btn-collab-disconnect" class="btn btn-secondary btn-sm">🛑 Disconnect</button>
+          </div>
+          <div class="collab-topic-row">
+            <input type="text" id="collabTopicInput" class="collab-input" placeholder="Topik obrolan atau prompt collab untuk peer AI...">
+            <button type="button" id="btn-collab-send-topic" class="btn btn-accent btn-sm">💬 Send Topic</button>
+            <button type="button" id="btn-collab-duet-sync" class="btn btn-secondary btn-sm">🎵 Duet Sync</button>
+          </div>
+          <div id="collabMessagesFeed" class="collab-messages-feed">
+            <div class="collab-feed-empty">Belum ada aktivitas collab. Hubungkan peer WebSocket atau mulai topik!</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Community Plugin SDK Card -->
+      <section class="card plugins-card" id="pluginsCard">
+        <div class="card-header">
+          <div class="plugins-title">
+            <span class="plugins-icon">🧩</span>
+            <div>
+              <h2>Community Plugin SDK</h2>
+              <small class="plugins-subtitle">Sandboxed Extensions, Chat Commands &amp; Event Hooks</small>
+            </div>
+          </div>
+          <div class="plugins-status-bar">
+            <span id="plugins-count-badge" class="badge badge-accent">Plugins: 0</span>
+            <button type="button" id="btn-plugins-refresh" class="btn btn-secondary btn-sm">🔄 Refresh</button>
+          </div>
+        </div>
+        <div class="plugins-body">
+          <div id="pluginsListContainer" class="plugins-list">
+            <div class="collab-feed-empty">Memuat daftar plugin...</div>
+          </div>
+          <div id="pluginsEventFeed" class="plugins-event-feed" style="display: none;"></div>
+        </div>
+      </section>
+    </div>
 
     <!-- Quick Actions Panel -->
     <footer class="controls-footer">
@@ -1578,6 +1648,30 @@
       </div>
 
       <div class="goal-content">
+        <!-- Closed-Loop Autonomous Missions Bar -->
+        <div class="mission-runner-bar" id="missionRunnerBar">
+          <div class="mission-runner-info">
+            <div class="mission-runner-badges">
+              <span id="mission-runner-badge" class="badge">Loop: PAUSED</span>
+              <span id="mission-step-count-badge" class="badge badge-sm">Steps: 0</span>
+            </div>
+            <div id="mission-active-summary" class="mission-active-summary">
+              Closed-loop mission executor siap menjalankan subtask aktif secara otonom.
+            </div>
+          </div>
+          <div class="mission-runner-actions">
+            <button type="button" id="btn-mission-toggle" class="btn btn-primary btn-sm">▶️ Start Auto-Mission Loop</button>
+            <button type="button" id="btn-mission-step" class="btn btn-secondary btn-sm">⏭️ Execute 1 Step Now</button>
+          </div>
+          <div id="mission-approval-bar" class="mission-approval-bar" style="display: none;">
+            <span id="mission-approval-text" class="mission-approval-text">⚠️ Menunggu persetujuan aksi otonom...</span>
+            <div class="mission-approval-btns">
+              <button type="button" id="btn-mission-approve" class="btn btn-primary btn-sm">✅ Approve</button>
+              <button type="button" id="btn-mission-reject" class="btn btn-danger btn-sm">❌ Reject</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Goal Tabs -->
         <div class="goal-tabs">
           <button type="button" class="goal-tab active" data-tab="tab-goal-active">⚡ Active Mission & Subtasks</button>
@@ -1672,6 +1766,7 @@
               <select id="goalNewCategory" class="select-mem-type">
                 <option value="minecraft">🟩 Minecraft</option>
                 <option value="chess">♟️ Catur</option>
+                <option value="performance">🎤 Performance / Konser</option>
                 <option value="social">👥 Sosial</option>
                 <option value="stream">🎥 Stream</option>
                 <option value="creative">🎨 Kreatif</option>

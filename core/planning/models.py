@@ -25,6 +25,7 @@ class GoalCategory(str, Enum):
     CHESS = "chess"
     SOCIAL = "social"
     STREAM = "stream"
+    PERFORMANCE = "performance"
     CREATIVE = "creative"
     GENERAL = "general"
 

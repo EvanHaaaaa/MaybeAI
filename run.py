@@ -1,6 +1,10 @@
 import os
 import sys
 import json
+import time
+import hmac
+import array
+import base64
 import secrets
 import asyncio
 import argparse
@@ -102,6 +106,112 @@ def _is_ws_creator_authorized(websocket: WebSocket) -> bool:
         provided_token.encode("utf-8"),
         configured_token.encode("utf-8"),
     )
+
+
+def _get_collab_secret() -> str:
+    env_secret = os.getenv("MAYBEAI_COLLAB_SECRET", "").strip()
+    if env_secret:
+        return env_secret
+    mgr_secret = getattr(orchestrator.collab, "shared_secret", "")
+    if isinstance(mgr_secret, str) and mgr_secret.strip():
+        return mgr_secret.strip()
+    collab_cfg = config_mgr.settings.get("collab", {})
+    if isinstance(collab_cfg, dict):
+        cfg_secret = str(collab_cfg.get("shared_secret") or "").strip()
+        if cfg_secret and cfg_secret != "********":
+            return cfg_secret
+    return ""
+
+
+def _decode_pcm_chunk(raw_audio: Any) -> bytes:
+    if raw_audio is None:
+        return b""
+    if isinstance(raw_audio, (bytes, bytearray, memoryview)):
+        return bytes(raw_audio)
+    if isinstance(raw_audio, str):
+        cleaned = raw_audio.strip()
+        if not cleaned:
+            return b""
+        try:
+            return base64.b64decode(cleaned)
+        except Exception:
+            return b""
+    if isinstance(raw_audio, list):
+        try:
+            ints = [max(-32768, min(32767, int(x))) for x in raw_audio]
+            return array.array("h", ints).tobytes()
+        except Exception:
+            return b""
+    return b""
+
+
+def _get_missions_status() -> Dict[str, Any]:
+    st = orchestrator.missions.get_status()
+    st.setdefault("running", st.get("is_running", False))
+    st.setdefault("paused", st.get("is_paused", False))
+    st.setdefault("last_step", st.get("last_action"))
+    return st
+
+
+async def _handle_collab_action(payload: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
+    action = str(payload.get("action") or "").strip().lower()
+    if action == "connect":
+        ws_url = payload.get("peer_ws_url") or payload.get("ws_url")
+        peer_name = payload.get("peer_name")
+        ok = await orchestrator.collab.connect_peer(ws_url=ws_url, peer_name=peer_name)
+        return 200, {"success": ok, "status": orchestrator.collab.get_status()}
+    if action == "disconnect":
+        await orchestrator.collab.disconnect_peer()
+        return 200, {"success": True, "status": orchestrator.collab.get_status()}
+    if action in ("initiate", "prompt"):
+        topic = str(payload.get("topic") or payload.get("prompt") or payload.get("speech") or "")
+        res = await orchestrator.collab.initiate_prompt(topic)
+        return 200, {**res, "status": orchestrator.collab.get_status()}
+    if action in ("send_utterance", "utterance"):
+        res = await orchestrator.collab.send_utterance(
+            speech=str(payload.get("speech") or ""),
+            emotion=str(payload.get("emotion") or "neutral"),
+            yield_turn=bool(payload.get("yield_turn", True)),
+            topic=str(payload.get("topic") or ""),
+        )
+        return 200, {**res, "status": orchestrator.collab.get_status()}
+    if action == "duet_sync":
+        res = await orchestrator.collab.send_duet_sync(
+            song_id=str(payload.get("song_id") or "digital_world"),
+            lyric_index=int(payload.get("lyric_index", 0) or 0),
+            timestamp=float(payload.get("timestamp", time.time()) or time.time()),
+        )
+        return 200, {**res, "status": orchestrator.collab.get_status()}
+    if action == "emote_sync":
+        res = await orchestrator.collab.send_emote_sync(
+            emotion=str(payload.get("emotion") or "happy"),
+            action=str(payload.get("emote_action") or payload.get("action_name") or ""),
+        )
+        return 200, {**res, "status": orchestrator.collab.get_status()}
+    if action == "reset_turns":
+        st = await orchestrator.collab.reset_turns()
+        return 200, {"success": True, "status": st}
+    if action == "status":
+        return 200, {"success": True, "status": orchestrator.collab.get_status()}
+    return 400, {"success": False, "error": f"Unknown collab action: '{action}'"}
+
+
+async def _handle_plugin_action(payload: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
+    await orchestrator.ensure_plugins_loaded()
+    action = str(payload.get("action") or "").strip().lower()
+    plugin_id = str(payload.get("plugin_id") or "").strip()
+    if action == "enable":
+        res = await orchestrator.plugins.enable_plugin(plugin_id)
+        return 200, {**res, "plugins": orchestrator.plugins.list_plugins()}
+    if action == "disable":
+        res = await orchestrator.plugins.disable_plugin(plugin_id)
+        return 200, {**res, "plugins": orchestrator.plugins.list_plugins()}
+    if action == "reload":
+        res = await orchestrator.plugins.reload_plugin(plugin_id)
+        return 200, {**res, "plugins": orchestrator.plugins.list_plugins()}
+    if action in ("list", "refresh"):
+        return 200, {"success": True, "plugins": orchestrator.plugins.list_plugins()}
+    return 400, {"success": False, "error": f"Unknown plugin action: '{action}'"}
 
 
 @app.middleware("http")
@@ -391,6 +501,91 @@ async def reset_personality():
     await orchestrator.broadcast("mood_updated", orchestrator.brain.mood.get_state())
     return {"status": "reset", "state": orchestrator.brain.personality.get_state()}
 
+# --- Full-Duplex Voice, Autonomous Missions, AI Collab & Plugin SDK Endpoints ---
+@app.get("/api/voice/status")
+async def get_voice_status():
+    return {
+        "stt": orchestrator.stt.get_status(),
+        "voice_session": orchestrator.voice_session.get_status(),
+        "tts": orchestrator.tts.get_status(),
+        "barge_in_count": orchestrator.barge_in_count,
+        "busy": orchestrator.is_busy,
+    }
+
+
+@app.get("/api/missions/status")
+async def get_missions_status():
+    return _get_missions_status()
+
+
+@app.post("/api/missions/step")
+async def step_missions(req: Optional[Dict[str, Any]] = None):
+    payload = req or {}
+    action = str(payload.get("action") or "step").strip().lower()
+    if action == "approve":
+        res = await orchestrator.missions.approve_pending()
+    elif action == "reject":
+        res = await orchestrator.missions.reject_pending(
+            reason=str(payload.get("reason") or "Rejected by creator")
+        )
+    else:
+        res = await orchestrator.missions.step_once(force=bool(payload.get("force", False)))
+    return {**res, "status": _get_missions_status()}
+
+
+@app.post("/api/missions/toggle")
+async def toggle_missions(req: Optional[Dict[str, Any]] = None):
+    payload = req or {}
+    if "enabled" in payload:
+        target_active = bool(payload["enabled"])
+    elif "running" in payload:
+        target_active = bool(payload["running"])
+    elif "paused" in payload:
+        target_active = not bool(payload["paused"])
+    else:
+        target_active = not (orchestrator.missions.is_running and not orchestrator.missions.is_paused)
+
+    if target_active:
+        orchestrator.missions.update_config(enabled=True)
+        orchestrator.missions.resume()
+        await orchestrator.missions.start_loop()
+    else:
+        orchestrator.missions.pause()
+
+    st = _get_missions_status()
+    return {"success": True, **st, "status": st}
+
+
+@app.get("/api/collab/status")
+async def get_collab_status():
+    return orchestrator.collab.get_status()
+
+
+@app.post("/api/collab/action")
+async def post_collab_action(req: Dict[str, Any]):
+    status_code, body = await _handle_collab_action(req or {})
+    if status_code != 200:
+        return JSONResponse(status_code=status_code, content=body)
+    return body
+
+
+@app.get("/api/plugins")
+async def get_plugins_list():
+    await orchestrator.ensure_plugins_loaded()
+    return {
+        "enabled": orchestrator.plugins.enabled,
+        "plugins": orchestrator.plugins.list_plugins(),
+    }
+
+
+@app.post("/api/plugins/action")
+async def post_plugins_action(req: Dict[str, Any]):
+    status_code, body = await _handle_plugin_action(req or {})
+    if status_code != 200:
+        return JSONResponse(status_code=status_code, content=body)
+    return body
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     origin = websocket.headers.get("origin")
@@ -506,6 +701,16 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "system_diagnostics",
         "data": config_mgr.get_system_diagnostics(orchestrator)
+    })
+
+    # Send initial autonomous mission and collab states
+    await websocket.send_json({
+        "type": "mission_status",
+        "data": _get_missions_status()
+    })
+    await websocket.send_json({
+        "type": "collab_state",
+        "data": orchestrator.collab.get_status()
     })
 
     try:
@@ -1103,10 +1308,150 @@ async def websocket_endpoint(websocket: WebSocket):
                         "type": "system_diagnostics",
                         "data": config_mgr.get_system_diagnostics(orchestrator)
                     })
+            elif data.get("type") == "barge_in":
+                if not ws_creator_authorized:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": "Creator authorization required for barge_in", "code": "forbidden"}
+                    })
+                    continue
+                reason = str(data.get("reason") or "creator_vad")
+                await orchestrator.barge_in(source="creator", reason=reason)
+            elif data.get("type") == "voice_audio_chunk":
+                if not ws_creator_authorized:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": "Creator authorization required for voice_audio_chunk", "code": "forbidden"}
+                    })
+                    continue
+                raw_audio = data.get("audio_b64") or data.get("pcm_b64") or data.get("chunk") or data.get("pcm")
+                pcm_bytes = _decode_pcm_chunk(raw_audio)
+                if pcm_bytes:
+                    res = await orchestrator.process_voice_chunk(
+                        pcm_bytes,
+                        user=str(data.get("user") or "Creator"),
+                        language=data.get("language"),
+                    )
+                    await websocket.send_json({"type": "voice_chunk_ack", "data": res})
+            elif data.get("type") == "mission_action":
+                if not ws_creator_authorized:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": "Creator authorization required for mission_action", "code": "forbidden"}
+                    })
+                    continue
+                act = str(data.get("action") or "step").strip().lower()
+                if act == "step":
+                    res = await orchestrator.missions.step_once(force=bool(data.get("force", False)))
+                    await websocket.send_json({"type": "mission_step", "data": {**res, "status": _get_missions_status()}})
+                elif act == "approve":
+                    res = await orchestrator.missions.approve_pending()
+                    await websocket.send_json({"type": "mission_step", "data": {**res, "status": _get_missions_status()}})
+                elif act == "reject":
+                    res = await orchestrator.missions.reject_pending(reason=str(data.get("reason") or "Rejected by creator"))
+                    await websocket.send_json({"type": "mission_status", "data": _get_missions_status()})
+                elif act in ("toggle", "start", "resume", "pause", "stop"):
+                    if act in ("start", "resume"):
+                        orchestrator.missions.update_config(enabled=True)
+                        orchestrator.missions.resume()
+                        await orchestrator.missions.start_loop()
+                    elif act in ("pause", "stop"):
+                        orchestrator.missions.pause()
+                    else:
+                        currently_active = orchestrator.missions.is_running and not orchestrator.missions.is_paused
+                        if currently_active:
+                            orchestrator.missions.pause()
+                        else:
+                            orchestrator.missions.update_config(enabled=True)
+                            orchestrator.missions.resume()
+                            await orchestrator.missions.start_loop()
+                    await websocket.send_json({"type": "mission_status", "data": _get_missions_status()})
+                elif act == "status":
+                    await websocket.send_json({"type": "mission_status", "data": _get_missions_status()})
+            elif data.get("type") == "collab_action":
+                act = str(data.get("action") or "").strip().lower()
+                if act != "status" and not ws_creator_authorized:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": "Creator authorization required for collab_action", "code": "forbidden"}
+                    })
+                    continue
+                _, body = await _handle_collab_action(data)
+                await websocket.send_json({"type": "collab_state", "data": body.get("status", orchestrator.collab.get_status())})
+            elif data.get("type") == "plugin_action":
+                act = str(data.get("action") or "").strip().lower()
+                if act not in ("list", "refresh") and not ws_creator_authorized:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": "Creator authorization required for plugin_action", "code": "forbidden"}
+                    })
+                    continue
+                _, body = await _handle_plugin_action(data)
+                await websocket.send_json({"type": "plugin_event", "data": body})
     except WebSocketDisconnect:
         orchestrator.unregister_listener(listener)
     except Exception as e:
         orchestrator.unregister_listener(listener)
+
+
+@app.websocket("/ws/collab")
+async def collab_websocket_endpoint(websocket: WebSocket):
+    client_host = websocket.client.host if websocket.client else None
+    is_loopback = client_host in _LOOPBACK_HOSTS
+    secret = _get_collab_secret()
+
+    if secret:
+        provided_secret = (
+            websocket.query_params.get("secret")
+            or websocket.query_params.get("token")
+            or websocket.headers.get("x-collab-secret")
+            or ""
+        ).strip()
+        if not provided_secret:
+            auth_header = websocket.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                provided_secret = auth_header[7:].strip()
+        if provided_secret and not hmac.compare_digest(
+            provided_secret.encode("utf-8"),
+            secret.encode("utf-8"),
+        ):
+            await websocket.close(code=1008)
+            return
+        if not provided_secret and not is_loopback:
+            await websocket.close(code=1008)
+            return
+    elif not is_loopback:
+        await websocket.close(code=1008)
+        return
+
+    await websocket.accept()
+
+    async def send_to_peer(envelope_dict: Dict[str, Any]):
+        await websocket.send_json(envelope_dict)
+
+    prev_collab_secret = orchestrator.collab.shared_secret
+    secret_overridden = bool(secret and prev_collab_secret != secret)
+    if secret_overridden:
+        orchestrator.collab.shared_secret = secret
+
+    orchestrator.collab.set_peer_sender(send_to_peer)
+    try:
+        while True:
+            raw = await websocket.receive_json()
+            res = await orchestrator.collab.handle_incoming_envelope(
+                raw,
+                is_loopback=is_loopback,
+            )
+            if not res.get("accepted"):
+                await websocket.send_json(res)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        orchestrator.collab.set_peer_sender(None)
+        if secret_overridden and orchestrator.collab.shared_secret == secret:
+            orchestrator.collab.shared_secret = prev_collab_secret
 
 
 

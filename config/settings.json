@@ -120,7 +120,9 @@
     "goal_planning_enabled": true,
     "idle_banter_interval_sec": 40,
     "max_planning_steps": 5,
-    "human_approval_required": false
+    "human_approval_required": false,
+    "closed_loop_missions": true,
+    "mission_tick_interval_sec": 25
   },
   "performance": {
     "max_concurrent_tasks": 3,
@@ -130,10 +132,29 @@
   "stt": {
     "enabled": false,
     "model": "base",
-    "device": "cpu"
+    "device": "cpu",
+    "vad_enabled": true,
+    "vad_energy_threshold": 0.02,
+    "barge_in_enabled": true
   },
   "security": {
     "creator_token": "",
     "allowed_origins": []
+  },
+  "collab": {
+    "enabled": false,
+    "peer_name": "NeuroPeer",
+    "peer_ws_url": "",
+    "shared_secret": "",
+    "max_collab_turns": 6,
+    "turn_cooldown_sec": 2.5
+  },
+  "plugins": {
+    "enabled": true,
+    "plugins_dir": "plugins",
+    "enabled_plugins": [
+      "word_chain"
+    ],
+    "hook_timeout_sec": 5.0
   }
 }

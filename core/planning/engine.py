@@ -191,11 +191,14 @@ class GoalEngine:
         mood = mood_dimensions or {}
         comp = mood.get("competitiveness", 0.3)
         curious = mood.get("curiosity", 0.5)
+        excited = mood.get("excitement", 0.4)
 
         chosen: Goal = pending_goals[0]
         if comp >= 0.65:
             # Prefer speedrun or chess
             comp_candidates = [g for g in pending_goals if g.category in (GoalCategory.MINECRAFT.value, GoalCategory.CHESS.value) and "speedrun" in g.title.lower()]
+            if not comp_candidates:
+                comp_candidates = [g for g in pending_goals if g.category == GoalCategory.CHESS.value]
             if comp_candidates:
                 chosen = max(comp_candidates, key=lambda g: g.priority)
         elif curious >= 0.65:
@@ -203,6 +206,12 @@ class GoalEngine:
             social_candidates = [g for g in pending_goals if g.tier == GoalTier.SOCIAL.value or g.category == GoalCategory.SOCIAL.value]
             if social_candidates:
                 chosen = max(social_candidates, key=lambda g: g.priority)
+        elif excited >= 0.75:
+            perf_candidates = [g for g in pending_goals if g.category == GoalCategory.PERFORMANCE.value]
+            if perf_candidates:
+                chosen = max(perf_candidates, key=lambda g: g.priority)
+            else:
+                chosen = max(pending_goals, key=lambda g: g.priority)
         else:
             chosen = max(pending_goals, key=lambda g: g.priority)
 
@@ -318,49 +327,95 @@ class GoalEngine:
         self.save()
         return new_sub, speech
 
-    def evaluate_event(self, event_type: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def evaluate_event(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Evaluates domain events (Minecraft, Chess, Social) and automatically
-        credits progress to the relevant active subtask.
+        Evaluates domain events (Minecraft, Chess, Performance, Social, Mission) and
+        automatically credits progress to the relevant active subtask, keeping agenda.md synced.
         """
+        data = data or {}
         active_goal = self.get_active_goal()
         if not active_goal:
+            self.save()
             return {"advanced": False}
 
         active_sub = active_goal.get_active_subtask()
         if not active_sub:
+            self.save()
             return {"advanced": False}
 
         advanced = False
         delta = 1.0
+        goal_text = f"{active_goal.title} {active_sub.title}".lower()
 
         if event_type == "minecraft_item_collected":
-            item = data.get("item", "").lower()
+            item = str(data.get("item", "")).lower()
             cnt = float(data.get("count", 1.0))
-            if any(term in active_sub.title.lower() or term in active_sub.unit.lower() for term in [item, "logs", "wood", "iron", "diamond"]):
+            if any(term and (term in active_sub.title.lower() or term in active_sub.unit.lower()) for term in [item, "logs", "wood", "iron", "diamond"]):
                 delta = cnt
                 advanced = True
 
         elif event_type == "minecraft_speedrun_advance":
             if active_goal.category == GoalCategory.MINECRAFT.value or "speedrun" in active_goal.title.lower():
+                delta = float(data.get("delta", 1.0))
                 advanced = True
 
         elif event_type == "minecraft_guard_victory":
             if "guard" in active_sub.title.lower() or "mob" in active_sub.title.lower():
+                delta = float(data.get("delta", 1.0))
                 advanced = True
 
         elif event_type == "player_greeted":
-            if active_goal.tier == GoalTier.SOCIAL.value or "player" in active_sub.title.lower() or "sapa" in active_sub.title.lower():
+            if active_goal.tier == GoalTier.SOCIAL.value or active_goal.category == GoalCategory.SOCIAL.value or "player" in active_sub.title.lower() or "sapa" in active_sub.title.lower():
+                delta = float(data.get("delta", 1.0))
                 advanced = True
 
         elif event_type == "chess_game_won":
-            if active_goal.category == GoalCategory.CHESS.value or "catur" in active_sub.title.lower():
+            if active_goal.category == GoalCategory.CHESS.value or "catur" in goal_text or "chess" in goal_text:
+                delta = float(data.get("delta", 1.0))
+                advanced = True
+
+        elif event_type == "chess_game_started":
+            if active_goal.category == GoalCategory.CHESS.value or active_sub.category == GoalCategory.CHESS.value or any(w in goal_text for w in ["catur", "chess", "opening"]):
+                delta = float(data.get("delta", 1.0))
+                advanced = True
+
+        elif event_type == "chess_move_played":
+            if active_goal.category == GoalCategory.CHESS.value or active_sub.category == GoalCategory.CHESS.value or any(w in goal_text for w in ["catur", "chess", "opening", "skakmat"]):
+                delta = float(data.get("delta", 1.0))
+                advanced = True
+
+        elif event_type in ("performance_completed", "song_completed"):
+            if (
+                active_goal.category in (GoalCategory.PERFORMANCE.value, GoalCategory.STREAM.value)
+                or active_sub.category == GoalCategory.PERFORMANCE.value
+                or any(w in goal_text for w in ["konser", "karaoke", "nyanyi", "lagu", "setlist", "performance", "idol", "encore"])
+            ):
+                delta = float(data.get("delta", data.get("count", 1.0)))
+                advanced = True
+
+        elif event_type == "glowsticks_reached":
+            if (
+                active_goal.category in (GoalCategory.PERFORMANCE.value, GoalCategory.STREAM.value)
+                or active_sub.category == GoalCategory.PERFORMANCE.value
+                or "glowstick" in active_sub.title.lower()
+                or "glowstick" in active_sub.unit.lower()
+                or "sorakan" in active_sub.title.lower()
+            ):
+                delta = float(data.get("delta", data.get("count", data.get("glowsticks", 1.0))))
+                advanced = True
+
+        elif event_type == "mission_subtask_executed":
+            target_goal_id = data.get("goal_id")
+            target_sub_id = data.get("subtask_id")
+            if (not target_goal_id or target_goal_id == active_goal.id) and (not target_sub_id or target_sub_id == active_sub.id):
+                delta = float(data.get("delta", 1.0))
                 advanced = True
 
         if advanced:
             res = self.advance_subtask_progress(active_sub.id, delta=delta)
             return {"advanced": True, "details": res}
 
+        self.save()
         return {"advanced": False}
 
     def get_goal_directive(self) -> str:

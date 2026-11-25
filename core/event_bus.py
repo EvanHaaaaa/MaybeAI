@@ -22,6 +22,15 @@ CONVERSATION_STATE = "conversation.state"
 RELATIONSHIP_UPDATED = "relationship.updated"
 CONFIGURATION_UPDATED = "configuration.updated"
 VISION_UPDATED = "vision.updated"
+VOICE_BARGE_IN = "voice.barge_in"
+VOICE_VAD_STATE = "voice.vad_state"
+STT_PARTIAL = "stt.partial"
+STT_FINAL = "stt.final"
+MISSION_STEP = "mission.step"
+MISSION_STATUS = "mission.status"
+COLLAB_MESSAGE = "collab.message"
+COLLAB_STATE = "collab.state"
+PLUGIN_EVENT = "plugin.event"
 
 
 class Events:
@@ -43,6 +52,15 @@ class Events:
     RELATIONSHIP_UPDATED = RELATIONSHIP_UPDATED
     CONFIGURATION_UPDATED = CONFIGURATION_UPDATED
     VISION_UPDATED = VISION_UPDATED
+    VOICE_BARGE_IN = VOICE_BARGE_IN
+    VOICE_VAD_STATE = VOICE_VAD_STATE
+    STT_PARTIAL = STT_PARTIAL
+    STT_FINAL = STT_FINAL
+    MISSION_STEP = MISSION_STEP
+    MISSION_STATUS = MISSION_STATUS
+    COLLAB_MESSAGE = COLLAB_MESSAGE
+    COLLAB_STATE = COLLAB_STATE
+    PLUGIN_EVENT = PLUGIN_EVENT
 
 
 # Bidirectional mapping between legacy WebSocket event types and canonical EventBus names
@@ -63,6 +81,15 @@ WS_TO_BUS_EVENT: Dict[str, str] = {
     "relationship_updated": RELATIONSHIP_UPDATED,
     "configuration_updated": CONFIGURATION_UPDATED,
     "vision_updated": VISION_UPDATED,
+    "voice_barge_in": VOICE_BARGE_IN,
+    "voice_vad_state": VOICE_VAD_STATE,
+    "stt_partial": STT_PARTIAL,
+    "stt_final": STT_FINAL,
+    "mission_step": MISSION_STEP,
+    "mission_status": MISSION_STATUS,
+    "collab_message": COLLAB_MESSAGE,
+    "collab_state": COLLAB_STATE,
+    "plugin_event": PLUGIN_EVENT,
 }
 BUS_TO_WS_EVENT: Dict[str, str] = {v: k for k, v in WS_TO_BUS_EVENT.items()}
 

@@ -151,10 +151,25 @@ class TTSEngine:
         self.interruptible = interruptible
         self.last_error: Optional[str] = None
         self._mixer_initialized: bool = False
+        self._is_speaking: bool = False
+        self._was_interrupted: bool = False
+        self._stop_requested: bool = False
+        self._stop_reason: Optional[str] = None
+        self._active_speak_task: Optional[asyncio.Task] = None
         self._active_stream_tasks: List[asyncio.Task] = []
         self._active_stream_interruptible: bool = True
+        self._active_temp_files: Set[str] = set()
+        self._active_mouth_callback: Optional[Callable[[float], Any]] = None
         self.temp_dir = Path(tempfile.gettempdir()) / "maybeai_audio"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def is_speaking(self) -> bool:
+        return self._is_speaking
+
+    @property
+    def was_interrupted(self) -> bool:
+        return self._was_interrupted
 
     def update_config(
         self,
@@ -183,6 +198,8 @@ class TTSEngine:
             "rate": self.rate,
             "pitch": self.pitch,
             "interruptible": self.interruptible,
+            "is_speaking": self._is_speaking,
+            "was_interrupted": self._was_interrupted,
             "last_error": self.last_error
         }
 
@@ -198,64 +215,109 @@ class TTSEngine:
         if inspect.isawaitable(result):
             await result
 
-    def stop(self) -> bool:
+    def stop(self, reason: str = "barge_in") -> bool:
         """
-        Interrupts active streaming TTS playback if interruptible is enabled.
-        Returns True if an active stream was signalled to stop.
+        Interrupts active single-shot or streaming TTS playback if interruptible is enabled.
+        Returns True if an active speech task or audio stream was signalled to stop.
         """
-        if not self._active_stream_interruptible:
+        if self._active_stream_tasks and not self._active_stream_interruptible:
             return False
+        if not self.interruptible:
+            return False
+
+        self._stop_requested = True
+        self._was_interrupted = True
+        self._stop_reason = reason
         stopped = False
+
+        if self._active_speak_task is not None and not self._active_speak_task.done():
+            self._active_speak_task.cancel()
+            stopped = True
+
         for task in list(self._active_stream_tasks):
             if not task.done():
                 task.cancel()
                 stopped = True
+
         try:
             import pygame
             if self._mixer_initialized and isinstance(pygame.mixer.get_init(), tuple):
+                if pygame.mixer.music.get_busy():
+                    stopped = True
                 pygame.mixer.music.stop()
                 if hasattr(pygame.mixer.music, "unload"):
                     pygame.mixer.music.unload()
         except Exception:
             pass
+
+        for temp_path in list(self._active_temp_files):
+            self._cleanup_audio_file(temp_path)
+            self._active_temp_files.discard(temp_path)
+
         return stopped
 
     async def speak(self, text: str, on_mouth_update: Optional[Callable[[float], Any]] = None) -> Optional[str]:
         """
         Synthesizes text to speech, plays audio, and fires lip-sync mouth updates.
-        Returns path to generated audio file.
+        Returns path to generated audio file (or None if disabled, failed, or interrupted via stop()).
         """
         if not text.strip():
             return None
 
-        # If TTS is disabled, skip audio synthesis and gracefully simulate mouth flap if needed
-        if not self.enabled:
-            await self._simulate_mouth_flap(text, on_mouth_update)
-            return None
+        self._is_speaking = True
+        self._was_interrupted = False
+        self._stop_requested = False
+        self._stop_reason = None
+        self._active_mouth_callback = on_mouth_update
+        output_file: Optional[str] = None
 
-        output_file = self._make_temp_audio_path()
-
-        try:
+        async def _run_speak(out_path: str) -> str:
             communicate = edge_tts.Communicate(
                 text=text,
                 voice=self.voice,
                 rate=self.rate,
                 pitch=self.pitch
             )
-            await communicate.save(output_file)
-
-            # Play audio and simulate lip sync
-            await self._play_and_lipsync(output_file, text, on_mouth_update)
+            await communicate.save(out_path)
+            await self._play_and_lipsync(out_path, text, on_mouth_update)
             self.last_error = None
-            return output_file
+            return out_path
+
+        try:
+            if not self.enabled:
+                task = asyncio.create_task(self._simulate_mouth_flap(text, on_mouth_update))
+                self._active_speak_task = task
+                await task
+                return None
+
+            output_file = self._make_temp_audio_path()
+            self._active_temp_files.add(output_file)
+            task = asyncio.create_task(_run_speak(output_file))
+            self._active_speak_task = task
+            return await task
         except asyncio.CancelledError:
+            if self._active_speak_task is not None and not self._active_speak_task.done():
+                self._active_speak_task.cancel()
+                await asyncio.gather(self._active_speak_task, return_exceptions=True)
+            if on_mouth_update:
+                try:
+                    await self._invoke_callback(on_mouth_update, 0.0)
+                except Exception:
+                    pass
+            if self._stop_requested:
+                return None
             raise
         except Exception as e:
             self.last_error = str(e)
             print(f"[TTS Error] {e}")
             return None
         finally:
-            self._cleanup_audio_file(output_file)
+            self._is_speaking = False
+            self._active_speak_task = None
+            self._active_mouth_callback = None
+            if output_file:
+                self._cleanup_audio_file(output_file)
+                self._active_temp_files.discard(output_file)
 
     async def speak_stream(
         self,
@@ -274,6 +336,11 @@ class TTSEngine:
         """
         is_interruptible = self.interruptible if interruptible is None else bool(interruptible)
         self._active_stream_interruptible = is_interruptible
+        self._is_speaking = True
+        self._was_interrupted = False
+        self._stop_requested = False
+        self._stop_reason = None
+        self._active_mouth_callback = on_mouth_update
 
         chunker = SentenceChunker()
         audio_queue: asyncio.Queue[Optional[Tuple[Optional[str], str, List[str], List[str]]]] = asyncio.Queue(maxsize=4)
@@ -295,6 +362,7 @@ class TTSEngine:
 
             out_file = self._make_temp_audio_path()
             pending_files.add(out_file)
+            self._active_temp_files.add(out_file)
             try:
                 communicate = edge_tts.Communicate(
                     text=clean_text,
@@ -307,12 +375,14 @@ class TTSEngine:
             except asyncio.CancelledError:
                 self._cleanup_audio_file(out_file)
                 pending_files.discard(out_file)
+                self._active_temp_files.discard(out_file)
                 raise
             except Exception as e:
                 self.last_error = str(e)
                 print(f"[TTS Stream Error] {e}")
                 self._cleanup_audio_file(out_file)
                 pending_files.discard(out_file)
+                self._active_temp_files.discard(out_file)
                 out_file = None
 
             await audio_queue.put((out_file, clean_text, emotions, actions))
@@ -357,6 +427,7 @@ class TTSEngine:
                     if file_path:
                         self._cleanup_audio_file(file_path)
                         pending_files.discard(file_path)
+                        self._active_temp_files.discard(file_path)
                     audio_queue.task_done()
 
         producer_task = asyncio.create_task(_producer())
@@ -376,9 +447,13 @@ class TTSEngine:
                     await self._invoke_callback(on_mouth_update, 0.0)
                 except Exception:
                     pass
+            if self._stop_requested:
+                return "".join(raw_parts).strip()
             raise
         finally:
+            self._is_speaking = False
             self._active_stream_tasks = []
+            self._active_mouth_callback = None
             # Drain any unconsumed items in the queue and clean up all temp files
             while not audio_queue.empty():
                 try:
@@ -386,11 +461,13 @@ class TTSEngine:
                     if queued and queued[0]:
                         self._cleanup_audio_file(queued[0])
                         pending_files.discard(queued[0])
+                        self._active_temp_files.discard(queued[0])
                 except asyncio.QueueEmpty:
                     break
             for leftover in list(pending_files):
                 self._cleanup_audio_file(leftover)
                 pending_files.discard(leftover)
+                self._active_temp_files.discard(leftover)
 
     @staticmethod
     def _cleanup_audio_file(file_path: str):

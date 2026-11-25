@@ -2,6 +2,29 @@
 
 All notable changes to **MaybeAI (Eve Maybe)** are documented in this file.
 
+## [2026-11-25] — Long-Term Autonomous Vision: Full-Duplex Voice & Barge-In, Closed-Loop Missions, AI Collab Protocol & Plugin SDK
+
+### Pillar 1 — Full-Duplex Voice & Barge-In
+- **Energy VAD & Streaming STT (`core/stt.py`):** Added `VADResult`, `EnergyVAD` (NumPy/Python PCM16 & float32 RMS VAD with onset hysteresis `min_speech_frames` and hangover smoothing `hangover_frames`), `StreamingSTTSession` (`feed_pcm_chunk`, `flush`, pre-roll + in-memory WAV buffering), and `STTEngine.transcribe_wav_bytes()` / `transcribe_audio_file()` supporting `faster-whisper`, `openai-whisper`, OpenAI Whisper API, and deterministic offline mock fallback.
+- **Interruptible TTS & Orchestrator Preemption (`core/tts.py`, `core/orchestrator.py`):** Upgraded `TTSEngine.stop(reason="barge_in")` to cleanly interrupt both `speak()` and `speak_stream()`, stop/unload `pygame.mixer.music`, reset mouth (`0.0`), and delete temporary `speech_*.mp3` files. Added `Orchestrator.barge_in()`, `Orchestrator.process_voice_chunk()`, and non-blocking `_active_interaction_task` cancellation (never acquiring `_busy_lock`, preventing deadlocks) plus auto-barge-in on authorized Creator `mic` input.
+- **Voice Status, Creator-Only WS & Live VAD UI (`run.py`, `web/index.html`, `web/style.css`, `web/app.js`):** Added `GET /api/voice/status`, creator-only `/ws` `barge_in` and `voice_audio_chunk` handlers (rejecting non-creators with `code: "forbidden"`), `voice.barge_in` / `voice.vad_state` / `stt.final` EventBus events, and Web Audio API RMS/VAD bar + barge-in toggle in the Creator Voice Dock.
+
+### Pillar 2 — Closed-Loop Autonomous Missions
+- **Domain-Aware Planning & Execution (`core/planning/models.py`, `core/planning/decomposer.py`, `core/planning/engine.py`, `core/planning/executor.py`):** Added `GoalCategory.PERFORMANCE`, Performance/Karaoke & Chess decomposition templates, expanded `GoalEngine.evaluate_event()`, and implemented `AutonomousMissionExecutor` for closed-loop execution across Minecraft, Chess, Performance Director, and Social goals with `agenda.md` syncing, automatic `StrategyReplanner` fallback on failure, and `human_approval_required` (`approve_pending()` / `reject_pending()`).
+- **Mission APIs, WS & Studio Controls (`core/orchestrator.py`, `run.py`, `web/index.html`, `web/app.js`):** Wired `Orchestrator.missions`, added `GET /api/missions/status`, `POST /api/missions/step`, `POST /api/missions/toggle`, creator-only `/ws` `mission_action`, and the Autonomous Missions control bar in the `Brain & Memory` tab.
+
+### Pillar 3 — AI Collab Protocol & Community Plugin SDK
+- **AI-to-AI Collab Protocol (`core/collab/protocol.py`, `core/collab/manager.py`, `run.py`):** Implemented `CollabEnvelope` with HMAC-SHA256 signing and constant-time `hmac.compare_digest` verification, `CollabManager` turn-taking floor state machine (`idle`, `speaking`, `yielding`, `listening`, `cooldown`), `max_collab_turns` & `turn_cooldown_sec` anti-loop protection, `send_duet_sync` / `send_emote_sync`, `/ws/collab` peer WebSocket (HMAC secret / loopback auth), `GET /api/collab/status`, `POST /api/collab/action`, and `#collabCard` studio controls.
+- **Plugin SDK & Built-in Sambung Kata (`core/plugins/sdk.py`, `core/plugins/registry.py`, `core/plugins/word_chain.py`, `core/orchestrator.py`, `run.py`):** Built `PluginManifest`, sandboxed `PluginContext`, `MaybeAIPlugin`, `@plugin_command` / `@plugin_event`, and `PluginRegistry` with built-in/external plugin discovery, enable/disable/reload lifecycle, `asyncio.wait_for` timeout & exception isolation, `creator_only_commands` enforcement, `WordChainPlugin` (`!sambungkata` / `!wc`), `GET /api/plugins`, `POST /api/plugins/action`, and `#pluginsCard` studio controls.
+- **Settings & Secret Masking (`config/settings.json`, `core/config_manager.py`, `web/settings.html`, `web/settings.js`):** Added `stt.vad_enabled` / `vad_energy_threshold` / `barge_in_enabled`, `autonomous_agent.closed_loop_missions` / `mission_tick_interval_sec`, and new `collab` & `plugins` categories in `/settings` (19 categories total), with `"********"` masking and preservation for `collab.shared_secret`.
+
+### Tests & Documentation
+- **New Test Coverage:** Added `tests/test_voice_duplex.py`, `tests/test_autonomous_missions.py`, and `tests/test_collab_and_plugins.py` (all offline/deterministic using `tempfile.TemporaryDirectory(ignore_cleanup_errors=True)`).
+- **Verified Suite:** `274` Python unit/integration tests passing (`0` failures, `0` errors) + `tests/test_guard_runner.js` passing.
+- **Documentation:** Updated `README.md`, `CHANGELOG.md`, and `.env.example` (added `MAYBEAI_COLLAB_SECRET`).
+
+---
+
 ## [2026-11-25] — Mid-Term Upgrades: OBS Overlay, Streaming Brain-to-TTS, EventBus, Semantic Embeddings & Multi-Platform Chat
 
 ### Pillar 1 — Dedicated OBS `/overlay` & Modular Tabbed Studio UI

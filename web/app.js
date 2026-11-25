@@ -120,6 +120,52 @@ document.addEventListener("DOMContentLoaded", () => {
   let time = 0;
   let isSinging = false;
   let musicNotes = [];
+  let isEveSpeaking = false;
+  let eveSpeakingTailTimer = null;
+  let bargeInBadgeTimer = null;
+
+  function markEveSpeaking(speaking) {
+    if (speaking) {
+      isEveSpeaking = true;
+      if (eveSpeakingTailTimer) {
+        clearTimeout(eveSpeakingTailTimer);
+        eveSpeakingTailTimer = null;
+      }
+    } else {
+      if (eveSpeakingTailTimer) clearTimeout(eveSpeakingTailTimer);
+      eveSpeakingTailTimer = setTimeout(() => {
+        isEveSpeaking = false;
+        eveSpeakingTailTimer = null;
+      }, 900);
+    }
+  }
+
+  function stopBrowserAudioOutput() {
+    try {
+      if (window.speechSynthesis && window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      }
+    } catch (e) {}
+    try {
+      document.querySelectorAll("audio").forEach(el => {
+        if (!el.paused) {
+          el.pause();
+          el.currentTime = 0;
+        }
+      });
+    } catch (e) {}
+  }
+
+  function flashBargeInBadge(label = "⚡ Barge-In!") {
+    const badge = document.getElementById("barge-in-badge");
+    if (!badge) return;
+    badge.textContent = label;
+    badge.style.display = "inline-block";
+    if (bargeInBadgeTimer) clearTimeout(bargeInBadgeTimer);
+    bargeInBadgeTimer = setTimeout(() => {
+      badge.style.display = "none";
+    }, 2500);
+  }
 
   // --- WebSocket Connection ---
   let ws = null;
@@ -147,6 +193,9 @@ document.addEventListener("DOMContentLoaded", () => {
     ws.onopen = () => {
       wsStatus.textContent = "Connected";
       wsStatus.className = "badge badge-online";
+      if (typeof refreshMissionStatus === "function") refreshMissionStatus();
+      if (typeof refreshCollabStatus === "function") refreshCollabStatus();
+      if (typeof refreshPluginsList === "function") refreshPluginsList();
     };
 
     ws.onclose = () => {
@@ -192,8 +241,37 @@ document.addEventListener("DOMContentLoaded", () => {
       if (msg.data.emotions && msg.data.emotions.length > 0) {
         setEmotion(msg.data.emotions[0]);
       }
+      if (msg.data.streamed) {
+        markEveSpeaking(false);
+      }
+    } else if (msg.type === "ai_chunk") {
+      markEveSpeaking(true);
+      if (msg.data && msg.data.chunk) {
+        subtitles.textContent = `"${msg.data.chunk}"`;
+      }
+      if (msg.data && msg.data.emotion) {
+        setEmotion(msg.data.emotion);
+      }
+    } else if (msg.type === "voice_barge_in") {
+      targetMouthOpen = 0.0;
+      mouthOpen = 0.0;
+      isSinging = false;
+      isEveSpeaking = false;
+      if (eveSpeakingTailTimer) {
+        clearTimeout(eveSpeakingTailTimer);
+        eveSpeakingTailTimer = null;
+      }
+      if (meterFill) meterFill.style.width = "0%";
+      stopBrowserAudioOutput();
+      flashBargeInBadge("⚡ Barge-In!");
+      if (subtitles) subtitles.textContent = "⚡ [Creator Barge-In] Mendengarkan...";
     } else if (msg.type === "avatar_state") {
       targetMouthOpen = msg.data.mouth_open || 0.0;
+      if (targetMouthOpen > 0.05) {
+        markEveSpeaking(true);
+      } else {
+        markEveSpeaking(false);
+      }
       if (msg.data.emotion) {
         setEmotion(msg.data.emotion);
       }
@@ -249,6 +327,16 @@ document.addEventListener("DOMContentLoaded", () => {
       updatePerformanceUi(msg.data);
     } else if (msg.type === "personality_updated") {
       updatePersonalityUi(msg.data);
+    } else if (msg.type === "mission_status") {
+      if (typeof updateMissionUi === "function") updateMissionUi(msg.data);
+    } else if (msg.type === "mission_step") {
+      if (typeof handleMissionStepEvent === "function") handleMissionStepEvent(msg.data);
+    } else if (msg.type === "collab_state") {
+      if (typeof updateCollabUi === "function") updateCollabUi(msg.data);
+    } else if (msg.type === "collab_message") {
+      if (typeof appendCollabMessage === "function") appendCollabMessage(msg.data);
+    } else if (msg.type === "plugin_event") {
+      if (typeof handlePluginEvent === "function") handlePluginEvent(msg.data);
     } else if (msg.type === "audience_cheer") {
       triggerCheerEffect(msg.data);
     } else if (msg.type === "avatar_movement") {
@@ -474,7 +562,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  // --- Microphone Voice Listening (Speech-to-Text) ---
+  // --- Microphone Voice Listening (Speech-to-Text + Real-Time Web Audio VAD Barge-In) ---
   const btnToggleMicHeader = document.getElementById("btn-toggle-mic-header");
   const btnCreatorMic = document.getElementById("btn-creator-mic");
   const creatorMicLabel = document.getElementById("creator-mic-label");
@@ -482,10 +570,132 @@ document.addEventListener("DOMContentLoaded", () => {
   const micStatusBar = document.getElementById("mic-status-bar");
   const micTranscriptPreview = document.getElementById("mic-transcript-preview");
   const micLangSelect = document.getElementById("micLangSelect");
+  const chkBargeIn = document.getElementById("chk-barge-in");
+  const vadEnergyFill = document.getElementById("vad-energy-fill");
+  const vadRmsLabel = document.getElementById("vad-rms-label");
 
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recognition = null;
   let isListeningMic = false;
+  let vadAudioContext = null;
+  let vadMediaStream = null;
+  let vadAnalyser = null;
+  let vadTimeData = null;
+  let vadRafId = null;
+  let vadThreshold = 0.02;
+  let vadSpeechFrames = 0;
+  let lastBargeInSentAt = 0;
+
+  function triggerVoiceBargeIn(reason = "creator_vad") {
+    const autoEnabled = chkBargeIn ? chkBargeIn.checked : true;
+    if (!autoEnabled || !isListeningMic) return;
+
+    const browserSpeaking = Boolean(window.speechSynthesis && window.speechSynthesis.speaking);
+    const activeSpeech = isEveSpeaking || targetMouthOpen > 0.05 || browserSpeaking;
+    if (!activeSpeech) return;
+
+    const now = Date.now();
+    if (now - lastBargeInSentAt < 650) return;
+    lastBargeInSentAt = now;
+
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({
+        type: "barge_in",
+        reason: reason
+      }));
+    }
+    stopBrowserAudioOutput();
+    targetMouthOpen = 0.0;
+    isEveSpeaking = false;
+    flashBargeInBadge("⚡ Barge-In!");
+  }
+
+  async function startVadMonitor() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
+    try {
+      const resp = await fetch("/api/voice/status");
+      if (resp.ok) {
+        const vst = await resp.json();
+        const th = vst && vst.stt && Number(vst.stt.vad_energy_threshold);
+        if (Number.isFinite(th) && th > 0) vadThreshold = th;
+      }
+    } catch (e) {}
+
+    try {
+      vadMediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      vadAudioContext = new AudioCtx();
+      const source = vadAudioContext.createMediaStreamSource(vadMediaStream);
+      vadAnalyser = vadAudioContext.createAnalyser();
+      vadAnalyser.fftSize = 512;
+      source.connect(vadAnalyser);
+      vadTimeData = new Float32Array(vadAnalyser.fftSize);
+      vadSpeechFrames = 0;
+
+      const sampleVad = () => {
+        if (!isListeningMic || !vadAnalyser || !vadTimeData) return;
+        vadAnalyser.getFloatTimeDomainData(vadTimeData);
+        let sumSq = 0;
+        for (let i = 0; i < vadTimeData.length; i++) {
+          sumSq += vadTimeData[i] * vadTimeData[i];
+        }
+        const rms = Math.sqrt(sumSq / vadTimeData.length);
+        const pct = Math.min(100, Math.round(rms * 500));
+        const isHot = rms >= vadThreshold;
+
+        if (vadEnergyFill) {
+          vadEnergyFill.style.width = `${pct}%`;
+          vadEnergyFill.classList.toggle("vad-speech-hot", isHot);
+        }
+        if (vadRmsLabel) {
+          vadRmsLabel.textContent = `VAD: ${rms.toFixed(3)}`;
+        }
+
+        if (isHot) {
+          vadSpeechFrames += 1;
+          if (vadSpeechFrames >= 2) {
+            triggerVoiceBargeIn("creator_vad");
+          }
+        } else {
+          vadSpeechFrames = 0;
+        }
+        vadRafId = requestAnimationFrame(sampleVad);
+      };
+      vadRafId = requestAnimationFrame(sampleVad);
+    } catch (e) {
+      // Gracefully continue with SpeechRecognition only if getUserMedia is unavailable
+    }
+  }
+
+  function stopVadMonitor() {
+    if (vadRafId) {
+      cancelAnimationFrame(vadRafId);
+      vadRafId = null;
+    }
+    if (vadMediaStream) {
+      try {
+        vadMediaStream.getTracks().forEach(t => t.stop());
+      } catch (e) {}
+      vadMediaStream = null;
+    }
+    if (vadAudioContext) {
+      try { vadAudioContext.close(); } catch (e) {}
+      vadAudioContext = null;
+    }
+    vadAnalyser = null;
+    vadTimeData = null;
+    vadSpeechFrames = 0;
+    if (vadEnergyFill) {
+      vadEnergyFill.style.width = "0%";
+      vadEnergyFill.classList.remove("vad-speech-hot");
+    }
+    if (vadRmsLabel) {
+      vadRmsLabel.textContent = "VAD: 0.000";
+    }
+  }
 
   if (SpeechRecognition) {
     recognition = new SpeechRecognition();
@@ -511,6 +721,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (micTranscriptPreview) micTranscriptPreview.textContent = "Mendengarkan suaramu... silakan bicara!";
     };
 
+    recognition.onspeechstart = () => {
+      triggerVoiceBargeIn("creator_vad");
+    };
+
     recognition.onresult = (event) => {
       let interimTranscript = "";
       let finalTranscript = "";
@@ -524,8 +738,11 @@ document.addEventListener("DOMContentLoaded", () => {
         }
       }
 
-      if (interimTranscript && micTranscriptPreview) {
-        micTranscriptPreview.textContent = `"${interimTranscript.trim()}"`;
+      if (interimTranscript.trim()) {
+        triggerVoiceBargeIn("creator_vad");
+        if (micTranscriptPreview) {
+          micTranscriptPreview.textContent = `"${interimTranscript.trim()}"`;
+        }
       }
 
       if (finalTranscript.trim()) {
@@ -597,6 +814,7 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) {
       updateMicUiState(true);
     }
+    startVadMonitor();
   }
 
   function stopMic() {
@@ -604,6 +822,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (recognition) {
       try { recognition.stop(); } catch (e) {}
     }
+    stopVadMonitor();
     updateMicUiState(false);
   }
 
@@ -4216,6 +4435,410 @@ document.addEventListener("DOMContentLoaded", () => {
         sendPersonalityAction({ action: "reset" });
       }
     });
+  }
+
+  // --- Long-Term Pillar 2: Closed-Loop Autonomous Missions Bar ---
+  const missionRunnerBadge = document.getElementById("mission-runner-badge");
+  const missionStepCountBadge = document.getElementById("mission-step-count-badge");
+  const missionActiveSummary = document.getElementById("mission-active-summary");
+  const btnMissionToggle = document.getElementById("btn-mission-toggle");
+  const btnMissionStep = document.getElementById("btn-mission-step");
+  const missionApprovalBar = document.getElementById("mission-approval-bar");
+  const missionApprovalText = document.getElementById("mission-approval-text");
+  const btnMissionApprove = document.getElementById("btn-mission-approve");
+  const btnMissionReject = document.getElementById("btn-mission-reject");
+  let missionLoopActive = false;
+
+  async function refreshMissionStatus() {
+    try {
+      const res = await fetch("/api/missions/status");
+      if (res.ok) {
+        const data = await res.json();
+        updateMissionUi(data);
+      }
+    } catch (e) {}
+  }
+
+  function updateMissionUi(data) {
+    if (!data || typeof data !== "object") return;
+    const isRunning = Boolean((data.is_running ?? data.running) && !(data.is_paused ?? data.paused));
+    missionLoopActive = isRunning;
+    const pending = data.pending_approval || null;
+    const stepCount = data.step_count !== undefined ? data.step_count : (data.steps_executed || 0);
+
+    if (missionRunnerBadge) {
+      if (pending) {
+        missionRunnerBadge.textContent = "Loop: AWAITING APPROVAL";
+        missionRunnerBadge.className = "badge badge-accent";
+      } else if (isRunning) {
+        missionRunnerBadge.textContent = "Loop: RUNNING 🟢";
+        missionRunnerBadge.className = "badge badge-online";
+      } else {
+        missionRunnerBadge.textContent = "Loop: PAUSED";
+        missionRunnerBadge.className = "badge";
+      }
+    }
+
+    if (missionStepCountBadge) {
+      missionStepCountBadge.textContent = `Steps: ${stepCount}`;
+    }
+
+    if (btnMissionToggle) {
+      btnMissionToggle.textContent = isRunning ? "⏸️ Pause Auto-Mission Loop" : "▶️ Start Auto-Mission Loop";
+    }
+
+    if (missionActiveSummary) {
+      const goalTitle = data.active_goal_title || (data.active_goal && data.active_goal.title) || "Menunggu agenda aktif";
+      const subTitle = data.active_subtask_title || (data.active_subtask && data.active_subtask.title) || "";
+      const lastStep = data.last_step || data.last_action || null;
+      const lastSummary = lastStep && (lastStep.summary || lastStep.subtask_title || lastStep.action_name || lastStep.error || lastStep.speech || lastStep.action);
+      let text = `Misi: ${goalTitle}`;
+      if (subTitle) text += ` -> ${subTitle}`;
+      if (lastSummary) text += ` | Terakhir: ${lastSummary}`;
+      missionActiveSummary.textContent = text;
+    }
+
+    if (missionApprovalBar) {
+      if (pending) {
+        missionApprovalBar.style.display = "flex";
+        if (missionApprovalText) {
+          const desc = pending.summary || pending.subtask_title || pending.action_name || pending.action || pending.title || "Aksi otonom menunggu persetujuan Creator";
+          missionApprovalText.textContent = `⚠️ Approval Needed (${pending.domain || "mission"}): ${desc}`;
+        }
+      } else {
+        missionApprovalBar.style.display = "none";
+      }
+    }
+  }
+
+  function handleMissionStepEvent(data) {
+    if (!data || typeof data !== "object") return;
+    if (missionActiveSummary) {
+      const domain = data.domain || "mission";
+      const summary = data.summary || data.subtask_title || data.action_name || data.error || data.speech || data.action || "Step executed";
+      missionActiveSummary.textContent = `[${domain.toUpperCase()}] ${summary}`;
+    }
+    if (data.status && typeof data.status === "object") {
+      updateMissionUi(data.status);
+    } else {
+      refreshMissionStatus();
+    }
+  }
+
+  if (btnMissionToggle) {
+    btnMissionToggle.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/missions/toggle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !missionLoopActive })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          updateMissionUi(data.status || data);
+        }
+      } catch (e) {}
+    });
+  }
+
+  if (btnMissionStep) {
+    btnMissionStep.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/missions/step", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ force: false })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          handleMissionStepEvent(data);
+        }
+      } catch (e) {}
+    });
+  }
+
+  if (btnMissionApprove) {
+    btnMissionApprove.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/missions/step", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "approve", force: true })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          handleMissionStepEvent(data);
+          return;
+        }
+      } catch (e) {}
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "mission_action", action: "approve" }));
+      }
+    });
+  }
+
+  if (btnMissionReject) {
+    btnMissionReject.addEventListener("click", async () => {
+      try {
+        const res = await fetch("/api/missions/step", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "reject" })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          updateMissionUi(data.status || data);
+          return;
+        }
+      } catch (e) {}
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "mission_action", action: "reject" }));
+      }
+    });
+  }
+
+  // --- Long-Term Pillar 3: AI VTuber Collab Card ---
+  const collabFloorBadge = document.getElementById("collab-floor-badge");
+  const collabTurnBadge = document.getElementById("collab-turn-badge");
+  const collabPeerUrl = document.getElementById("collabPeerUrl");
+  const collabPeerName = document.getElementById("collabPeerName");
+  const btnCollabConnect = document.getElementById("btn-collab-connect");
+  const btnCollabDisconnect = document.getElementById("btn-collab-disconnect");
+  const collabTopicInput = document.getElementById("collabTopicInput");
+  const btnCollabSendTopic = document.getElementById("btn-collab-send-topic");
+  const btnCollabDuetSync = document.getElementById("btn-collab-duet-sync");
+  const collabMessagesFeed = document.getElementById("collabMessagesFeed");
+
+  async function refreshCollabStatus() {
+    try {
+      const res = await fetch("/api/collab/status");
+      if (res.ok) {
+        const data = await res.json();
+        updateCollabUi(data);
+      }
+    } catch (e) {}
+  }
+
+  async function postCollabAction(payload) {
+    try {
+      const res = await fetch("/api/collab/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        updateCollabUi(data.status || data);
+      }
+    } catch (e) {}
+  }
+
+  function updateCollabUi(data) {
+    if (!data) return;
+    const floor = (data.floor_state || data.state || "idle").toUpperCase();
+    const turns = data.turn_count !== undefined ? data.turn_count : 0;
+    const maxTurns = data.max_collab_turns !== undefined ? data.max_collab_turns : 6;
+    const connected = Boolean(data.connected || data.peer_connected);
+
+    if (collabFloorBadge) {
+      collabFloorBadge.textContent = `Floor: ${floor}${connected ? " 🟢" : ""}`;
+      collabFloorBadge.className = connected ? "badge badge-online" : "badge";
+    }
+    if (collabTurnBadge) {
+      collabTurnBadge.textContent = `Turns: ${turns}/${maxTurns}`;
+    }
+    if (collabPeerUrl && data.peer_ws_url && !collabPeerUrl.value) {
+      collabPeerUrl.value = data.peer_ws_url;
+    }
+    if (collabPeerName && data.peer_name && !collabPeerName.value) {
+      collabPeerName.value = data.peer_name;
+    }
+  }
+
+  function appendCollabMessage(data) {
+    if (!collabMessagesFeed || !data) return;
+    const emptyHint = collabMessagesFeed.querySelector(".collab-feed-empty");
+    if (emptyHint) emptyHint.remove();
+
+    const sender = data.sender_name || data.sender_id || "Peer";
+    const evType = data.event_type || "turn_utterance";
+    const text = data.speech || data.topic || JSON.stringify(data.payload || {});
+    const item = document.createElement("div");
+    const isOutbound = Boolean(data.outbound || data.direction === "outbound");
+    item.className = `collab-msg-item ${isOutbound ? "outbound" : ""}`;
+
+    const strong = document.createElement("strong");
+    strong.textContent = `${sender} [${evType}]: `;
+    const span = document.createElement("span");
+    span.textContent = text;
+    item.appendChild(strong);
+    item.appendChild(span);
+
+    collabMessagesFeed.appendChild(item);
+    while (collabMessagesFeed.children.length > 25) {
+      collabMessagesFeed.removeChild(collabMessagesFeed.firstChild);
+    }
+    collabMessagesFeed.scrollTop = collabMessagesFeed.scrollHeight;
+  }
+
+  if (btnCollabConnect) {
+    btnCollabConnect.addEventListener("click", () => {
+      const wsUrl = collabPeerUrl ? collabPeerUrl.value.trim() : "";
+      const peerName = collabPeerName ? collabPeerName.value.trim() : "NeuroPeer";
+      postCollabAction({ action: "connect", peer_ws_url: wsUrl, ws_url: wsUrl, peer_name: peerName });
+    });
+  }
+
+  if (btnCollabDisconnect) {
+    btnCollabDisconnect.addEventListener("click", () => {
+      postCollabAction({ action: "disconnect" });
+    });
+  }
+
+  if (btnCollabSendTopic) {
+    btnCollabSendTopic.addEventListener("click", () => {
+      const topic = collabTopicInput ? collabTopicInput.value.trim() : "";
+      if (!topic) return;
+      postCollabAction({ action: "initiate", topic: topic, prompt: topic });
+      if (collabTopicInput) collabTopicInput.value = "";
+    });
+  }
+
+  if (btnCollabDuetSync) {
+    btnCollabDuetSync.addEventListener("click", () => {
+      const selectedSong = selectPerfSong && selectPerfSong.value !== "auto" ? selectPerfSong.value : "digital_world";
+      postCollabAction({ action: "duet_sync", song_id: selectedSong, lyric_index: 0 });
+    });
+  }
+
+  // --- Long-Term Pillar 3: Community Plugin SDK Card ---
+  const pluginsCountBadge = document.getElementById("plugins-count-badge");
+  const btnPluginsRefresh = document.getElementById("btn-plugins-refresh");
+  const pluginsListContainer = document.getElementById("pluginsListContainer");
+  const pluginsEventFeed = document.getElementById("pluginsEventFeed");
+
+  async function refreshPluginsList() {
+    try {
+      const res = await fetch("/api/plugins");
+      if (res.ok) {
+        const data = await res.json();
+        const plugins = Array.isArray(data) ? data : (data.plugins || []);
+        renderPluginsList(plugins);
+      }
+    } catch (e) {}
+  }
+
+  async function postPluginAction(action, pluginId) {
+    try {
+      const res = await fetch("/api/plugins/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: action, plugin_id: pluginId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.plugins)) {
+          renderPluginsList(data.plugins);
+        } else {
+          refreshPluginsList();
+        }
+      }
+    } catch (e) {}
+  }
+
+  function renderPluginsList(plugins) {
+    if (!pluginsListContainer) return;
+    const list = Array.isArray(plugins) ? plugins : [];
+    if (pluginsCountBadge) {
+      const enabledCount = list.filter(p => p.enabled).length;
+      pluginsCountBadge.textContent = `Plugins: ${enabledCount}/${list.length}`;
+    }
+
+    pluginsListContainer.innerHTML = "";
+    if (list.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "collab-feed-empty";
+      empty.textContent = "Tidak ada plugin terdaftar.";
+      pluginsListContainer.appendChild(empty);
+      return;
+    }
+
+    list.forEach(p => {
+      const card = document.createElement("div");
+      card.className = "plugin-item-card";
+
+      const info = document.createElement("div");
+      info.className = "plugin-item-info";
+
+      const head = document.createElement("div");
+      head.className = "plugin-item-head";
+
+      const title = document.createElement("strong");
+      title.textContent = `${p.name || p.id} v${p.version || "1.0"}`;
+      head.appendChild(title);
+
+      const statusBadge = document.createElement("span");
+      statusBadge.className = `badge ${p.enabled ? "badge-online" : ""}`;
+      statusBadge.textContent = p.enabled ? "Enabled" : "Disabled";
+      head.appendChild(statusBadge);
+
+      (p.commands || []).forEach(cmd => {
+        const cmdPill = document.createElement("span");
+        cmdPill.className = "plugin-cmd-pill";
+        cmdPill.textContent = cmd;
+        head.appendChild(cmdPill);
+      });
+
+      const desc = document.createElement("div");
+      desc.className = "plugin-item-desc";
+      desc.textContent = p.description || "";
+
+      info.appendChild(head);
+      info.appendChild(desc);
+
+      const actions = document.createElement("div");
+      actions.className = "plugin-item-actions";
+
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = `btn btn-sm ${p.enabled ? "btn-secondary" : "btn-primary"}`;
+      toggleBtn.textContent = p.enabled ? "Disable" : "Enable";
+      toggleBtn.addEventListener("click", () => {
+        postPluginAction(p.enabled ? "disable" : "enable", p.id);
+      });
+
+      const reloadBtn = document.createElement("button");
+      reloadBtn.type = "button";
+      reloadBtn.className = "btn btn-sm btn-secondary";
+      reloadBtn.textContent = "🔄 Reload";
+      reloadBtn.addEventListener("click", () => {
+        postPluginAction("reload", p.id);
+      });
+
+      actions.appendChild(toggleBtn);
+      actions.appendChild(reloadBtn);
+
+      card.appendChild(info);
+      card.appendChild(actions);
+      pluginsListContainer.appendChild(card);
+    });
+  }
+
+  function handlePluginEvent(data) {
+    if (!data) return;
+    if (pluginsEventFeed) {
+      pluginsEventFeed.style.display = "block";
+      const pid = data.plugin_id || data.plugin || "plugin";
+      const msg = data.message || data.event || data.speech || JSON.stringify(data);
+      pluginsEventFeed.textContent = `🧩 [${pid}] ${msg}`;
+    }
+    if (Array.isArray(data.plugins)) {
+      renderPluginsList(data.plugins);
+    }
+  }
+
+  if (btnPluginsRefresh) {
+    btnPluginsRefresh.addEventListener("click", refreshPluginsList);
   }
 
   // --- 2D Animated Avatar Renderer ---

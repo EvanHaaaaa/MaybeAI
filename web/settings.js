@@ -105,7 +105,9 @@ document.addEventListener("DOMContentLoaded", () => {
       moderator: { title: "🛡️ Moderation & Safety", desc: "Filter kata terlarang, batas panjang pesan penonton, dan pencegahan prompt injection." },
       security: { title: "🔐 Security & Access", desc: "Token otentikasi Creator WebSocket dan daftar origin tambahan yang diizinkan." },
       minecraft: { title: "⛏️ Minecraft Engine", desc: "Mode santai vs kompe, jarak follow bodyguard player, dan batas keselamatan HP." },
-      autonomous: { title: "🤖 Autonomous Agent", desc: "Perencanaan target mandiri, jeda obrolan spontan saat chat sepi, dan persetujuan aksi." },
+      autonomous: { title: "🤖 Autonomous Agent", desc: "Perencanaan target mandiri, misi otonom closed-loop, jeda obrolan spontan, dan persetujuan aksi." },
+      collab: { title: "🤝 AI Collab Protocol", desc: "Kolaborasi multi-VTuber via /ws/collab dengan HMAC-SHA256, turn-taking, dan batas anti-loop." },
+      plugins: { title: "🧩 Plugins & SDK", desc: "Ekstensi plugin built-in & eksternal (misal: word_chain) dengan isolasi error dan timeout hook." },
       performance: { title: "⚡ Performance & Network", desc: "Batas antrean tugas simultan, heartbeat ping, dan alokasi buffer audio." }
     };
 
@@ -200,8 +202,9 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (item.type === "number") {
       const minAttr = item.min !== undefined ? `min="${item.min}"` : "";
       const maxAttr = item.max !== undefined ? `max="${item.max}"` : "";
+      const stepAttr = item.step !== undefined ? `step="${item.step}"` : 'step="any"';
       return `
-        <input type="number" class="cyber-input" data-path="${p}" value="${value !== undefined ? value : item.default}" ${minAttr} ${maxAttr}>
+        <input type="number" class="cyber-input" data-path="${p}" value="${value !== undefined ? value : item.default}" ${minAttr} ${maxAttr} ${stepAttr}>
       `;
     } else if (item.type === "secret") {
       return `
@@ -212,19 +215,21 @@ document.addEventListener("DOMContentLoaded", () => {
       `;
     } else if (item.type === "list") {
       const items = Array.isArray(value) ? value : [];
+      const itemPlaceholder = p.includes("plugin") ? "word_chain" : "http://192.168.1.50:7860";
+      const emptyLabel = p.includes("plugin") ? "No plugins enabled." : "No entries configured (localhost allowed by default).";
       const rowsHtml = items.map((entry, idx) => `
         <div class="list-item-row" style="display: flex; gap: 8px; align-items: center;">
-          <input type="text" class="cyber-input list-item-input" data-list-path="${p}" data-index="${idx}" value="${escapeAttr(entry)}" placeholder="http://localhost:3000">
-          <button type="button" class="btn btn-danger-outline list-remove-btn" data-list-path="${p}" data-index="${idx}" title="Remove origin" style="padding: 6px 10px;">✕</button>
+          <input type="text" class="cyber-input list-item-input" data-list-path="${p}" data-index="${idx}" value="${escapeAttr(entry)}" placeholder="${itemPlaceholder}">
+          <button type="button" class="btn btn-danger-outline list-remove-btn" data-list-path="${p}" data-index="${idx}" title="Remove item" style="padding: 6px 10px;">✕</button>
         </div>
       `).join("");
       return `
         <div class="list-editor" data-path="${p}" style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 380px;">
           <div class="list-items-container" style="display: flex; flex-direction: column; gap: 6px;">
-            ${rowsHtml || '<small style="color: var(--text-dim);">No entries configured (localhost allowed by default).</small>'}
+            ${rowsHtml || `<small style="color: var(--text-dim);">${emptyLabel}</small>`}
           </div>
           <div class="list-add-row" style="display: flex; gap: 8px; align-items: center;">
-            <input type="text" class="cyber-input list-add-input" data-list-path="${p}" placeholder="e.g. http://192.168.1.50:7860">
+            <input type="text" class="cyber-input list-add-input" data-list-path="${p}" placeholder="e.g. ${itemPlaceholder}">
             <button type="button" class="btn btn-secondary list-add-btn" data-list-path="${p}" style="white-space: nowrap;">+ Add</button>
           </div>
         </div>

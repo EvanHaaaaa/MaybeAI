@@ -2,6 +2,7 @@ from core.planning.models import Goal, Subtask, GoalTier, GoalStatus, GoalCatego
 from core.planning.decomposer import GoalDecomposer
 from core.planning.replanner import StrategyReplanner
 from core.planning.engine import GoalEngine
+from core.planning.executor import AutonomousMissionExecutor
 
 __all__ = [
     "Goal",
@@ -11,5 +12,6 @@ __all__ = [
     "GoalCategory",
     "GoalDecomposer",
     "StrategyReplanner",
-    "GoalEngine"
+    "GoalEngine",
+    "AutonomousMissionExecutor",
 ]

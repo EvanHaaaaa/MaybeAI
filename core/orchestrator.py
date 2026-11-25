@@ -11,6 +11,11 @@ from core.platforms import YouTubeLiveAdapter, DiscordAdapter
 from core.moderator import Moderator
 from core.actions import ActionParser
 from core.singer import Singer
+from core.stt import STTEngine, StreamingSTTSession
+from core.planning.executor import AutonomousMissionExecutor
+from core.collab.manager import CollabManager
+from core.collab.protocol import CollabEnvelope
+from core.plugins.registry import PluginRegistry
 from core.minecraft.controller import MinecraftController
 from core.chess.controller import ChessController
 from core.conversation.chat_curator import ChatInteraction
@@ -53,6 +58,18 @@ class Orchestrator:
             interruptible=tts_cfg.get("interruptible", True),
         )
 
+        # Load STT / Full-Duplex Voice config
+        stt_cfg = settings.get("stt", {}) if isinstance(settings, dict) else {}
+        self.stt = STTEngine(
+            model_name=stt_cfg.get("model", "base"),
+            device=stt_cfg.get("device", "cpu"),
+            enabled=stt_cfg.get("enabled", False),
+            vad_enabled=stt_cfg.get("vad_enabled", True),
+            vad_energy_threshold=float(stt_cfg.get("vad_energy_threshold", 0.02) or 0.02),
+            barge_in_enabled=stt_cfg.get("barge_in_enabled", True),
+        )
+        self.voice_session = StreamingSTTSession(stt_engine=self.stt)
+
         # Load VTS config
         vts_cfg = settings.get("vts", {})
         self.vts = VTSClient(
@@ -85,8 +102,49 @@ class Orchestrator:
 
         self.chat = ChatReceiver()
         self._configure_platform_adapters(settings)
+
+        # Autonomous Closed-Loop Mission Executor
+        auto_cfg = settings.get("autonomous_agent", {}) if isinstance(settings, dict) else {}
+        self.missions = AutonomousMissionExecutor(
+            goal_engine=self.brain.goals,
+            mood_engine=self.brain.mood,
+            minecraft=self.minecraft,
+            chess=self.chess,
+            performance_runner=self.perform_song,
+            speak_fn=self._speak_mission_commentary,
+            event_bus=self.event_bus,
+            human_approval_required=bool(auto_cfg.get("human_approval_required", False)),
+            tick_interval_sec=float(auto_cfg.get("mission_tick_interval_sec", 25.0) or 25.0),
+            enabled=bool(auto_cfg.get("closed_loop_missions", True) and auto_cfg.get("enabled", True)),
+        )
+
+        # AI VTuber Collab Manager
+        self.collab = CollabManager(
+            settings=settings,
+            event_bus=self.event_bus,
+            self_name="EveMaybe",
+        )
+        self.collab.set_reply_callback(self._on_collab_reply_needed)
+
+        # Community Plugin SDK Registry
+        plugins_cfg = settings.get("plugins", {}) if isinstance(settings, dict) else {}
+        self.plugins = PluginRegistry(
+            plugins_dir=plugins_cfg.get("plugins_dir", "plugins"),
+            enabled_plugins=plugins_cfg.get("enabled_plugins", ["word_chain"]),
+            hook_timeout_sec=float(plugins_cfg.get("hook_timeout_sec", 5.0) or 5.0),
+            enabled=bool(plugins_cfg.get("enabled", True)),
+            event_bus=self.event_bus,
+            speak_cb=self._speak_plugin_response,
+            broadcast_cb=self.broadcast,
+            settings=settings,
+        )
+        self._plugins_discovered: bool = False
+        self.plugins.attach_to_event_bus(self.event_bus)
+
         self.is_running = False
         self._busy_lock = asyncio.Lock()
+        self._active_interaction_task: Optional[asyncio.Task] = None
+        self.barge_in_count: int = 0
         self.web_listeners: Set[Callable[[Dict[str, Any]], None]] = set()
         self.event_bus.subscribe("*", self._dispatch_to_web_listeners)
 
@@ -166,6 +224,13 @@ class Orchestrator:
         await self.chat.start_adapters()
         await self.broadcast("platform_status", self.chat.get_platforms_status())
 
+        # Discover and load configured community plugins
+        await self.ensure_plugins_loaded()
+
+        # Start closed-loop autonomous mission executor if enabled
+        if self.missions.enabled:
+            await self.missions.start_loop()
+
         # Start master processing loop
         asyncio.create_task(self._process_chat_loop())
         # Start spontaneous banter / idle stream thoughts loop
@@ -176,10 +241,189 @@ class Orchestrator:
     async def shutdown(self):
         """Gracefully stops background loops and closes external client sessions."""
         self.is_running = False
+        task = self._active_interaction_task
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.wait({task}, timeout=0.5)
+        self._active_interaction_task = None
+        await self.missions.stop_loop()
+        await self.collab.shutdown()
+        await self.plugins.shutdown()
         self.chat.stop()
         await self.chat.stop_adapters()
         await self.vts.disconnect()
         await self.brain.close()
+
+    async def ensure_plugins_loaded(self) -> None:
+        """Lazily discovers and loads configured plugins once."""
+        if not self._plugins_discovered:
+            self._plugins_discovered = True
+            await self.plugins.discover_plugins()
+
+    async def process_voice_chunk(
+        self,
+        pcm_bytes: bytes,
+        user: str = "Creator",
+        language: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Processes a raw PCM16 creator voice chunk through EnergyVAD + StreamingSTTSession.
+        Triggers barge-in on voice onset when Eve is busy/speaking and forwards final transcripts.
+        """
+        res = await self.voice_session.feed_pcm_chunk(pcm_bytes, language=language)
+
+        if res.get("speech_started") or res.get("speech_ended") or res.get("is_speech"):
+            await self.broadcast("voice_vad_state", {
+                "is_speech": bool(res.get("is_speech")),
+                "speech_started": bool(res.get("speech_started")),
+                "speech_ended": bool(res.get("speech_ended")),
+                "rms": float(res.get("rms", 0.0)),
+            })
+
+        if res.get("speech_started") and self.stt.vad_enabled:
+            if self.is_busy or bool(getattr(self.tts, "is_speaking", False)):
+                res["barge_in"] = await self.barge_in(source="creator", reason="vad")
+
+        transcript = (res.get("transcript") or "").strip()
+        if transcript:
+            await self.broadcast("stt_final", {
+                "user": user,
+                "text": transcript,
+                "rms": float(res.get("rms", 0.0)),
+            })
+            await self.chat.put_message(user=user, text=transcript, source="mic", is_creator=True)
+
+        return res
+
+    async def _speak_mission_commentary(self, text: str) -> None:
+        if not text:
+            return
+        if not self._busy_lock.locked():
+            async with self._busy_lock:
+                await self._speak_response(text, user_label="Eve (Mission)")
+        else:
+            speech_text, emotions, actions = ActionParser.parse(text)
+            await self.broadcast("ai_response", {
+                "user": "Eve (Mission)",
+                "raw": text,
+                "speech": speech_text,
+                "emotions": emotions,
+                "actions": actions,
+                "is_creator": False,
+                "channel": "audience",
+            })
+
+    async def _speak_plugin_response(self, text: str, user_label: str = "Eve (Plugin)") -> None:
+        if not text:
+            return
+        await self._speak_response(text, user_label=user_label, is_creator=False)
+
+    async def _on_collab_reply_needed(self, env: CollabEnvelope) -> None:
+        """Generates Eve's reply when a collab peer yields the turn and sends it back."""
+        if self.collab.turn_count >= self.collab.max_collab_turns:
+            return
+
+        peer_name = env.sender_name or env.sender_id or self.collab.peer_name or "Peer"
+        topic_ctx = f" (topic: {env.topic})" if env.topic else ""
+        llm_input = (
+            f"[AI VTuber Collab from {peer_name}{topic_ctx}]: {env.speech}\n"
+            f"(Reply naturally as Eve Maybe to fellow AI VTuber {peer_name} in 1-2 witty sentences with emotion tags)"
+        )
+
+        raw_reply = await self.brain.generate_response(
+            user_name=peer_name,
+            message=llm_input,
+            game_context=f"AI VTuber Collab with {peer_name}",
+        )
+        _, clean_reply = self.moderator.clean_text(raw_reply)
+        speech_text, emotions, _ = ActionParser.parse(clean_reply)
+        primary_emotion = emotions[0] if emotions else "happy"
+
+        if not self._busy_lock.locked():
+            async with self._busy_lock:
+                await self._speak_response(clean_reply, user_label=f"Eve (Collab w/ {peer_name})", is_creator=False)
+        else:
+            await self.broadcast("ai_response", {
+                "user": f"Eve (Collab w/ {peer_name})",
+                "raw": clean_reply,
+                "speech": speech_text,
+                "emotions": emotions,
+                "actions": [],
+                "is_creator": False,
+                "channel": "audience",
+            })
+
+        await self.collab.send_utterance(
+            speech=speech_text or clean_reply,
+            emotion=primary_emotion,
+            yield_turn=True,
+            topic=env.topic,
+        )
+
+    async def barge_in(self, source: str = "creator", reason: str = "vad") -> Dict[str, Any]:
+        """
+        Preempts Eve's active speech/response when the Creator speaks (full-duplex barge-in).
+        Never acquires `_busy_lock` so it cannot deadlock with an in-flight interaction.
+        """
+        settings = self.brain.settings if isinstance(self.brain.settings, dict) else {}
+        stt_cfg = settings.get("stt", {}) if isinstance(settings.get("stt"), dict) else {}
+        if not bool(stt_cfg.get("barge_in_enabled", True)):
+            return {
+                "interrupted": False,
+                "reason": "barge_in_disabled",
+                "source": source,
+                "barge_in_count": self.barge_in_count,
+            }
+
+        if not bool(getattr(self.tts, "interruptible", True)):
+            return {
+                "interrupted": False,
+                "reason": "tts_not_interruptible",
+                "source": source,
+                "barge_in_count": self.barge_in_count,
+            }
+
+        tts_stopped = bool(self.tts.stop())
+
+        task_cancelled = False
+        task = self._active_interaction_task
+        current = asyncio.current_task()
+        if task is not None and not task.done() and task is not current:
+            task.cancel()
+            await asyncio.wait({task}, timeout=0.5)
+            if task.done() and not task.cancelled():
+                try:
+                    _ = task.exception()
+                except Exception:
+                    pass
+            task_cancelled = True
+            if self._active_interaction_task is task and task.done():
+                self._active_interaction_task = None
+
+        if self.vts.connected:
+            try:
+                await self.vts.trigger_expression("neutral")
+                await self.vts.update_mouth(0.0)
+            except Exception:
+                pass
+
+        await self.broadcast("avatar_state", {
+            "mouth_open": 0.0,
+            "emotion": "neutral",
+        })
+
+        self.barge_in_count += 1
+        payload = {
+            "interrupted": True,
+            "source": source,
+            "reason": reason,
+            "tts_stopped": tts_stopped,
+            "task_cancelled": task_cancelled,
+            "barge_in_count": self.barge_in_count,
+            "timestamp": time.time(),
+        }
+        await self.broadcast("voice_barge_in", payload)
+        return payload
 
     async def close(self):
         await self.shutdown()
@@ -238,6 +482,37 @@ class Orchestrator:
             strict_mode=mod_cfg.get("strict_mode"),
             max_message_length=mod_cfg.get("max_message_length")
         )
+
+        # 5. Update STT / Full-Duplex Voice
+        stt_cfg = new_settings.get("stt", {})
+        self.stt.update_config(
+            enabled=stt_cfg.get("enabled"),
+            model=stt_cfg.get("model"),
+            device=stt_cfg.get("device"),
+            vad_enabled=stt_cfg.get("vad_enabled"),
+            vad_energy_threshold=stt_cfg.get("vad_energy_threshold"),
+            barge_in_enabled=stt_cfg.get("barge_in_enabled"),
+        )
+        self.voice_session.vad.energy_threshold = self.stt.vad_energy_threshold
+
+        # 6. Update Closed-Loop Autonomous Missions
+        auto_cfg = new_settings.get("autonomous_agent", {})
+        missions_enabled = bool(auto_cfg.get("closed_loop_missions", True) and auto_cfg.get("enabled", True))
+        self.missions.update_config(
+            enabled=missions_enabled,
+            human_approval_required=auto_cfg.get("human_approval_required"),
+            tick_interval_sec=auto_cfg.get("mission_tick_interval_sec"),
+        )
+        if self.is_running:
+            if missions_enabled and not self.missions.is_running:
+                await self.missions.start_loop()
+            elif not missions_enabled and self.missions.is_running:
+                await self.missions.stop_loop()
+
+        # 7. Update AI Collab & Plugins
+        self.collab.update_config(new_settings)
+        self.plugins.update_config(new_settings)
+        self.plugins._rebuild_command_map()
 
         # Broadcast live event to all connected WebSocket clients
         await self.broadcast("configuration_updated", {
@@ -430,7 +705,10 @@ class Orchestrator:
         if not is_safe:
             print(f"[Moderator] Filtered unsafe input from {msg.user}: {msg.text}")
 
-        is_creator_flag = bool(getattr(msg, "is_creator", False) or msg.source in ("creator", "mic"))
+        is_creator_flag = bool(msg.is_creator) if hasattr(msg, "is_creator") else (msg.source in ("creator", "mic"))
+
+        if msg.source == "mic" and is_creator_flag and (self.is_busy or bool(getattr(self.tts, "is_speaking", False))):
+            await self.barge_in(source="creator", reason="mic_barge_in")
 
         await self.broadcast("chat_received", {
             "user": msg.user,
@@ -508,6 +786,17 @@ class Orchestrator:
                 "total_glowsticks": cnt
             })
 
+    async def _run_interaction_with_lock(self, interaction: ChatInteraction):
+        async with self._busy_lock:
+            try:
+                await self._execute_interaction(interaction)
+            except asyncio.CancelledError:
+                print("[Orchestrator] Active interaction cancelled (barge-in).")
+                raise
+            finally:
+                if self._active_interaction_task is asyncio.current_task():
+                    self._active_interaction_task = None
+
     async def _process_chat_loop(self):
         """
         Continuously ingests chat into ChatCurator, then selects the highest
@@ -521,16 +810,20 @@ class Orchestrator:
                     await self._ingest_message(msg)
 
                 # 2. If not busy, select next best interaction from curator
-                if not self._busy_lock.locked():
-                    async with self._busy_lock:
-                        interaction = self.brain.conversation.select_next_interaction()
-                        if interaction:
-                            await self._execute_interaction(interaction)
-                            continue
+                if not self._busy_lock.locked() and (
+                    self._active_interaction_task is None or self._active_interaction_task.done()
+                ):
+                    interaction = self.brain.conversation.select_next_interaction()
+                    if interaction:
+                        self._active_interaction_task = asyncio.create_task(
+                            self._run_interaction_with_lock(interaction)
+                        )
+                        await asyncio.sleep(0)
+                        continue
 
                 # 3. If no interaction ready or currently busy, wait for next message
                 try:
-                    msg = await asyncio.wait_for(self.chat.get_next_message(), timeout=0.8)
+                    msg = await asyncio.wait_for(self.chat.get_next_message(), timeout=0.2)
                     await self._ingest_message(msg)
                 except asyncio.TimeoutError:
                     pass
@@ -760,6 +1053,19 @@ class Orchestrator:
             if handled and speech_resp:
                 await self.broadcast("desktop_updated", desktop_engine.get_state())
                 await self._speak_response(speech_resp, user_label="Eve (Desktop Companion)")
+                return
+
+        # Check for registered Plugin !commands before falling back to generic LLM
+        if clean_input.strip().startswith("!"):
+            await self.ensure_plugins_loaded()
+            handled_plugin, plugin_resp = await self.plugins.dispatch_command(
+                clean_input,
+                user=primary.user,
+                is_creator=is_creator,
+            )
+            if handled_plugin:
+                if plugin_resp:
+                    await self._speak_response(plugin_resp, user_label="Eve (Plugin)", is_creator=is_creator)
                 return
 
         # Game context

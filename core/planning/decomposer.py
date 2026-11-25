@@ -1,3 +1,4 @@
+import re
 import uuid
 from typing import List, Dict, Any, Optional
 from core.planning.models import Goal, Subtask, GoalTier, GoalCategory, GoalStatus
@@ -201,7 +202,7 @@ class GoalDecomposer:
             ]
 
         # 5. Chess: ELO & Gameplay Challenge
-        if any(w in lower for w in ["catur", "chess", "elo", "skakmat", "grandmaster"]):
+        if category == GoalCategory.CHESS.value or any(w in lower for w in ["catur", "chess", "skakmat", "grandmaster"]) or re.search(r"\belo\b", lower):
             return [
                 Subtask(
                     id=f"sub_{uuid.uuid4().hex[:6]}",
@@ -233,7 +234,49 @@ class GoalDecomposer:
                 )
             ]
 
-        # 6. Generic / Custom Fallback Decomposition
+        # 6. Performance / Karaoke Idol Challenge
+        if category == GoalCategory.PERFORMANCE.value or any(w in lower for w in ["konser", "karaoke", "nyanyi", "lagu", "setlist", "performance"]):
+            return [
+                Subtask(
+                    id=f"sub_{uuid.uuid4().hex[:6]}",
+                    title="Pilih lagu & susun setlist konser sesuai mood stream",
+                    description="Kurasi lagu pembuka dan atur urutan penampilan bersama PerformanceDirector.",
+                    category=GoalCategory.PERFORMANCE.value,
+                    status=GoalStatus.IN_PROGRESS.value,
+                    target_count=1.0,
+                    unit="setlist",
+                    strategy="Cek mood dominan lalu pilih lagu yang paling cocok dengan energi chat."
+                ),
+                Subtask(
+                    id=f"sub_{uuid.uuid4().hex[:6]}",
+                    title="MC Pembuka & ajak penonton nyalakan glowstick",
+                    description="Sapa penonton, buka sesi karaoke, dan bangun hype di panggung.",
+                    category=GoalCategory.PERFORMANCE.value,
+                    target_count=1.0,
+                    unit="mc_intro",
+                    strategy="Gunakan sapaan idol yang ceria dan panggil chat memakai !glowstick."
+                ),
+                Subtask(
+                    id=f"sub_{uuid.uuid4().hex[:6]}",
+                    title="Nyanyikan lagu utama dengan koreografi live",
+                    description="Tampil menyanyikan lagu pilihan dengan ekspresi avatar dan sinkronisasi lirik.",
+                    category=GoalCategory.PERFORMANCE.value,
+                    target_count=1.0,
+                    unit="song",
+                    strategy="Ikuti tempo musik dan sinkronkan gerakan panggung di setiap section."
+                ),
+                Subtask(
+                    id=f"sub_{uuid.uuid4().hex[:6]}",
+                    title="Raih sorakan glowstick & tutup konser dengan encore",
+                    description="Evaluasi skor penampilan panggung dan ucapkan terima kasih kepada chat.",
+                    category=GoalCategory.PERFORMANCE.value,
+                    target_count=1.0,
+                    unit="glowsticks",
+                    strategy="Rayakan pencapaian skor panggung dan tawarkan lagu encore."
+                )
+            ]
+
+        # 7. Generic / Custom Fallback Decomposition
         return [
             Subtask(
                 id=f"sub_{uuid.uuid4().hex[:6]}",

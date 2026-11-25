@@ -140,7 +140,9 @@ class ConfigManager:
             "goal_planning_enabled": True,
             "idle_banter_interval_sec": 40,
             "max_planning_steps": 5,
-            "human_approval_required": False
+            "human_approval_required": False,
+            "closed_loop_missions": True,
+            "mission_tick_interval_sec": 25
         },
         "performance": {
             "max_concurrent_tasks": 3,
@@ -150,11 +152,28 @@ class ConfigManager:
         "stt": {
             "enabled": False,
             "model": "base",
-            "device": "cpu"
+            "device": "cpu",
+            "vad_enabled": True,
+            "vad_energy_threshold": 0.02,
+            "barge_in_enabled": True
         },
         "security": {
             "creator_token": "",
             "allowed_origins": []
+        },
+        "collab": {
+            "enabled": False,
+            "peer_name": "NeuroPeer",
+            "peer_ws_url": "",
+            "shared_secret": "",
+            "max_collab_turns": 6,
+            "turn_cooldown_sec": 2.5
+        },
+        "plugins": {
+            "enabled": True,
+            "plugins_dir": "plugins",
+            "enabled_plugins": ["word_chain"],
+            "hook_timeout_sec": 5.0
         }
     }
 
@@ -192,6 +211,7 @@ class ConfigManager:
         ("youtube", "api_key", "api_key_configured"),
         ("discord", "bot_token", "bot_token_configured"),
         ("security", "creator_token", "creator_token_configured"),
+        ("collab", "shared_secret", "shared_secret_configured"),
     )
 
     def get_public_config(self) -> Dict[str, Any]:
@@ -800,6 +820,35 @@ class ConfigManager:
                 "default": 40,
                 "restart_required": False
             },
+            {
+                "path": "autonomous_agent.closed_loop_missions",
+                "category": "autonomous",
+                "label": "Closed-Loop Autonomous Missions",
+                "description": "Mengizinkan Eve mengeksekusi misi otonom berurutan secara otomatis (Minecraft, Chess, Stage, Social).",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "autonomous_agent.mission_tick_interval_sec",
+                "category": "autonomous",
+                "label": "Mission Tick Interval (sec)",
+                "description": "Jeda waktu antar langkah eksekusi misi otonom (dalam detik).",
+                "type": "number",
+                "min": 5,
+                "max": 300,
+                "default": 25,
+                "restart_required": False
+            },
+            {
+                "path": "autonomous_agent.human_approval_required",
+                "category": "autonomous",
+                "label": "Require Creator Approval for Missions",
+                "description": "Menahan eksekusi langkah misi otonom hingga Creator menyetujuinya.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
 
             # 13. Performance
             {
@@ -864,6 +913,37 @@ class ConfigManager:
                 "default": "cpu",
                 "restart_required": False
             },
+            {
+                "path": "stt.vad_enabled",
+                "category": "stt",
+                "label": "Voice Activity Detection (VAD)",
+                "description": "Mendeteksi onset suara mikrofon secara real-time untuk streaming STT.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "stt.vad_energy_threshold",
+                "category": "stt",
+                "label": "VAD Energy Threshold",
+                "description": "Ambang batas energi RMS mikrofon untuk memicu deteksi suara (0.005 - 0.5).",
+                "type": "slider",
+                "min": 0.005,
+                "max": 0.5,
+                "step": 0.005,
+                "unit": "",
+                "default": 0.02,
+                "restart_required": False
+            },
+            {
+                "path": "stt.barge_in_enabled",
+                "category": "stt",
+                "label": "Full-Duplex Barge-In",
+                "description": "Mengizinkan suara Creator langsung memotong TTS Eve saat berbicara.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
 
             # 15. Security & Access
             {
@@ -882,6 +962,106 @@ class ConfigManager:
                 "description": "Daftar origin HTTP tambahan (misal: http://192.168.1.50:7860) yang diizinkan selain localhost.",
                 "type": "list",
                 "default": [],
+                "restart_required": False
+            },
+
+            # 16. AI Collab Protocol
+            {
+                "path": "collab.enabled",
+                "category": "collab",
+                "label": "AI Collab Enabled",
+                "description": "Mengaktifkan mode kolaborasi AI-to-AI VTuber via protokol WebSocket /ws/collab.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "collab.peer_name",
+                "category": "collab",
+                "label": "Collab Peer Name",
+                "description": "Nama tampilan AI VTuber partner kolaborasi.",
+                "type": "text",
+                "default": "NeuroPeer",
+                "restart_required": False
+            },
+            {
+                "path": "collab.peer_ws_url",
+                "category": "collab",
+                "label": "Peer WebSocket URL",
+                "description": "Alamat endpoint ws:// atau wss:// dari peer VTuber saat Eve menjadi client outbound.",
+                "type": "text",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "collab.shared_secret",
+                "category": "collab",
+                "label": "Collab HMAC Shared Secret",
+                "description": "Kunci rahasia HMAC-SHA256 untuk verifikasi frame /ws/collab. Disembunyikan demi keamanan.",
+                "type": "secret",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "collab.max_collab_turns",
+                "category": "collab",
+                "label": "Max Collab Turns",
+                "description": "Batas maksimum giliran bicara beruntun sebelum cooldown agar tidak terjadi infinite loop.",
+                "type": "number",
+                "min": 1,
+                "max": 30,
+                "default": 6,
+                "restart_required": False
+            },
+            {
+                "path": "collab.turn_cooldown_sec",
+                "category": "collab",
+                "label": "Turn Cooldown (sec)",
+                "description": "Durasi jeda cooldown setelah batas giliran collab tercapai (detik).",
+                "type": "number",
+                "min": 0.0,
+                "max": 30.0,
+                "default": 2.5,
+                "restart_required": False
+            },
+
+            # 17. Plugins & SDK
+            {
+                "path": "plugins.enabled",
+                "category": "plugins",
+                "label": "Plugin System Enabled",
+                "description": "Mengaktifkan Plugin SDK dan command handler modular (!sambungkata, !wc, dll).",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "plugins.plugins_dir",
+                "category": "plugins",
+                "label": "External Plugins Directory",
+                "description": "Direktori lokal tempat meletakkan plugin Python (.py) eksternal.",
+                "type": "text",
+                "default": "plugins",
+                "restart_required": False
+            },
+            {
+                "path": "plugins.enabled_plugins",
+                "category": "plugins",
+                "label": "Enabled Plugin IDs",
+                "description": "Daftar ID plugin yang diaktifkan saat startup (misal: word_chain).",
+                "type": "list",
+                "default": ["word_chain"],
+                "restart_required": False
+            },
+            {
+                "path": "plugins.hook_timeout_sec",
+                "category": "plugins",
+                "label": "Plugin Hook Timeout (sec)",
+                "description": "Batas waktu eksekusi per command/event plugin sebelum dihentikan otomatis.",
+                "type": "number",
+                "min": 0.5,
+                "max": 30.0,
+                "default": 5.0,
                 "restart_required": False
             }
         ]
