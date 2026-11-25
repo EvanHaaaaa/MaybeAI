@@ -1,6 +1,7 @@
 import io
 import base64
 import time
+import threading
 from typing import Tuple, Optional, Any
 
 try:
@@ -29,19 +30,21 @@ class ScreenCaptureManager:
     """
 
     def __init__(self):
-        self._sct: Optional[Any] = None
+        self._thread_local = threading.local()
         self.has_pil = HAS_PIL
         self.has_mss = HAS_MSS
 
     def _get_sct(self) -> Any:
         if not HAS_MSS or mss is None:
             return None
-        if self._sct is None:
+        sct = getattr(self._thread_local, "sct", None)
+        if sct is None:
             # mss.MSS is the newer entrypoint, fall back to mss.mss for older versions
             cls_mss = getattr(mss, "MSS", getattr(mss, "mss", None))
             if cls_mss:
-                self._sct = cls_mss()
-        return self._sct
+                sct = cls_mss()
+                self._thread_local.sct = sct
+        return sct
 
     def capture_screen(self, monitor_idx: int = 1) -> Any:
         """

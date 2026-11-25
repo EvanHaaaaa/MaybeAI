@@ -96,10 +96,12 @@ document.addEventListener("DOMContentLoaded", () => {
       memory: { title: "💾 Memory & Second Brain", desc: "Pengaturan memori jangka pendek, penyimpanan episodik, dan sinkronisasi Karpathy BrainMap." },
       mood: { title: "💖 Mood & Emotion", desc: "Kecepatan decay emosi internal dan kepekaan reaksi terhadap event streaming." },
       voice: { title: "🎙️ Voice & TTS (Edge-TTS)", desc: "Aktor suara vokal sintetis, laju bicara, modulasi pitch, dan sensitivitas lip-sync." },
+      stt: { title: "🎧 Speech-to-Text (STT)", desc: "Pengaturan pengenalan suara lokal Whisper (enable, ukuran model, dan device komputasi)." },
       avatar: { title: "👤 Avatar & VTube Studio", desc: "Integrasi WebSocket VTube Studio (port 8001), intensitas gerakan, dan ekspresi Live2D." },
       karaoke: { title: "🎤 Karaoke & Performance", desc: "Pengaturan volume vokal/BGM panggung idol, katalog lagu, dan glowstick crowd cheer." },
       twitch: { title: "💬 Twitch & Chat Stream", desc: "Koneksi live chat Twitch IRC, bot nick, dan perlindungan keamanan OAuth token." },
       moderator: { title: "🛡️ Moderation & Safety", desc: "Filter kata terlarang, batas panjang pesan penonton, dan pencegahan prompt injection." },
+      security: { title: "🔐 Security & Access", desc: "Token otentikasi Creator WebSocket dan daftar origin tambahan yang diizinkan." },
       minecraft: { title: "⛏️ Minecraft Engine", desc: "Mode santai vs kompe, jarak follow bodyguard player, dan batas keselamatan HP." },
       autonomous: { title: "🤖 Autonomous Agent", desc: "Perencanaan target mandiri, jeda obrolan spontan saat chat sepi, dan persetujuan aksi." },
       performance: { title: "⚡ Performance & Network", desc: "Batas antrean tugas simultan, heartbeat ping, dan alokasi buffer audio." }
@@ -202,16 +204,43 @@ document.addEventListener("DOMContentLoaded", () => {
     } else if (item.type === "secret") {
       return `
         <div class="secret-wrapper">
-          <input type="password" class="cyber-input" data-path="${p}" value="${value || ''}" placeholder="Enter secret key...">
+          <input type="password" class="cyber-input" data-path="${p}" value="${escapeAttr(value || '')}" placeholder="Enter secret key...">
           <button type="button" class="secret-toggle-btn" title="Toggle visibility">👁️</button>
+        </div>
+      `;
+    } else if (item.type === "list") {
+      const items = Array.isArray(value) ? value : [];
+      const rowsHtml = items.map((entry, idx) => `
+        <div class="list-item-row" style="display: flex; gap: 8px; align-items: center;">
+          <input type="text" class="cyber-input list-item-input" data-list-path="${p}" data-index="${idx}" value="${escapeAttr(entry)}" placeholder="http://localhost:3000">
+          <button type="button" class="btn btn-danger-outline list-remove-btn" data-list-path="${p}" data-index="${idx}" title="Remove origin" style="padding: 6px 10px;">✕</button>
+        </div>
+      `).join("");
+      return `
+        <div class="list-editor" data-path="${p}" style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 380px;">
+          <div class="list-items-container" style="display: flex; flex-direction: column; gap: 6px;">
+            ${rowsHtml || '<small style="color: var(--text-dim);">No entries configured (localhost allowed by default).</small>'}
+          </div>
+          <div class="list-add-row" style="display: flex; gap: 8px; align-items: center;">
+            <input type="text" class="cyber-input list-add-input" data-list-path="${p}" placeholder="e.g. http://192.168.1.50:7860">
+            <button type="button" class="btn btn-secondary list-add-btn" data-list-path="${p}" style="white-space: nowrap;">+ Add</button>
+          </div>
         </div>
       `;
     } else {
       // Default: text
       return `
-        <input type="text" class="cyber-input" data-path="${p}" value="${value !== undefined ? value : ''}" placeholder="${item.default || ''}">
+        <input type="text" class="cyber-input" data-path="${p}" value="${escapeAttr(value !== undefined ? value : '')}" placeholder="${escapeAttr(item.default || '')}">
       `;
     }
+  }
+
+  function escapeAttr(val) {
+    return String(val)
+      .replace(/&/g, "&amp;")
+      .replace(/"/g, "&quot;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
   }
 
   // --- Attach Control Listeners ---
@@ -253,6 +282,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // Number & Text inputs
     settingsContent.querySelectorAll('input.cyber-input').forEach(input => {
       if (input.type === "range" || input.type === "checkbox") return;
+      if (input.closest(".list-editor")) return;
       input.addEventListener("input", (e) => {
         const path = e.target.getAttribute("data-path");
         let val = e.target.value;
@@ -262,6 +292,65 @@ document.addEventListener("DOMContentLoaded", () => {
         setValueByPath(draftConfig, path, val);
         onDraftModified(path);
       });
+    });
+
+    // List editors (e.g. security.allowed_origins)
+    settingsContent.querySelectorAll(".list-editor").forEach(editor => {
+      const path = editor.getAttribute("data-path");
+
+      editor.querySelectorAll(".list-item-input").forEach(itemInput => {
+        itemInput.addEventListener("input", (e) => {
+          const idx = parseInt(e.target.getAttribute("data-index"), 10);
+          const currentList = Array.isArray(getValueByPath(draftConfig, path))
+            ? [...getValueByPath(draftConfig, path)]
+            : [];
+          currentList[idx] = e.target.value;
+          setValueByPath(draftConfig, path, currentList);
+          onDraftModified(path);
+        });
+      });
+
+      editor.querySelectorAll(".list-remove-btn").forEach(removeBtn => {
+        removeBtn.addEventListener("click", (e) => {
+          const idx = parseInt(e.currentTarget.getAttribute("data-index"), 10);
+          const currentList = Array.isArray(getValueByPath(draftConfig, path))
+            ? [...getValueByPath(draftConfig, path)]
+            : [];
+          currentList.splice(idx, 1);
+          setValueByPath(draftConfig, path, currentList);
+          onDraftModified(path);
+          renderContent();
+        });
+      });
+
+      const addInput = editor.querySelector(".list-add-input");
+      const addBtn = editor.querySelector(".list-add-btn");
+      const addOriginItem = () => {
+        if (!addInput) return;
+        const newVal = addInput.value.trim();
+        if (!newVal) return;
+        const currentList = Array.isArray(getValueByPath(draftConfig, path))
+          ? [...getValueByPath(draftConfig, path)]
+          : [];
+        if (!currentList.includes(newVal)) {
+          currentList.push(newVal);
+        }
+        setValueByPath(draftConfig, path, currentList);
+        onDraftModified(path);
+        renderContent();
+      };
+
+      if (addBtn) {
+        addBtn.addEventListener("click", addOriginItem);
+      }
+      if (addInput) {
+        addInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            addOriginItem();
+          }
+        });
+      }
     });
 
     // Secret visibility toggles
@@ -608,7 +697,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }).then(r => r.json());
 
       if (res.success) {
-        savedConfig = JSON.parse(JSON.stringify(draftConfig));
+        savedConfig = JSON.parse(JSON.stringify(res.config || draftConfig));
+        draftConfig = JSON.parse(JSON.stringify(savedConfig));
         unsavedBanner.style.display = "none";
         renderContent();
 

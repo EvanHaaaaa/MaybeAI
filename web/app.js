@@ -88,7 +88,17 @@ document.addEventListener("DOMContentLoaded", () => {
       reconnectTimer = null;
     }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlToken = urlParams.get("token");
+    let storedToken = null;
+    try {
+      storedToken = localStorage.getItem("maybeai_creator_token") || localStorage.maybeai_creator_token || null;
+    } catch (e) {}
+    const creatorToken = urlToken || storedToken;
+    let wsUrl = `${protocol}//${window.location.host}/ws`;
+    if (creatorToken) {
+      wsUrl += `?token=${encodeURIComponent(creatorToken)}`;
+    }
     ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

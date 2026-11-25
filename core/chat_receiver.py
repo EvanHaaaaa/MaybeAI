@@ -23,7 +23,7 @@ class ChatMessage:
         if is_creator is not None:
             self.is_creator = bool(is_creator)
         else:
-            self.is_creator = (source in ("creator", "mic") or user.lower() in ("creator", "admin", "evanh"))
+            self.is_creator = source in ("creator", "mic")
 
 class ChatReceiver:
     """

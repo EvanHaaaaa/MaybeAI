@@ -1,6 +1,6 @@
 import unittest
 import os
-import shutil
+import tempfile
 from pathlib import Path
 from core.planning.models import Goal, Subtask, GoalTier, GoalStatus, GoalCategory
 from core.planning.decomposer import GoalDecomposer
@@ -80,14 +80,12 @@ class TestStrategyReplanner(unittest.TestCase):
 
 class TestGoalEngine(unittest.TestCase):
     def setUp(self):
-        self.test_dir = "data/test_goals"
-        if os.path.exists(self.test_dir):
-            shutil.rmtree(self.test_dir)
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.test_dir = self._temp_dir_obj.name
         self.engine = GoalEngine(storage_dir=self.test_dir)
 
     def tearDown(self):
-        if os.path.exists(self.test_dir):
-            shutil.rmtree(self.test_dir)
+        self._temp_dir_obj.cleanup()
 
     def test_seeded_canonical_goals(self):
         goals = self.engine.get_all_goals()

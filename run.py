@@ -1,14 +1,16 @@
 import os
 import sys
 import json
+import secrets
 import asyncio
 import argparse
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from urllib.parse import urlparse
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 import uvicorn
 
 from contextlib import asynccontextmanager
@@ -31,6 +33,83 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="MaybeAI - Eve Maybe AI VTuber", lifespan=lifespan)
+
+_LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost", "::ffff:127.0.0.1")
+
+
+def _get_security_settings() -> Dict[str, Any]:
+    sec = config_mgr.settings.get("security", {})
+    return sec if isinstance(sec, dict) else {}
+
+
+def _is_allowed_origin(origin: str) -> bool:
+    if not isinstance(origin, str):
+        return False
+    raw_origin = origin.strip()
+    if not raw_origin or raw_origin.lower() == "null":
+        return False
+
+    try:
+        parsed = urlparse(raw_origin)
+        _ = parsed.port
+    except ValueError:
+        return False
+
+    if (
+        parsed.scheme in ("http", "https")
+        and parsed.hostname in ("127.0.0.1", "localhost", "::1")
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in ("", "/")
+        and not parsed.params
+        and not parsed.query
+        and not parsed.fragment
+    ):
+        return True
+
+    allowed_origins = _get_security_settings().get("allowed_origins", [])
+    if isinstance(allowed_origins, list):
+        normalized_origin = raw_origin.rstrip("/").lower()
+        for entry in allowed_origins:
+            if isinstance(entry, str) and entry.strip():
+                if normalized_origin == entry.strip().rstrip("/").lower():
+                    return True
+    return False
+
+
+def _get_configured_creator_token() -> str:
+    env_token = os.getenv("MAYBEAI_CREATOR_TOKEN")
+    if env_token:
+        return env_token
+    cfg_token = _get_security_settings().get("creator_token")
+    if isinstance(cfg_token, str) and cfg_token and cfg_token != "********":
+        return cfg_token
+    return ""
+
+
+def _is_ws_creator_authorized(websocket: WebSocket) -> bool:
+    client_host = websocket.client.host if websocket.client else None
+    if client_host not in _LOOPBACK_HOSTS:
+        return False
+    configured_token = _get_configured_creator_token()
+    if not configured_token:
+        return True
+    provided_token = websocket.query_params.get("token", "")
+    if not provided_token:
+        return False
+    return secrets.compare_digest(
+        provided_token.encode("utf-8"),
+        configured_token.encode("utf-8"),
+    )
+
+
+@app.middleware("http")
+async def verify_api_origin_middleware(request: Request, call_next):
+    if request.url.path.startswith("/api/") and request.method in ("PUT", "POST", "PATCH", "DELETE"):
+        origin = request.headers.get("origin")
+        if origin is not None and not _is_allowed_origin(origin):
+            return JSONResponse(status_code=403, content={"detail": "Forbidden origin"})
+    return await call_next(request)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="web"), name="static")
@@ -299,6 +378,13 @@ async def reset_personality():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    origin = websocket.headers.get("origin")
+    if origin is not None and not _is_allowed_origin(origin):
+        await websocket.close(code=1008)
+        return
+
+    ws_creator_authorized = _is_ws_creator_authorized(websocket)
+
     await websocket.accept()
 
     async def listener(event: dict):
@@ -413,8 +499,13 @@ async def websocket_endpoint(websocket: WebSocket):
             if data.get("type") == "user_message":
                 user = data.get("user", "User")
                 text = data.get("text", "")
-                source = data.get("source", "web")
-                is_creator = data.get("is_creator", None)
+                raw_source = str(data.get("source") or "web")
+                if ws_creator_authorized:
+                    source = raw_source
+                    is_creator = data.get("is_creator", None)
+                else:
+                    source = "web" if raw_source.lower() in ("creator", "mic") else raw_source
+                    is_creator = False
                 await orchestrator.chat.put_message(user=user, text=text, source=source, is_creator=is_creator)
             elif data.get("type") == "donation":
                 user = data.get("user", "Supporter")
@@ -427,12 +518,18 @@ async def websocket_endpoint(websocket: WebSocket):
                     source="web",
                     is_donation=True,
                     donation_amount=amount,
-                    donation_currency=currency
+                    donation_currency=currency,
+                    is_creator=False
                 )
             elif data.get("type") == "bulk_chat":
                 msgs = data.get("messages", [])
                 for m in msgs:
-                    await orchestrator.chat.put_message(user=m.get("user", "Chatter"), text=m.get("text", ""), source="web")
+                    await orchestrator.chat.put_message(
+                        user=m.get("user", "Chatter"),
+                        text=m.get("text", ""),
+                        source="web",
+                        is_creator=False
+                    )
             elif data.get("type") == "set_llm_provider":
                 prov = data.get("provider", "mock")
                 active_prov = orchestrator.brain.set_provider(prov)
@@ -835,7 +932,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 elif act == "chat_input":
                     user = data.get("user", "Chatter")
                     text = data.get("message", "")
-                    await orchestrator.chat.put_message(user=user, text=text, source="web")
+                    await orchestrator.chat.put_message(user=user, text=text, source="web", is_creator=False)
             elif data.get("type") == "story_action":
                 act = data.get("action")
                 engine = orchestrator.brain.storytelling

@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python 3.12" />
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688.svg" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Tests-175%20Passed%20(100%25)-success.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-208%20Passed%20(100%25)-success.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/UI-Cyberpunk%20Futuristic-8b5cf6.svg" alt="UI" />
   <img src="https://img.shields.io/badge/Live2D-VTube%20Studio%20API-ff69b4.svg" alt="VTS" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
@@ -46,6 +46,7 @@
 - [Struktur Direktori Proyek](#-struktur-direktori-proyek)
 - [Panduan Instalasi & Menjalankan](#-panduan-instalasi--menjalankan)
 - [Panduan Configuration Center (/settings)](#-panduan-configuration-center-settings)
+- [Keamanan & Konfigurasi (Security & Config)](#-keamanan--konfigurasi-security--config)
 - [Daftar Perintah Chat & Streamer (Commands)](#-daftar-perintah-chat--streamer-commands)
 - [REST API & WebSocket Protocol](#-rest-api--websocket-protocol)
 - [Panduan Integrasi OBS Studio](#-panduan-integrasi-obs-studio)
@@ -109,9 +110,9 @@ flowchart TD
 ## 🚀 Katalog Fitur Komprehensif
 
 ### 1. Autonomous Brain & Multi-Provider LLM
-- **Multi-Provider Architecture:** Mendukung **Google Gemini** (Gemini 1.5 Flash), **OpenAI** (GPT-4o / GPT-4o-mini), **Local Ollama** (Llama 3.2 / Mistral / DeepSeek), serta **Mock Mode** bawaan (bisa langsung dijalankan tanpa internet dan tanpa API key).
-- **Fallback Otomatis:** Jika API provider utama kehabisan kuota atau mengalami timeout, sistem otomatis beralih ke provider cadangan (fallback) tanpa memutus siaran.
-- **Dynamic Emotion Tags:** Brain secara cerdas membubuhkan tag ekspresi (seperti `[happy]`, `[smug]`, `[angry]`, `[blush]`, `[surprised]`, `[thinking]`) di awal respons untuk menggerakkan ekspresi wajah avatar secara presisi.
+- **Multi-Provider Architecture:** Mendukung **Google Gemini** (default: `gemini-3-flash-preview` via `config/settings.json`, otomatis *fallback* ke Mock Mode jika `GEMINI_API_KEY` belum diisi), **OpenAI** (GPT-4o / GPT-4o-mini), **Local Ollama** (Llama 3.2 / Mistral / DeepSeek), serta **Mock Mode** bawaan (bisa langsung dijalankan tanpa internet dan tanpa API key). Provider dapat di-override via `MAYBEAI_LLM_PROVIDER` atau flag `--provider`.
+- **Fallback Otomatis:** Jika API provider utama tidak memiliki API key, kehabisan kuota, atau mengalami timeout, sistem otomatis beralih ke respons persona cadangan (`mock`) tanpa memutus siaran.
+- **Dynamic Emotion & Action Tags:** Brain secara cerdas membubuhkan tag ekspresi (seperti `[emotion: neutral]`, `[emotion: happy]`, `[emotion: smug]`, `[emotion: angry]`, `[emotion: blush]`, `[emotion: surprised]`, `[emotion: confused]`) dan tag aksi (`[action: giggle]`, `[action: sigh]`, `[action: wink]`) yang diparsing oleh `ActionParser` (`core/actions.py`) untuk menggerakkan ekspresi avatar secara presisi.
 - **Token & Temperature Hot-Reload:** Parameter kreativitas (*temperature*) dan panjang respons (*max_tokens*) dapat diubah langsung dari Configuration Center tanpa me-restart aplikasi.
 
 ### 2. Edge-TTS & Dynamic Lip-Sync
@@ -126,8 +127,8 @@ flowchart TD
 
 ### 4. Centralized Cyberpunk Configuration Center
 - **Dedicated GUI URL:** Halaman khusus di `http://localhost:7860/settings` dengan tema estetika Cyberpunk / Futuristic AI (aksen neon, glow cards, toggle switch, slider nilai interaktif).
-- **13 Kategori Pengaturan Lengkap:** Meliputi General, Brain, Personality, Memory, Mood, Voice/TTS, Avatar/VTS, Karaoke, Twitch, Moderation, Minecraft, Autonomous Agent, dan Performance.
-- **Secret Protection:** Token OAuth Twitch dan API Key **tidak pernah diekspos dalam bentuk plaintext** via HTTP GET (`"********"` masking) dan tidak akan terhapus jika form disimpan tanpa mengubah token.
+- **15 Kategori Pengaturan Lengkap:** Meliputi General, Brain, Personality, Memory, Mood, Voice/TTS, Speech-to-Text (`stt`), Avatar/VTS, Karaoke, Twitch, Moderation, Security (`security`), Minecraft, Autonomous Agent, dan Performance.
+- **Secret Protection:** Token OAuth Twitch (`twitch.oauth_token`), Creator Access Token (`security.creator_token`), dan API Key **tidak pernah diekspos dalam bentuk plaintext** via HTTP GET (`"********"` masking) dan tidak akan terhapus jika form disimpan tanpa mengubah token.
 - **Atomic Persistence:** Menggunakan mekanisme *temp-write* (`.settings.json.tmp`) dan atomic `os.replace()` untuk mencegah korupsi file saat listrik mati atau crash.
 - **Live Hot-Reload:** Perubahan diterapkan seketika ke seluruh modul aktif di runtime tanpa perlu restart server.
 - **Interactive Diagnostic Test Runners:** Tombol uji live probe untuk LLM, TTS, VTS, Twitch, Moderator, dan Memory langsung dari browser.
@@ -218,13 +219,17 @@ flowchart TD
 
 ```
 MaybeAI/
+├── assets/
+│   └── songs/
+│       └── digital_world_bgm.wav  # Instrumen BGM karaoke
 ├── config/
-│   ├── settings.json              # Konfigurasi master (General, LLM, TTS, Minecraft, dll)
+│   ├── settings.json              # Konfigurasi master (General, LLM, TTS, STT, Security, dll)
 │   ├── character.json             # Persona, latar belakang, lore, & gaya bicara Eve
 │   ├── filter_words.json          # Blacklist kata & aturan moderasi regex
 │   ├── songs.json                 # Katalog lagu karaoke, lirik, & delay timing
 │   └── minecraft_servers.json     # Daftar server Minecraft tersimpan
 ├── core/
+│   ├── actions.py                 # Parser tag [emotion: x] dan [action: x]
 │   ├── brain.py                   # Otak LLM (Gemini, OpenAI, Ollama, Mock)
 │   ├── tts.py                     # Edge-TTS Engine & Simulasi Lip-Sync
 │   ├── vts_client.py              # Client WebSocket VTube Studio API
@@ -256,6 +261,15 @@ MaybeAI/
 │   ├── personality/evolution.json # Data level, EXP, & sifat kepribadian
 │   ├── relationships/             # JSON data relasi user
 │   └── second_brain/              # Direktori catatan Markdown otomatis (Dossier, Setlist, dll)
+├── minecraft/
+│   ├── bot.js                     # Entrypoint bot Mineflayer
+│   ├── casual.js                  # Modul perilaku casual & sosial Minecraft
+│   ├── guard.js                   # Modul bodyguard & proteksi player
+│   ├── speedrun.js                # State machine speedrun 10 fase
+│   ├── config.json                # Konfigurasi koneksi bot Mineflayer
+│   ├── package.json               # Dependensi Node.js Mineflayer
+│   ├── node/                      # Runtime Node.js portabel (Windows)
+│   └── node_modules/              # Paket Node.js terbundel
 ├── web/
 │   ├── index.html                 # Dashboard Web utama & 2D Canvas Avatar
 │   ├── style.css                  # Styling Cyberpunk dashboard & HUD
@@ -263,10 +277,16 @@ MaybeAI/
 │   ├── settings.html              # Antarmuka Cyberpunk Configuration Center
 │   ├── settings.css               # Styling khusus Configuration Center
 │   └── settings.js                # Form engine, secret protection, & test runner
-├── tests/                         # Suite pengujian unit & integrasi lengkap (175 tests)
+├── tests/
+│   ├── __init__.py                # Menetapkan MAYBEAI_LLM_PROVIDER=mock saat test berjalan
+│   ├── test_guard_runner.js       # Uji unit guard mode Minecraft (Node.js)
+│   └── test_*.py                  # 20 modul pengujian unit & integrasi Python (208 tests)
 ├── run.py                         # FastAPI Web Server & Application Launcher
 ├── requirements.txt               # Daftar dependensi Python
-└── .env                           # Konfigurasi kunci rahasia (API Keys)
+├── LICENSE                        # Lisensi MIT (EvanH 2026)
+├── push.bat                       # Skrip utilitas push Git (Windows)
+├── .env.example                   # Template variabel lingkungan (.env)
+└── .env                           # Konfigurasi kunci rahasia lokal (tidak di-commit)
 ```
 
 ---
@@ -294,14 +314,20 @@ pip install -r requirements.txt
 ```
 
 ### 3. Konfigurasi File Lingkungan (`.env`)
-Salin file template atau buat file `.env` di folder root:
+Salin `.env.example` menjadi `.env` di folder root lalu isi sesuai kebutuhan:
 
 ```env
-# Google Gemini (Paling direkomendasikan & gratis)
+# Override provider LLM (opsional: gemini | openai | ollama | mock)
+MAYBEAI_LLM_PROVIDER=
+
+# Google Gemini (Default provider di settings.json: gemini-3-flash-preview)
 GEMINI_API_KEY=AIzaSy...
 
 # OpenAI (Opsional)
 OPENAI_API_KEY=sk-...
+
+# Security & Creator Access (Opsional)
+MAYBEAI_CREATOR_TOKEN=
 
 # Twitch IRC (Opsional jika ingin membaca chat Twitch)
 TWITCH_OAUTH_TOKEN=oauth:...
@@ -311,9 +337,14 @@ TWITCH_BOT_NICK=EveMaybe
 
 ### 4. Menjalankan Aplikasi
 
-#### A. Mode Bawaan (Default Mock Mode — Siap Pakai Tanpa API Key)
+#### A. Mode Bawaan (Default `gemini` dengan Fallback Otomatis ke Mock Mode)
+Secara default, `config/settings.json` menggunakan provider `gemini` (`gemini-3-flash-preview`). Jika `GEMINI_API_KEY` belum diatur, sistem otomatis *fallback* ke Mock Mode tanpa API key:
 ```powershell
 .\.venv\Scripts\python.exe run.py
+```
+Untuk memaksa mode Mock murni secara eksplisit:
+```powershell
+.\.venv\Scripts\python.exe run.py --provider mock
 ```
 Akses di browser Anda: 👉 **`http://localhost:7860`**
 
@@ -342,82 +373,136 @@ Akses halaman kontrol konfigurasi di: 👉 **`http://localhost:7860/settings`**
 *(Atau klik tombol **⚙️ Configuration Center** di bagian atas Web Dashboard utama).*
 
 ### Fitur Utama Configuration Center:
-1. **Navigasi Sidebar Responsif:** 13 kategori pengaturan dengan ikon khas cyberpunk.
-2. **Pencarian Real-Time (*Search Box*):** Menemukan pengaturan apapun hanya dengan mengetikkan kata kunci (contoh: *temperature*, *volume*, *minecraft*, *token*).
-3. **Perlindungan Token & Masking:** Secret sensitif seperti `twitch.oauth_token` disamarkan menjadi `********`.
-4. **Live Slider & Toggle:** Setiap slider menampilkan nilai numerik secara *real-time*.
+1. **Navigasi Sidebar Responsif:** 15 kategori pengaturan (termasuk `stt` dan `security`) plus tampilan *System Diagnostics* dengan ikon khas cyberpunk.
+2. **Pencarian Real-Time (*Search Box*):** Menemukan pengaturan apapun hanya dengan mengetikkan kata kunci (contoh: *temperature*, *volume*, *minecraft*, *token*, *stt*).
+3. **Perlindungan Token & Masking:** Secret sensitif seperti `twitch.oauth_token` dan `security.creator_token` disamarkan menjadi `********` dan dipertahankan saat penyimpanan atomik bila tidak diubah.
+4. **Live Slider & Toggle:** Setiap slider menampilkan nilai numerik secara *real-time*, ditambah editor list interaktif untuk `security.allowed_origins`.
 5. **Indikator Unsaved Changes:** Memunculkan banner konfirmasi di bawah layar saat terdapat perubahan yang belum disimpan.
 6. **Shortcut Keyboard:** Tekan **`Ctrl + S`** di halaman settings untuk menyimpan secara instan.
-7. **Penyimpanan Atomik & Hot-Reload:** Perubahan pada LLM, TTS, VTS, Moderator, dan Karaoke langsung diterapkan seketika tanpa perlu restart proses.
+7. **Penyimpanan Atomik & Hot-Reload:** Perubahan pada LLM, TTS, VTS, Moderator, Karaoke, STT, dan Security langsung diterapkan seketika tanpa perlu restart proses.
 8. **Interactive Feature Test Runner:** Tekan tombol **Run Test / Probe** di tiap kategori untuk menguji fungsionalitas modul secara langsung.
+
+---
+
+## 🔐 Keamanan & Konfigurasi (Security & Config)
+
+MaybeAI menerapkan kontrol akses ketat untuk melindungi endpoint kontrol dan eksekusi lokal:
+
+- **Validasi Origin (`Origin` Check):**
+  - Seluruh endpoint mutasi `/api/*` (`PUT`, `POST`, `PATCH`, `DELETE`) dan koneksi WebSocket `/ws` memeriksa header `Origin` jika disertakan oleh browser/klien.
+  - Secara default hanya origin localhost (`http://127.0.0.1:<port>`, `http://localhost:<port>`, `http://[::1]:<port>`, atau `https://`) serta entri yang didaftarkan di `security.allowed_origins` (`config/settings.json` / `/settings`) yang diizinkan.
+  - Origin asing ditolak dengan **HTTP `403`** pada `/api/*` dan penutupan WebSocket kode **`1008`** pada `/ws`.
+- **Otentikasi Creator Token (`?token=` & `MAYBEAI_CREATOR_TOKEN`):**
+  - Klien WebSocket tidak lagi dipercaya berdasarkan `is_creator` dari payload JSON atau nama user.
+  - Hak Creator hanya diberikan jika koneksi berasal dari alamat loopback (`127.0.0.1`, `::1`, `localhost`, `::ffff:127.0.0.1`).
+  - Jika token dikonfigurasi melalui environment variable `MAYBEAI_CREATOR_TOKEN` (prioritas utama) atau `security.creator_token` di `config/settings.json`, klien wajib menyertakan `?token=<token>` saat membuka `/ws` (diverifikasi menggunakan `secrets.compare_digest`). Tanpa token yang valid, `is_creator` dipaksa `False` dan source `"creator"`/`"mic"` diturunkan menjadi `"web"`.
+  - Di Web Dashboard (`web/app.js`), token dibaca otomatis dari parameter URL `?token=` atau `localStorage.maybeai_creator_token` lalu dilampirkan ke URL WebSocket `/ws`.
+  - Jika tidak ada token yang dikonfigurasi, klien loopback tetap mendapatkan akses Creator secara default agar dashboard lokal langsung berfungsi.
+- **Override Provider LLM (`MAYBEAI_LLM_PROVIDER`):**
+  - Menetapkan `MAYBEAI_LLM_PROVIDER` (misal `mock`, `gemini`, `openai`, `ollama`) akan menimpa `llm.provider` dari `config/settings.json` secara langsung (sangat berguna untuk pengujian otomatis maupun isolasi offline).
+- **Kategori Baru di `/settings` (`stt` & `security`):**
+  - **`stt` (Speech-to-Text):** Mengatur `stt.enabled`, `stt.model` (`tiny`, `base`, `small`, `medium`, `large`), dan `stt.device` (`cpu`, `cuda`).
+  - **`security` (Security & Access):** Mengatur `security.creator_token` (disamarkan sebagai `********`) dan daftar `security.allowed_origins`.
+- **Eksekusi Desktop Companion Aman:** `DesktopController` meluncurkan aplikasi hanya dari *allow-list* terverifikasi tanpa `shell=True` dan menolak input yang mengandung metakarakter shell.
 
 ---
 
 ## 🎮 Daftar Perintah Chat & Streamer (Commands)
 
-Anda dapat mengetik perintah ini di **Interactive Web Chat** atau di **Twitch Live Chat**:
+Anda dapat mengetik perintah ini di **Interactive Web Chat** atau di **Twitch Live Chat** (aksi UI lanjutan untuk Mini-Games, Story RPG, dan Performance Director juga tersedia langsung melalui panel dashboard / REST API / WebSocket):
 
 | Kategori | Perintah / Contoh Chat | Deskripsi Aksi |
 |---|---|---|
-| **Karaoke** | `!sing digital_world` | Meminta Eve menyanyikan lagu "Digital World" lengkap dengan BGM. |
+| **Karaoke & Panggung** | `!sing` / `!sing digital_world` | Meminta Eve menyanyikan lagu (opsional dengan `song_id`, misal `digital_world`) lengkap dengan BGM. |
 | | *"Eve coba nyanyi dong"* | Perintah natural untuk memicu penampilan karaoke. |
-| | `!sing stop` | Menghentikan nyanyian yang sedang berlangsung. |
-| **Performance** | `!stage intro` | Meminta Eve membawakan monolog pembuka panggung konser. |
-| | `!stage setlist` | Melihat jadwal daftar lagu yang akan dibawakan. |
-| **Minecraft** | `!mc mode santai` | Mengubah mode Minecraft ke mode sosial interaktif. |
-| | `!mc mode kompe` | Memulai speedrun Minecraft dari fase 1. |
-| | `!mc next` | Memajukan fase speedrun ke milestone berikutnya. |
-| | `!mc status` | Melihat status HP, posisi, dan fase Minecraft saat ini. |
-| **Mini-Games** | `!game start trivia` | Memulai kuis Trivia bersama penonton. |
-| | `!game start number` | Memulai permainan tebak angka rahasia. |
-| | `!game start riddle` | Memulai teka-teki asah otak. |
-| | `!game answer <jawaban>` | Menjawab permainan aktif (bisa langsung diketik di chat). |
-| | `!game leaderboard` | Menampilkan pemain dengan skor dan streak tertinggi. |
-| **Story RPG** | `!story start` | Memulai petualangan cerita RPG interaktif baru. |
-| | `!story vote <1/2/3>` | Melakukan voting pilihan aksi cerita komunitas. |
-| | `!story roll` | Melakukan lemparan dadu D20 penentu nasib aksi. |
-| | `!story status` | Melihat status party, inventaris, dan babak cerita saat ini. |
-| **Catur** | `!chess new 1200` | Memulai permainan catur baru dengan target ELO 1200. |
-| | `!chess move e2e4` | Mengirim langkah catur dalam format UCI/SAN. |
-| | `!chess eval` | Meminta Eve mengevaluasi posisi papan catur. |
-| **Desktop** | `!desktop play` / `!desktop pause` | Mengontrol media player komputer. |
-| | `!desktop volume 50` | Mengatur volume audio sistem ke 50%. |
-| | `!desktop app notepad` | Meminta izin meluncurkan aplikasi Notepad. |
-| **Sistem** | `!help` | Menampilkan bantuan perintah. |
-| | `!status` | Menampilkan status koneksi sistem Eve. |
+| | `!glowstick`, `!cheer`, `!clap`, `!encore` | Memberikan sorakan audiens / glowstick / permintaan encore selama penampilan berlangsung. |
+| **Improv & Interaksi** | `!improv` | Memicu monolog spontan atau komentar *shower thought* Eve ke chat. |
+| | `!roleplay <peran>` / `!roleplay stop` | Mengaktifkan atau menghentikan mode roleplay karakter tertentu. |
+| | `!opinion` / `!hottake <topik>` | Meminta opini tegas atau *hot take* khas Eve. |
+| | `!roast` | Meminta Eve me-roast pengirim pesan secara bercanda. |
+| | `!story [tema]` | Memicu respons cerita/dongeng personal dan menyimpan catatan cerita ke memori episodik. |
+| **Minecraft** | `!mc mode santai` *(Creator-only)* | Mengubah mode Minecraft ke mode sosial interaktif. |
+| | `!mc mode kompe` *(Creator-only)* | Memulai speedrun Minecraft dari fase 1. |
+| | `!mc next` *(Creator-only)* | Memajukan fase speedrun ke milestone berikutnya. |
+| | `!mc guard <player>` | Meminta Eve menjaga/mengawal pemain tertentu. |
+| | `!mc follow` / `!mc stop` / `!mc jump` / `!mc crouch` / `!mc dance` / `!mc gift` | Mengontrol aksi bot Minecraft di server. |
+| **Catur** | `!chess new [white\|black]` / `!catur new` *(Creator-only)* | Memulai permainan catur baru melawan Eve. |
+| | `!chess elo <800-2000>` / `!catur elo <angka>` *(Creator-only)* | Mengatur level ELO engine catur Eve. |
+| | `!chess move <langkah>` / `!catur move <langkah>` | Mengirim langkah catur dalam format UCI/SAN (contoh: `e2e4`). |
+| | `!chess resign` / `!catur resign` *(Creator-only)* | Mengakhiri/menyerah pada permainan catur aktif. |
+| **Mini-Games** | `!A` / `!B` | Memilih opsi saat ronde *Would You Rather* aktif (untuk game lain seperti Trivia, Riddle, Tebak Angka, Asosiasi Kata, dan Tebak Lagu, cukup ketik jawaban langsung di chat; start/stop via UI atau REST API). |
+| **Story RPG** | `!1`, `!2`, `!3` | Melakukan voting pilihan jalur cerita saat kampanye RPG aktif (dimulai via UI atau REST API). |
+| | `!action <tindakan>` / `!aksi <tindakan>` | Mengajukan aksi *freeform* komunitas dalam cerita RPG aktif. |
+| | `!roll` / `!d20` / `!dadu` | Melakukan lempar dadu D20 saat sesi RPG aktif. |
+| **Desktop** *(Creator-only)* | `!desktop` | Menampilkan status Desktop Companion dan volume saat ini. |
+| | `!desktop volume <0-100>` / `up` / `down` / `mute` | Mengatur volume audio atau mute sistem. |
+| | `!desktop play` / `!desktop pause` / `!desktop next` | Mengontrol media player komputer. |
+| | `!desktop app <nama>` | Meminta izin meluncurkan aplikasi yang ada di allow-list (misal `notepad.exe`). |
+| | `!desktop notif` | Membaca ringkasan notifikasi desktop sesuai kebijakan izin. |
 
 ---
 
 ## 🌐 REST API & WebSocket Protocol
 
-Aplikasi menyediakan REST API dan WebSocket server terpadu:
+Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
 
 ### REST Endpoints
-- `GET /`: Halaman utama Web Dashboard & Virtual Avatar.
-- `GET /settings`: Halaman Cyberpunk Configuration Center.
-- `GET /api/config`: Mengambil data konfigurasi publik (tersanitasi/masked).
-- `GET /api/config/schema`: Metadata skema konfigurasi (tipe, range, label).
-- `PUT /api/config`: Menyimpan konfigurasi secara atomik dan mengeksekusi hot-reload.
-- `POST /api/config/validate`: Memvalidasi payload konfigurasi.
-- `POST /api/config/reset`: Mereset pengaturan ke default.
-- `POST /api/config/test/{feature}`: Menjalankan probe diagnostik fitur (`llm`, `tts`, `vts`, `twitch`, `moderator`, `memory`).
-- `GET /api/system/diagnostics`: Mengambil laporan diagnostik kesehatan seluruh subsistem.
-- `GET /api/status`: Informasi status umum orchestrator.
+- **Web UI:**
+  - `GET /`: Halaman utama Web Dashboard & Virtual Avatar.
+  - `GET /settings`: Halaman Cyberpunk Configuration Center.
+- **Configuration & Diagnostics:**
+  - `GET /api/config`: Mengambil data konfigurasi publik (secret dimasking sebagai `********`).
+  - `GET /api/config/schema`: Metadata skema konfigurasi (tipe, range, label).
+  - `PUT /api/config`: Menyimpan konfigurasi secara atomik dan mengeksekusi hot-reload.
+  - `POST /api/config/validate`: Memvalidasi payload konfigurasi.
+  - `POST /api/config/reset`: Mereset pengaturan ke default.
+  - `POST /api/config/test/{feature}`: Menjalankan probe diagnostik fitur (`llm`, `tts`, `vts`, `twitch`, `moderator`, `memory`).
+  - `GET /api/system/diagnostics`: Mengambil laporan diagnostik kesehatan seluruh subsistem.
+  - `GET /api/status`: Informasi status umum orchestrator.
+- **Memory, Mood, Goals, & Relationships:**
+  - `GET /api/memory/stats`: Statistik memori episodik & Second Brain.
+  - `GET /api/memory/search`: Pencarian memori episodik (`q`, `user`, `limit`).
+  - `GET /api/memory/journal`: Mengambil konten jurnal Markdown terbaru.
+  - `GET /api/memory/recent`: Mengambil daftar memori episodik terbaru (`limit`).
+  - `GET /api/mood`: Status dimensi mood Eve saat ini.
+  - `GET /api/goals`: Status misi & subtask autonomous goal planning.
+  - `GET /api/goals/agenda`: Konten Markdown `data/goals/agenda.md`.
+  - `GET /api/relationships`: Status seluruh relasi penonton.
+  - `GET /api/relationships/{username}`: Profil relasi untuk penonton tertentu.
+- **Vision, Minecraft, & Desktop:**
+  - `GET /api/vision/state`: Status modul visual perception.
+  - `POST /api/vision/perceive`: Memicu pemindaian layar on-demand (`simulated_scene` opsional).
+  - `GET /api/minecraft/multiplayer`: Status social intelligence multiplayer Minecraft.
+  - `GET /api/desktop/state`: Status Desktop Companion & antrean izin.
+- **Mini-Games, Storytelling RPG, Performance, & Personality:**
+  - `GET /api/minigames/state`: Status mini-game aktif & leaderboard.
+  - `POST /api/minigames/start`: Memulai sesi mini-game (`game_type`, `total_rounds`).
+  - `POST /api/minigames/stop`: Menghentikan sesi mini-game aktif.
+  - `GET /api/storytelling/state`: Status kampanye Storytelling RPG.
+  - `POST /api/storytelling/start`: Memulai kampanye cerita RPG (`preset`, `genre`, `eve_role`, dll).
+  - `POST /api/storytelling/advance`: Melanjutkan adegan cerita berdasarkan pilihan/narasi.
+  - `POST /api/storytelling/roll`: Melempar dadu D20 pada sesi RPG aktif.
+  - `GET /api/performance/state`: Status Performance Director & setlist.
+  - `POST /api/performance/plan`: Menyusun setlist konser.
+  - `POST /api/performance/start`: Memulai penampilan lagu (`song_id`, `dedication_user`).
+  - `POST /api/performance/cheer`: Mencatat sorakan/glowstick audiens.
+  - `GET /api/personality/state`: Status evolusi kepribadian, level, & EXP Eve.
+  - `POST /api/personality/experience`: Mencatat event pengalaman kepribadian.
+  - `POST /api/personality/reset`: Mereset profil evolusi kepribadian ke default.
 
 ### WebSocket Events (`/ws`)
 - **Client $\rightarrow$ Server:**
-  - `{"type": "chat", "user": "Admin", "text": "Halo Eve!"}`
-  - `{"type": "config_action", "action": "save", "config": {...}}`
-  - `{"type": "config_action", "action": "test", "feature": "tts"}`
-  - `{"type": "config_action", "action": "get_diagnostics"}`
+  - `user_message`: `{"type": "user_message", "user": "Admin", "text": "Halo Eve!", "source": "web"}`
+  - `donation`: `{"type": "donation", "user": "Supporter", "text": "...", "amount": "$5.00", "currency": "USD"}`
+  - `bulk_chat`: `{"type": "bulk_chat", "messages": [{"user": "...", "text": "..."}]}`
+  - `set_llm_provider` / `trigger_improv`: Pengaturan cepat LLM provider atau pemicu improv spontan.
+  - `*_action`: Event aksi subsistem (`minecraft_action`, `chess_action`, `memory_action`, `mood_action`, `goal_action`, `relationship_action`, `vision_action`, `multiplayer_action`, `desktop_action`, `minigame_action`, `story_action`, `performance_action`, `personality_action`, `config_action`).
 - **Server $\rightarrow$ Client:**
-  - `{"type": "speech", "data": {"text": "Halo!", "audio_url": "...", "emotion": "happy"}}`
-  - `{"type": "mouth", "value": 0.85}`
-  - `{"type": "emotion", "name": "smug"}`
-  - `{"type": "mood_updated", "data": {...}}`
-  - `{"type": "personality_updated", "data": {...}}`
-  - `{"type": "system_diagnostics", "data": {...}}`
-  - `{"type": "configuration_updated", "data": {...}}`
+  - `ai_response`: `{"type": "ai_response", "data": {"user": "Eve", "raw": "...", "speech": "...", "emotions": ["happy"], "actions": ["wink"]}}`
+  - `avatar_state` & `avatar_movement`: `{"type": "avatar_state", "data": {"mouth_open": 0.85, "emotion": "smug"}}` serta gerakan panggung (`movement`, `action`, `lighting`).
+  - `chat_received` & `donation_received`: Broadcast pesan chat masuk dan notifikasi donasi.
+  - `song_started`, `lyric_line`, `song_ended`, `audience_cheer`: Event sinkronisasi karaoke & sorakan penonton.
+  - `*_state` / `*_updated` & hasil query: `minecraft_state`, `chess_state`, `conversation_state`, `llm_provider_changed`, `memory_updated`, `memory_search_results`, `memory_journal_data`, `memory_recent_data`, `memory_user_profile_data`, `mood_updated`, `goal_updated`, `goal_completed`, `strategy_adapted`, `relationship_updated`, `vision_updated`, `multiplayer_updated`, `desktop_updated`, `minigame_updated`, `story_updated`, `performance_updated`, `personality_updated`, `system_diagnostics`, `config_saved`, `configuration_updated`, `feature_test_result`.
 
 ---
 
@@ -438,21 +523,24 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu:
 
 ## 🧪 Pengujian & Jaminan Kualitas (QA Testing)
 
-MaybeAI memiliki rangkaian unit dan integration test yang ketat untuk memastikan stabilitas produksi tanpa regresi:
+MaybeAI memiliki rangkaian unit dan integration test yang ketat (secara otomatis menjalankan LLM dalam mode `mock` melalui `tests/__init__.py`) untuk memastikan stabilitas produksi tanpa regresi:
 
 ```powershell
-# Jalankan seluruh test suite otomatis
+# Jalankan seluruh test suite Python otomatis
 .\.venv\Scripts\python.exe -m unittest discover tests
+
+# Jalankan uji unit Guard Mode Mineflayer (Node.js)
+node tests/test_guard_runner.js
 ```
 
 ### Hasil Verifikasi:
 ```text
-Ran 175 tests in 10.827s
+Ran 208 tests in 5.091s
 OK
 ```
-- **Total Test Cases:** 175 tests
+- **Total Test Cases:** 208 Python unit/integration tests + `test_guard_runner.js` (Node.js)
 - **Success Rate:** **100% PASS (0 Failures, 0 Errors)**
-- **Modul Teruji:** `test_configuration`, `test_system_integrity`, `test_personality`, `test_performance`, `test_minigames`, `test_storytelling`, `test_multiplayer_social`, `test_vision`, `test_desktop_companion`, `test_goals`, `test_relationships`, `test_memory`, `test_mood`, `test_chess`, `test_guard_mode`.
+- **Modul Teruji:** `test_brain`, `test_chat_receiver`, `test_chess`, `test_configuration`, `test_desktop_companion`, `test_goals`, `test_guard_mode`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_performance`, `test_personality`, `test_relationships`, `test_storytelling`, `test_system_integrity`, `test_tts`, `test_vision`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
 
 ---
 

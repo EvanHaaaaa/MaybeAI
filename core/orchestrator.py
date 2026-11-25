@@ -73,8 +73,12 @@ class Orchestrator:
 
         self.chat = ChatReceiver()
         self.is_running = False
-        self.is_busy = False
+        self._busy_lock = asyncio.Lock()
         self.web_listeners: Set[Callable[[Dict[str, Any]], None]] = set()
+
+    @property
+    def is_busy(self) -> bool:
+        return self._busy_lock.locked()
 
     def register_listener(self, callback: Callable[[Dict[str, Any]], None]):
         self.web_listeners.add(callback)
@@ -117,6 +121,16 @@ class Orchestrator:
         asyncio.create_task(self._idle_banter_loop())
         # Start visual perception / screen awareness loop
         asyncio.create_task(self._visual_perception_loop())
+
+    async def shutdown(self):
+        """Gracefully stops background loops and closes external client sessions."""
+        self.is_running = False
+        self.chat.stop()
+        await self.vts.disconnect()
+        await self.brain.close()
+
+    async def close(self):
+        await self.shutdown()
 
     async def apply_configuration_hot_reload(self, new_settings: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -185,7 +199,7 @@ class Orchestrator:
             idle_duration = now - self.brain.conversation.last_interaction_time
 
             # If chat is silent for >= 40 seconds and Eve hasn't made spontaneous banter in 45s
-            if idle_duration >= 40.0 and (now - last_banter_time) >= 45.0 and not self.is_busy:
+            if idle_duration >= 40.0 and (now - last_banter_time) >= 45.0 and not self._busy_lock.locked():
                 last_banter_time = now
                 print(f"[Orchestrator] Chat idle for {idle_duration:.1f}s. Triggering spontaneous streamer banter!")
                 active_g = self.brain.goals.get_active_goal()
@@ -199,9 +213,12 @@ class Orchestrator:
 
     async def trigger_improv(self):
         """Triggers an unprompted spontaneous monologue or engaging streamer thought."""
-        if self.is_busy:
+        if self._busy_lock.locked():
             return
-        self.is_busy = True
+        async with self._busy_lock:
+            await self._run_improv()
+
+    async def _run_improv(self):
         try:
             game_contexts = []
             if self.minecraft.connection_status == "connected":
@@ -254,8 +271,6 @@ class Orchestrator:
             await self.broadcast("mood_updated", self.brain.mood.get_state())
         except Exception as e:
             print(f"[Improv Error] {e}")
-        finally:
-            self.is_busy = False
 
     async def _visual_perception_loop(self):
         """
@@ -271,23 +286,23 @@ class Orchestrator:
             try:
                 dominant_mood, _ = self.brain.mood.get_dominant_mood()
                 mood_directive = self.brain.mood.get_behavioral_directive()
-                obs = self.brain.vision.perceive(
+                obs = await asyncio.to_thread(
+                    self.brain.vision.perceive,
                     mood_directive=mood_directive,
                     dominant_mood=dominant_mood
                 )
                 await self.broadcast("vision_updated", self.brain.vision.get_state())
 
                 # If an event occurred or commentary produced and not busy, speak commentary
-                if obs.eve_commentary and not self.is_busy:
+                if obs.eve_commentary and not self._busy_lock.locked():
                     await self._speak_visual_commentary(obs)
             except Exception as e:
                 print(f"[Orchestrator] Visual perception loop error: {e}")
 
     async def _speak_visual_commentary(self, obs: Any):
-        if not obs.eve_commentary or self.is_busy:
+        if not obs.eve_commentary or self._busy_lock.locked():
             return
-        self.is_busy = True
-        try:
+        async with self._busy_lock:
             raw_thought = obs.eve_commentary
             _, clean_response = self.moderator.clean_text(raw_thought)
             speech_text, emotions, actions = ActionParser.parse(clean_response)
@@ -332,21 +347,20 @@ class Orchestrator:
                 await self.vts.update_mouth(0.0)
 
             await self.broadcast("avatar_state", {"mouth_open": 0.0, "emotion": "neutral"})
-        finally:
-            self.is_busy = False
 
     async def perceive_screen_now(self, simulated_scene: Optional[str] = None):
         """Triggers an immediate on-demand visual perception scan."""
         dominant_mood, _ = self.brain.mood.get_dominant_mood()
         mood_directive = self.brain.mood.get_behavioral_directive()
-        obs = self.brain.vision.perceive(
+        obs = await asyncio.to_thread(
+            self.brain.vision.perceive,
             simulated_scene=simulated_scene,
             force_commentary=True,
             mood_directive=mood_directive,
             dominant_mood=dominant_mood
         )
         await self.broadcast("vision_updated", self.brain.vision.get_state())
-        if obs.eve_commentary and not self.is_busy:
+        if obs.eve_commentary and not self._busy_lock.locked():
             asyncio.create_task(self._speak_visual_commentary(obs))
         return obs
 
@@ -356,9 +370,7 @@ class Orchestrator:
         if not is_safe:
             print(f"[Moderator] Filtered unsafe input from {msg.user}: {msg.text}")
 
-        is_creator_flag = getattr(msg, "is_creator", False) or (
-            msg.source in ("creator", "mic") or msg.user.strip().lower() in ("creator", "admin", "evanh")
-        )
+        is_creator_flag = bool(getattr(msg, "is_creator", False) or msg.source in ("creator", "mic"))
 
         await self.broadcast("chat_received", {
             "user": msg.user,
@@ -448,13 +460,12 @@ class Orchestrator:
                     await self._ingest_message(msg)
 
                 # 2. If not busy, select next best interaction from curator
-                if not self.is_busy:
-                    interaction = self.brain.conversation.select_next_interaction()
-                    if interaction:
-                        self.is_busy = True
-                        await self._execute_interaction(interaction)
-                        self.is_busy = False
-                        continue
+                if not self._busy_lock.locked():
+                    async with self._busy_lock:
+                        interaction = self.brain.conversation.select_next_interaction()
+                        if interaction:
+                            await self._execute_interaction(interaction)
+                            continue
 
                 # 3. If no interaction ready or currently busy, wait for next message
                 try:
@@ -465,20 +476,20 @@ class Orchestrator:
 
             except Exception as e:
                 print(f"[Orchestrator Error] {e}")
-                self.is_busy = False
                 await asyncio.sleep(1)
 
     async def _execute_interaction(self, interaction: ChatInteraction):
         primary = interaction.primary_message
         clean_input = primary.text
         msg_lower = clean_input.lower()
-        is_creator = getattr(primary, "is_creator", False) or (
-            primary.source in ("creator", "mic") or primary.user.strip().lower() in ("creator", "admin", "evanh")
-        )
+        is_creator = bool(getattr(primary, "is_creator", False) or primary.source in ("creator", "mic"))
 
         # Check for spontaneous improv command
         if msg_lower.startswith("!improv"):
-            await self.trigger_improv()
+            if self._busy_lock.locked():
+                await self._run_improv()
+            else:
+                await self.trigger_improv()
             return
 
         # Check for sing command / request

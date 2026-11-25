@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock
 from core.chess.chess_engine import ChessEngine
 from core.chess.chess_agent import ChessAgent
 from core.chess.controller import ChessController
+from core.conversation.chat_curator import ChatCurator
 from core.orchestrator import Orchestrator
 
 class TestChessEngine(unittest.TestCase):
@@ -127,9 +128,12 @@ class TestChessOrchestration(unittest.IsolatedAsyncioTestCase):
         self.received_events = []
         self.orchestrator.register_listener(lambda e: self.received_events.append(e))
 
+    async def asyncTearDown(self):
+        await self.orchestrator.shutdown()
+
     async def test_chess_commands(self):
         # 1. Start game via chat command
-        await self.orchestrator.chat.put_message(user="Admin", text="!chess new", source="web")
+        await self.orchestrator.chat.put_message(user="Admin", text="!chess new", source="creator")
         # Process 1 iteration of curator/chat
         msg = await self.orchestrator.chat.get_next_message()
         await self.orchestrator._ingest_message(msg)
@@ -141,7 +145,7 @@ class TestChessOrchestration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.orchestrator.chess.player_name, "Admin")
 
         # 2. Change ELO via chat command
-        await self.orchestrator.chat.put_message(user="Admin", text="!chess elo 1500", source="web")
+        await self.orchestrator.chat.put_message(user="Admin", text="!chess elo 1500", source="creator")
         msg = await self.orchestrator.chat.get_next_message()
         await self.orchestrator._ingest_message(msg)
         interaction = self.orchestrator.brain.conversation.select_next_interaction()
@@ -149,12 +153,34 @@ class TestChessOrchestration(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.orchestrator.chess.engine.elo, 1500)
 
         # 3. Make move via chat command
-        await self.orchestrator.chat.put_message(user="Admin", text="!chess move e2e4", source="web")
+        await self.orchestrator.chat.put_message(user="Admin", text="!chess move e2e4", source="creator")
         msg = await self.orchestrator.chat.get_next_message()
         await self.orchestrator._ingest_message(msg)
         interaction = self.orchestrator.brain.conversation.select_next_interaction()
         await self.orchestrator._execute_interaction(interaction)
         self.assertEqual(self.orchestrator.chess.engine.move_history[0], "e4")
+
+    async def test_admin_username_on_web_source_is_not_creator(self):
+        curator = ChatCurator()
+        queued_msg = curator.add_message("Admin", "!chess elo 2500", source="web", is_creator=None)
+        self.assertFalse(queued_msg.is_creator)
+
+        initial_elo = self.orchestrator.chess.engine.elo
+        await self.orchestrator.chat.put_message(
+            user="Admin", text="!chess elo 2500", source="web", is_creator=None
+        )
+        msg = await self.orchestrator.chat.get_next_message()
+        self.assertFalse(msg.is_creator)
+        await self.orchestrator._ingest_message(msg)
+        interaction = self.orchestrator.brain.conversation.select_next_interaction()
+        self.assertIsNotNone(interaction)
+        self.assertFalse(interaction.primary_message.is_creator)
+        await self.orchestrator._execute_interaction(interaction)
+
+        self.orchestrator.tts.speak.assert_called()
+        last_speech = self.orchestrator.tts.speak.call_args[0][0]
+        self.assertIn("cuma Creator yang berhak atur level ELO", last_speech)
+        self.assertEqual(self.orchestrator.chess.engine.elo, initial_elo)
 
 if __name__ == "__main__":
     unittest.main()

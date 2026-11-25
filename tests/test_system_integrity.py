@@ -1,6 +1,13 @@
 import asyncio
+import os
 import unittest
 from unittest.mock import AsyncMock
+
+try:
+    import tests  # noqa: F401
+except ImportError:
+    os.environ.setdefault("MAYBEAI_LLM_PROVIDER", "mock")
+
 from core.brain import Brain
 from core.moderator import Moderator
 from core.actions import ActionParser

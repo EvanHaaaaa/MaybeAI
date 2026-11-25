@@ -1,6 +1,6 @@
 import unittest
 import os
-import shutil
+import tempfile
 from pathlib import Path
 from core.relationship.models import (
     RelationshipTier,
@@ -76,8 +76,10 @@ class TestRelationshipModels(unittest.TestCase):
 
 class TestRelationshipEngine(unittest.TestCase):
     def setUp(self):
-        self.test_storage = "data/test_relationships/relationships.json"
-        self.test_md_dir = "data/test_second_brain/relationships"
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.temp_dir = Path(self._temp_dir_obj.name)
+        self.test_storage = str(self.temp_dir / "relationships" / "relationships.json")
+        self.test_md_dir = str(self.temp_dir / "second_brain" / "relationships")
         os.makedirs(os.path.dirname(self.test_storage), exist_ok=True)
         os.makedirs(self.test_md_dir, exist_ok=True)
         self.engine = RelationshipEngine(
@@ -86,8 +88,7 @@ class TestRelationshipEngine(unittest.TestCase):
         )
 
     def tearDown(self):
-        shutil.rmtree("data/test_relationships", ignore_errors=True)
-        shutil.rmtree("data/test_second_brain", ignore_errors=True)
+        self._temp_dir_obj.cleanup()
 
     def test_canonical_seed_profiles(self):
         creator = self.engine.get_relationship("Creator")
@@ -166,8 +167,10 @@ class TestConversationAndBrainIntegration(unittest.TestCase):
     def setUp(self):
         self.brain = Brain()
         self.conv = self.brain.conversation
-        self.test_storage = "data/test_relationships/conv_rel.json"
-        self.test_md_dir = "data/test_second_brain/relationships"
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.temp_dir = Path(self._temp_dir_obj.name)
+        self.test_storage = str(self.temp_dir / "relationships" / "conv_rel.json")
+        self.test_md_dir = str(self.temp_dir / "second_brain" / "relationships")
         os.makedirs(os.path.dirname(self.test_storage), exist_ok=True)
         os.makedirs(self.test_md_dir, exist_ok=True)
         self.conv.relationships = RelationshipEngine(
@@ -176,8 +179,7 @@ class TestConversationAndBrainIntegration(unittest.TestCase):
         )
 
     def tearDown(self):
-        shutil.rmtree("data/test_relationships", ignore_errors=True)
-        shutil.rmtree("data/test_second_brain", ignore_errors=True)
+        self._temp_dir_obj.cleanup()
 
     def test_brain_relationship_access(self):
         self.assertIsNotNone(self.brain.relationships)

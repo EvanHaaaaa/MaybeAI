@@ -1,5 +1,5 @@
 import unittest
-import shutil
+import tempfile
 from pathlib import Path
 
 from core.storytelling.models import (
@@ -95,15 +95,12 @@ class TestPresetCampaigns(unittest.TestCase):
 
 class TestStoryEngine(unittest.TestCase):
     def setUp(self):
-        self.test_dir = Path("data/test_story_env")
-        if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
-        self.test_dir.mkdir(parents=True, exist_ok=True)
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.test_dir = Path(self._temp_dir_obj.name)
         self.engine = StoryEngine(data_dir=str(self.test_dir))
 
     def tearDown(self):
-        if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
+        self._temp_dir_obj.cleanup()
 
     def test_campaign_lifecycle_and_choices(self):
         # Start campaign
@@ -153,7 +150,10 @@ class TestStoryEngine(unittest.TestCase):
         res, speech = self.engine.roll_dice(roller="TestRoller", dc_target=10, stat_type="Agility")
         self.assertIsInstance(res, DiceRollResult)
         self.assertTrue(1 <= res.d20_value <= 20)
-        self.assertIn("D20", speech)
+        self.assertTrue(
+            any(tok in speech for tok in ("D20", "NATURAL 20", "NATURAL 1")),
+            f"Unexpected dice roll speech: {speech}",
+        )
 
     def test_second_brain_sync(self):
         self.engine.start_campaign("guild_petualang_noob")

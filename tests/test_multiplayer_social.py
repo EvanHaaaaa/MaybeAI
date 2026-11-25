@@ -1,6 +1,6 @@
 import unittest
 import os
-import shutil
+import tempfile
 from pathlib import Path
 from core.minecraft.multiplayer.models import (
     TeamRole,
@@ -211,16 +211,15 @@ class TestGroupChatTracker(unittest.TestCase):
 
 class TestMultiplayerSocialEngine(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = Path("data/test_mp_temp")
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.temp_dir = Path(self._temp_dir_obj.name)
         self.engine = MultiplayerSocialEngine(
             data_dir=str(self.temp_dir / "mp_data"),
             second_brain_dir=str(self.temp_dir / "second_brain")
         )
 
     def tearDown(self):
-        if self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir, ignore_errors=True)
+        self._temp_dir_obj.cleanup()
 
     def test_engine_state_and_directive(self):
         state = self.engine.get_state()

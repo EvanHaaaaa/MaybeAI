@@ -1,6 +1,6 @@
 import unittest
 import os
-import shutil
+import tempfile
 from pathlib import Path
 
 from core.minigames.models import (
@@ -99,15 +99,12 @@ class TestGameCatalog(unittest.TestCase):
 
 class TestMiniGameEngine(unittest.TestCase):
     def setUp(self):
-        self.test_dir = Path("data/test_minigames_env")
-        if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
-        self.test_dir.mkdir(parents=True, exist_ok=True)
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.test_dir = Path(self._temp_dir_obj.name)
         self.engine = MiniGameEngine(data_dir=str(self.test_dir))
 
     def tearDown(self):
-        if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
+        self._temp_dir_obj.cleanup()
 
     def test_trivia_flow(self):
         # Start game

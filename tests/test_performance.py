@@ -1,5 +1,5 @@
 import unittest
-import shutil
+import tempfile
 from pathlib import Path
 
 from core.performance.models import (
@@ -57,15 +57,12 @@ class TestPerformanceModels(unittest.TestCase):
 
 class TestPerformanceDirector(unittest.TestCase):
     def setUp(self):
-        self.test_dir = Path("data/test_perf_env")
-        if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
-        self.test_dir.mkdir(parents=True, exist_ok=True)
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.test_dir = Path(self._temp_dir_obj.name)
         self.director = PerformanceDirector(data_dir=str(self.test_dir))
 
     def tearDown(self):
-        if self.test_dir.exists():
-            shutil.rmtree(self.test_dir)
+        self._temp_dir_obj.cleanup()
 
     def test_songs_catalog_loaded(self):
         self.assertTrue(len(self.director.songs_catalog) >= 5)

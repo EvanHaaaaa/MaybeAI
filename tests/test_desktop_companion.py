@@ -1,6 +1,9 @@
+import os
+import sys
 import unittest
-import shutil
+import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from core.desktop.models import (
     PermissionCategory,
@@ -156,19 +159,61 @@ class TestDesktopController(unittest.TestCase):
         self.ctrl.mark_all_read()
         self.assertEqual(len(self.ctrl.get_unread_notifications()), 0)
 
+    def test_launch_app_rejects_shell_metacharacters_and_traversal(self):
+        with patch("core.desktop.controller.subprocess.Popen") as mock_popen:
+            for bad in ("", "notepad & calc", "calc;whoami", "notepad|dir", "../notepad"):
+                ok, msg = self.ctrl.launch_app(bad)
+                self.assertFalse(ok, f"Expected rejection for {bad!r}")
+                self.assertTrue(len(msg) > 0)
+            mock_popen.assert_not_called()
+
+    def test_launch_app_rejects_non_whitelisted_app(self):
+        with patch("core.desktop.controller.subprocess.Popen") as mock_popen:
+            ok, msg = self.ctrl.launch_app("powershell.exe")
+            self.assertFalse(ok)
+            self.assertIn("whitelist", msg.lower())
+            mock_popen.assert_not_called()
+
+    def test_launch_app_uses_argv_list_without_shell_true(self):
+        with patch.object(self.ctrl, "_resolve_known_app_path", return_value=r"C:\Windows\System32\notepad.exe"), \
+             patch("core.desktop.controller.subprocess.Popen") as mock_popen:
+            ok, msg = self.ctrl.launch_app("notepad")
+        self.assertTrue(ok)
+        self.assertIn("notepad.exe", msg.lower())
+        mock_popen.assert_called_once_with([r"C:\Windows\System32\notepad.exe"])
+        self.assertNotIn("shell", mock_popen.call_args.kwargs)
+
+    def test_launch_app_missing_binary_returns_false(self):
+        with patch.object(self.ctrl, "_resolve_known_app_path", return_value=None), \
+             patch("core.desktop.controller.subprocess.Popen") as mock_popen:
+            ok, msg = self.ctrl.launch_app("notepad")
+        self.assertFalse(ok)
+        self.assertIn("tidak ditemukan", msg.lower())
+        mock_popen.assert_not_called()
+
+    def test_launch_app_lnk_uses_startfile_on_windows(self):
+        self.ctrl.config.allowed_apps.append("shortcut.lnk")
+        with patch.object(self.ctrl, "_resolve_known_app_path", return_value=r"C:\Links\shortcut.lnk"), \
+             patch("core.desktop.controller.sys.platform", "win32"), \
+             patch("core.desktop.controller.os.startfile", create=True) as mock_startfile, \
+             patch("core.desktop.controller.subprocess.Popen") as mock_popen:
+            ok, _ = self.ctrl.launch_app("shortcut.lnk")
+        self.assertTrue(ok)
+        mock_startfile.assert_called_once_with(r"C:\Links\shortcut.lnk")
+        mock_popen.assert_not_called()
+
 
 class TestDesktopCompanionEngine(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = Path("data/test_desktop_temp")
-        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.temp_dir = Path(self._temp_dir_obj.name)
         self.engine = DesktopCompanionEngine(
             data_dir=str(self.temp_dir),
             second_brain_dir=str(self.temp_dir / "second_brain")
         )
 
     def tearDown(self):
-        if self.temp_dir.exists():
-            shutil.rmtree(self.temp_dir, ignore_errors=True)
+        self._temp_dir_obj.cleanup()
 
     def test_engine_state_and_directive(self):
         state = self.engine.get_state()

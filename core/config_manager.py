@@ -1,4 +1,5 @@
 import os
+import copy
 import json
 import time
 import tempfile
@@ -132,6 +133,15 @@ class ConfigManager:
             "max_concurrent_tasks": 3,
             "websocket_ping_interval_sec": 30,
             "audio_buffer_size_kb": 256
+        },
+        "stt": {
+            "enabled": False,
+            "model": "base",
+            "device": "cpu"
+        },
+        "security": {
+            "creator_token": "",
+            "allowed_origins": []
         }
     }
 
@@ -152,8 +162,8 @@ class ConfigManager:
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
-                    # Deep merge defaults
-                    merged = dict(defaults)
+                    # Deep merge defaults without mutating DEFAULT_SETTINGS
+                    merged = copy.deepcopy(defaults)
                     for k, v in loaded.items():
                         if isinstance(v, dict) and k in merged and isinstance(merged[k], dict):
                             merged[k] = {**merged[k], **v}
@@ -162,21 +172,28 @@ class ConfigManager:
                     return merged
             except Exception as e:
                 print(f"[ConfigManager] Error reading {file_path}: {e}")
-        return dict(defaults)
+        return copy.deepcopy(defaults)
+
+    SECRET_MASK_FIELDS = (
+        ("twitch", "oauth_token", "oauth_configured"),
+        ("security", "creator_token", "creator_token_configured"),
+    )
 
     def get_public_config(self) -> Dict[str, Any]:
         """
-        Returns full configuration with sensitive secrets (OAuth tokens, API keys) masked.
+        Returns full configuration with sensitive secrets (OAuth tokens, Creator token, API keys) masked.
         """
         # Reload latest state from disk
         self.settings = self._load_json_with_defaults(self.settings_file, self.DEFAULT_SETTINGS)
         public_cfg = json.loads(json.dumps(self.settings))
 
-        # Mask Twitch OAuth token if set
-        twitch = public_cfg.get("twitch", {})
-        raw_oauth = twitch.get("oauth_token", "")
-        twitch["oauth_token"] = "********" if raw_oauth and raw_oauth != "********" else ""
-        twitch["oauth_configured"] = bool(raw_oauth and raw_oauth != "********")
+        # Mask sensitive secrets without exposing plaintext
+        for sec_name, key_name, flag_name in self.SECRET_MASK_FIELDS:
+            sec_obj = public_cfg.setdefault(sec_name, {})
+            raw_val = sec_obj.get(key_name, "")
+            is_set = bool(raw_val and raw_val != "********")
+            sec_obj[key_name] = "********" if is_set else ""
+            sec_obj[flag_name] = is_set
 
         # Check API key configuration status without leaking keys
         public_cfg["api_keys"] = {
@@ -695,6 +712,66 @@ class ConfigManager:
                 "max": 120,
                 "default": 30,
                 "restart_required": False
+            },
+
+            # 14. Speech-to-Text (STT)
+            {
+                "path": "stt.enabled",
+                "category": "stt",
+                "label": "Speech-to-Text Enabled",
+                "description": "Mengaktifkan mesin transkripsi suara lokal (Whisper STT).",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "stt.model",
+                "category": "stt",
+                "label": "Whisper Model",
+                "description": "Ukuran model Whisper untuk transkripsi audio.",
+                "type": "select",
+                "options": [
+                    {"label": "tiny (Fastest, Lowest VRAM)", "value": "tiny"},
+                    {"label": "base (Balanced Default)", "value": "base"},
+                    {"label": "small (Higher Accuracy)", "value": "small"},
+                    {"label": "medium (High Accuracy)", "value": "medium"},
+                    {"label": "large (Maximum Accuracy)", "value": "large"}
+                ],
+                "default": "base",
+                "restart_required": False
+            },
+            {
+                "path": "stt.device",
+                "category": "stt",
+                "label": "Inference Device",
+                "description": "Perangkat komputasi untuk menjalankan model Whisper STT.",
+                "type": "select",
+                "options": [
+                    {"label": "CPU", "value": "cpu"},
+                    {"label": "CUDA (NVIDIA GPU)", "value": "cuda"}
+                ],
+                "default": "cpu",
+                "restart_required": False
+            },
+
+            # 15. Security & Access
+            {
+                "path": "security.creator_token",
+                "category": "security",
+                "label": "Creator Access Token",
+                "description": "Token rahasia opsional untuk otentikasi akses creator pada WebSocket (?token=). Disembunyikan demi keamanan.",
+                "type": "secret",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "security.allowed_origins",
+                "category": "security",
+                "label": "Allowed Origins",
+                "description": "Daftar origin HTTP tambahan (misal: http://192.168.1.50:7860) yang diizinkan selain localhost.",
+                "type": "list",
+                "default": [],
+                "restart_required": False
             }
         ]
 
@@ -736,6 +813,12 @@ class ConfigManager:
                 allowed = [opt["value"] for opt in meta.get("options", [])]
                 if allowed and val not in allowed:
                     errors.append(f"Field '{path}' value '{val}' is not in allowed options: {allowed}")
+            elif ctrl_type == "secret":
+                if not isinstance(val, str):
+                    errors.append(f"Field '{path}' must be a string.")
+            elif ctrl_type == "list":
+                if not isinstance(val, list) or not all(isinstance(item, str) for item in val):
+                    errors.append(f"Field '{path}' must be a list of strings.")
 
         return len(errors) == 0, errors
 
@@ -752,6 +835,9 @@ class ConfigManager:
         # Load existing disk state to preserve secret if masked
         existing = self._load_json_with_defaults(self.settings_file, self.DEFAULT_SETTINGS)
 
+        secret_keys = {(sec, key) for sec, key, _ in self.SECRET_MASK_FIELDS}
+        computed_keys = {(sec, flag) for sec, _, flag in self.SECRET_MASK_FIELDS}
+
         # Merge payload on top of existing
         merged = json.loads(json.dumps(existing))
         for section, sec_data in payload.items():
@@ -760,8 +846,10 @@ class ConfigManager:
             if isinstance(sec_data, dict):
                 merged.setdefault(section, {})
                 for k, v in sec_data.items():
-                    # If user sent masked token, retain previous real token
-                    if section == "twitch" and k == "oauth_token" and v == "********":
+                    if (section, k) in computed_keys:
+                        continue
+                    # If user sent masked secret, retain previous real secret
+                    if (section, k) in secret_keys and v == "********":
                         continue
                     merged[section][k] = v
             else:
@@ -825,7 +913,7 @@ class ConfigManager:
                 parts = it["path"].split(".")
                 sec, k = parts[0], parts[1]
                 if sec in self.DEFAULT_SETTINGS and k in self.DEFAULT_SETTINGS[sec]:
-                    self.settings.setdefault(sec, {})[k] = self.DEFAULT_SETTINGS[sec][k]
+                    self.settings.setdefault(sec, {})[k] = copy.deepcopy(self.DEFAULT_SETTINGS[sec][k])
         else:
             self.settings = json.loads(json.dumps(self.DEFAULT_SETTINGS))
 

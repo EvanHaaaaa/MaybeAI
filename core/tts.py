@@ -23,6 +23,7 @@ class TTSEngine:
         self.pitch = pitch
         self.enabled = enabled
         self.last_error: Optional[str] = None
+        self._mixer_initialized: bool = False
         self.temp_dir = Path(tempfile.gettempdir()) / "maybeai_audio"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
@@ -72,7 +73,7 @@ class TTSEngine:
                 on_mouth_update(0.0)
             return None
 
-        output_file = str(self.temp_dir / f"speech_{asyncio.get_event_loop().time():.2f}.mp3")
+        output_file = str(self.temp_dir / f"speech_{asyncio.get_running_loop().time():.2f}.mp3")
 
         try:
             communicate = edge_tts.Communicate(
@@ -91,6 +92,16 @@ class TTSEngine:
             self.last_error = str(e)
             print(f"[TTS Error] {e}")
             return None
+        finally:
+            self._cleanup_audio_file(output_file)
+
+    @staticmethod
+    def _cleanup_audio_file(file_path: str):
+        try:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+        except Exception:
+            pass
 
     async def _play_and_lipsync(self, file_path: str, text: str, on_mouth_update: Optional[Callable[[float], None]]):
         """
@@ -102,7 +113,10 @@ class TTSEngine:
 
         try:
             import pygame
-            pygame.mixer.init()
+            if not self._mixer_initialized:
+                if not isinstance(pygame.mixer.get_init(), tuple):
+                    pygame.mixer.init()
+                self._mixer_initialized = True
             pygame.mixer.music.load(file_path)
             pygame.mixer.music.play()
 
@@ -122,6 +136,8 @@ class TTSEngine:
             if on_mouth_update:
                 on_mouth_update(0.0) # Close mouth when done
             pygame.mixer.music.stop()
+            if hasattr(pygame.mixer.music, "unload"):
+                pygame.mixer.music.unload()
         except Exception:
             # Fallback if pygame audio device isn't available
             steps = int(est_duration / 0.1)
@@ -132,3 +148,5 @@ class TTSEngine:
                     on_mouth_update(val)
             if on_mouth_update:
                 on_mouth_update(0.0)
+        finally:
+            self._cleanup_audio_file(file_path)

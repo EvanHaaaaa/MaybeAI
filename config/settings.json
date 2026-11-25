@@ -118,5 +118,9 @@
     "enabled": false,
     "model": "base",
     "device": "cpu"
+  },
+  "security": {
+    "creator_token": "",
+    "allowed_origins": []
   }
 }

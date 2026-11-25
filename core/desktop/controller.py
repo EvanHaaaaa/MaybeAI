@@ -1,12 +1,17 @@
 import os
+import re
 import sys
 import time
+import shutil
 import subprocess
 from typing import Dict, Any, List, Tuple, Optional
 from core.desktop.models import (
     DesktopPermissionConfig,
     DesktopNotification
 )
+
+
+_SHELL_METACHAR_RE = re.compile(r"[&|;$><`\\/\n\r\x00(){}\[\]*?~'\"%^!]")
 
 
 class DesktopController:
@@ -112,22 +117,78 @@ class DesktopController:
         return self.config.current_track, msg
 
     # --- 3. App Launch ---
+    def _resolve_known_app_path(self, app_exe: str) -> Optional[str]:
+        which_path = shutil.which(app_exe)
+        if which_path and os.path.isfile(which_path):
+            return os.path.abspath(which_path)
+
+        if sys.platform != "win32":
+            return None
+
+        exe_lower = app_exe.lower()
+        system_root = os.environ.get("SystemRoot", r"C:\Windows")
+        program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+        program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+        local_app_data = os.environ.get("LOCALAPPDATA", "")
+        app_data = os.environ.get("APPDATA", "")
+
+        known_candidates: Dict[str, List[str]] = {
+            "notepad.exe": [os.path.join(system_root, "System32", "notepad.exe")],
+            "calc.exe": [os.path.join(system_root, "System32", "calc.exe")],
+            "chrome.exe": [
+                os.path.join(program_files, "Google", "Chrome", "Application", "chrome.exe"),
+                os.path.join(program_files_x86, "Google", "Chrome", "Application", "chrome.exe"),
+            ],
+            "obs64.exe": [
+                os.path.join(program_files, "obs-studio", "bin", "64bit", "obs64.exe"),
+                os.path.join(program_files_x86, "obs-studio", "bin", "64bit", "obs64.exe"),
+            ],
+            "spotify.exe": [
+                os.path.join(app_data, "Spotify", "Spotify.exe"),
+                os.path.join(local_app_data, "Microsoft", "WindowsApps", "Spotify.exe"),
+            ],
+            "discord.exe": [
+                os.path.join(local_app_data, "Discord", "Update.exe"),
+            ],
+        }
+        for candidate in known_candidates.get(exe_lower, []):
+            if candidate and os.path.isfile(candidate):
+                return os.path.abspath(candidate)
+        return None
+
     def launch_app(self, app_name: str) -> Tuple[bool, str]:
+        if not isinstance(app_name, str) or not app_name.strip():
+            return False, "Nama aplikasi tidak boleh kosong."
+
         clean = app_name.strip()
-        if sys.platform == "win32" and not clean.lower().endswith(".exe") and not clean.lower().endswith(".lnk"):
-            target = f"{clean}.exe"
-        else:
-            target = clean
+        if ".." in clean or _SHELL_METACHAR_RE.search(clean):
+            return False, f"Target aplikasi '{clean}' ditolak karena mengandung karakter tidak aman."
+
+        allowed_map: Dict[str, str] = {}
+        for entry in self.config.allowed_apps:
+            a_clean = str(entry).strip()
+            if not a_clean or ".." in a_clean or _SHELL_METACHAR_RE.search(a_clean):
+                continue
+            allowed_map[a_clean.lower()] = a_clean
+
+        clean_lower = clean.lower()
+        matched = allowed_map.get(clean_lower)
+        if not matched and not clean_lower.endswith((".exe", ".lnk")):
+            matched = allowed_map.get(f"{clean_lower}.exe")
+
+        if not matched:
+            return False, f"Aplikasi '{clean}' tidak diizinkan oleh whitelist."
+
+        resolved_path = self._resolve_known_app_path(matched)
+        if not resolved_path:
+            return False, f"Aplikasi '{matched}' tidak ditemukan di jalur sistem yang dikenal."
 
         try:
-            if sys.platform == "win32":
-                try:
-                    os.startfile(target)
-                except Exception:
-                    subprocess.Popen(target, shell=True)
+            if sys.platform == "win32" and resolved_path.lower().endswith(".lnk"):
+                os.startfile(resolved_path)
             else:
-                subprocess.Popen([target])
-            return True, f"Aplikasi '{target}' berhasil diluncurkan di desktop."
+                subprocess.Popen([resolved_path])
+            return True, f"Aplikasi '{matched}' berhasil diluncurkan di desktop."
         except Exception as e:
             return False, f"Gagal membuka aplikasi '{clean}': {e}"
 

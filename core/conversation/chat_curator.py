@@ -68,9 +68,7 @@ class ChatCurator:
         clean_text = text.strip()
         msg_type = self._classify_message(clean_text, is_donation)
         
-        creator_flag = is_creator if is_creator is not None else (
-            source in ("creator", "mic") or user.strip().lower() in ("creator", "admin", "evanh")
-        )
+        creator_flag = bool(is_creator) if is_creator is not None else (source in ("creator", "mic"))
 
         msg = LiveChatMessage(
             user=user.strip() or "Chatter",

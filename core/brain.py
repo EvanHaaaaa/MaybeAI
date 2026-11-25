@@ -1,6 +1,8 @@
 import os
 import json
+import asyncio
 import random
+import tempfile
 import aiohttp
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -16,10 +18,13 @@ class Brain:
     """
 
     def __init__(self, settings_path: str = "config/settings.json", character_path: str = "config/character.json"):
+        self.settings_path = settings_path
+        self.character_path = character_path
         self.settings = self._load_json(settings_path)
         self.character = self._load_json(character_path)
         self.conversation = ConversationEngine(self.character)
         self.system_prompt = self.conversation.build_system_prompt("Chat")
+        self._session: Optional[aiohttp.ClientSession] = None
 
     @property
     def history(self) -> List[Dict[str, Any]]:
@@ -80,6 +85,51 @@ class Brain:
                 return json.load(f)
         return {}
 
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """Lazily creates and reuses a shared aiohttp ClientSession on the active event loop."""
+        loop = asyncio.get_running_loop()
+        if self._session is not None and self._session.closed is not True:
+            session_loop = getattr(self._session, "_loop", None)
+            if session_loop is not None and (session_loop.is_closed() or session_loop is not loop):
+                try:
+                    await self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+        if self._session is None or self._session.closed is True:
+            self._session = aiohttp.ClientSession()
+        return self._session
+
+    async def close(self):
+        """Closes the shared aiohttp ClientSession if it is open."""
+        if self._session is not None and self._session.closed is not True:
+            await self._session.close()
+        self._session = None
+
+    def get_provider(self) -> str:
+        """Returns the active LLM provider, respecting the MAYBEAI_LLM_PROVIDER env override."""
+        env_provider = os.getenv("MAYBEAI_LLM_PROVIDER", "").strip().lower()
+        if env_provider:
+            return env_provider
+        return self.settings.get("llm", {}).get("provider", "mock").lower()
+
+    def _atomic_write_settings(self):
+        """Atomically writes self.settings to self.settings_path using a temp file and os.replace."""
+        target = Path(self.settings_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(self.settings, f, indent=2, ensure_ascii=False)
+            os.replace(tmp_path, target)
+        except Exception:
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+            raise
+
     def reload_settings(self, new_settings: Dict[str, Any]):
         self.settings = new_settings
 
@@ -87,13 +137,24 @@ class Brain:
         prov = provider.lower().strip()
         if prov in ["mock", "gemini", "openai", "ollama"]:
             self.settings.setdefault("llm", {})["provider"] = prov
+            persisted = False
             try:
-                with open("config/settings.json", "w", encoding="utf-8") as f:
-                    json.dump(self.settings, f, indent=2)
+                settings_file = Path(self.settings_path)
+                if settings_file.name == "settings.json":
+                    from core.config_manager import ConfigManager
+                    cfg_mgr = ConfigManager(config_dir=str(settings_file.parent))
+                    success, _, _ = cfg_mgr.save_config({"llm": {"provider": prov}})
+                    persisted = bool(success)
             except Exception:
-                pass
+                persisted = False
+
+            if not persisted:
+                try:
+                    self._atomic_write_settings()
+                except Exception:
+                    pass
             return prov
-        return self.settings.get("llm", {}).get("provider", "mock")
+        return self.get_provider()
 
     def set_roleplay(self, role: Optional[str]):
         self.conversation.topic_tracker.set_roleplay(role)
@@ -129,7 +190,7 @@ class Brain:
         debate_users: Optional[List[str]] = None,
         image_base64: Optional[str] = None
     ) -> str:
-        provider = self.settings.get("llm", {}).get("provider", "mock").lower()
+        provider = self.get_provider()
 
         # If user explicitly asks about screen/visual and no image passed, use latest vision thumbnail
         if image_base64 is None and self.vision and self.vision.current_observation:
@@ -217,14 +278,14 @@ class Brain:
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload, timeout=12) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data["choices"][0]["message"]["content"].strip()
-                    else:
-                        print(f"[Brain Warning] OpenAI status {resp.status}. Using persona fallback.")
-                        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=12)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data["choices"][0]["message"]["content"].strip()
+                else:
+                    print(f"[Brain Warning] OpenAI status {resp.status}. Using persona fallback.")
+                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         except Exception as e:
             print(f"[Brain Error] OpenAI connection error: {e}")
             return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
@@ -256,12 +317,12 @@ class Brain:
         }
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload, timeout=15) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        return data.get("message", {}).get("content", "").strip()
-                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            session = await self._get_session()
+            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("message", {}).get("content", "").strip()
+                return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         except Exception as e:
             return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
 
@@ -275,7 +336,11 @@ class Brain:
             return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
 
         model = self.settings.get("llm", {}).get("gemini_model", "gemini-3-flash-preview")
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        headers = {
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json"
+        }
         
         # Build contents from conversational history
         contents = []
@@ -310,22 +375,22 @@ class Brain:
 
         try:
             timeout = aiohttp.ClientTimeout(total=15)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, json=payload) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        candidates = data.get("candidates", [])
-                        if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
-                            parts = candidates[0]["content"]["parts"]
-                            text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
-                            if text:
-                                return text
-                        print(f"[Brain Warning] Gemini response missing valid parts. Falling back to persona.")
-                        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
-                    else:
-                        err_text = await resp.text()
-                        print(f"[Brain Warning] Gemini returned status {resp.status}: {err_text[:120]}. Using persona fallback.")
-                        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    candidates = data.get("candidates", [])
+                    if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
+                        parts = candidates[0]["content"]["parts"]
+                        text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
+                        if text:
+                            return text
+                    print(f"[Brain Warning] Gemini response missing valid parts. Falling back to persona.")
+                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+                else:
+                    err_text = await resp.text()
+                    print(f"[Brain Warning] Gemini returned status {resp.status}: {err_text[:120]}. Using persona fallback.")
+                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
         except Exception as e:
             print(f"[Brain Warning] Gemini request error/timeout ({e}). Using persona fallback.")
             return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)

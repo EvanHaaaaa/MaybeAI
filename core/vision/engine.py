@@ -1,4 +1,5 @@
 import time
+import threading
 from typing import Optional, Dict, Any, List, Callable
 try:
     from PIL import Image
@@ -33,6 +34,7 @@ class VisionEngine:
         self.last_capture_time: float = 0.0
         self.last_commentary_time: float = 0.0
         self.is_auto_active: bool = self.config.auto_perception
+        self._lock = threading.Lock()
 
         # Optional event broadcast callback
         self.broadcast_callback: Optional[Callable[[Dict[str, Any]], None]] = None
@@ -88,7 +90,6 @@ class VisionEngine:
         5. Notifies listener / orchestrator callback if registered.
         """
         now = time.time()
-        self.last_capture_time = now
 
         # 1. Capture or synthesize image
         if simulated_scene:
@@ -102,53 +103,56 @@ class VisionEngine:
                 img = self.capture_mgr.generate_mock_scene(VisualSceneType.DESKTOP_GENERAL.value)
                 hint_scene = VisualSceneType.DESKTOP_GENERAL.value
 
-        # 2. Compute visual change diff
-        diff_delta = 0.0
-        if self._previous_image is not None:
-            diff_delta = ScreenCaptureManager.compute_image_diff(self._previous_image, img)
-        self._previous_image = img
+        with self._lock:
+            self.last_capture_time = now
 
-        # 3. Analyze scene & classify events
-        obs = VisualAnalyzer.analyze_frame(
-            image=img,
-            previous_observation=self.current_observation,
-            change_delta=diff_delta,
-            hint_scene=hint_scene
-        )
+            # 2. Compute visual change diff
+            diff_delta = 0.0
+            if self._previous_image is not None:
+                diff_delta = ScreenCaptureManager.compute_image_diff(self._previous_image, img)
+            self._previous_image = img
 
-        # 4. Generate thumbnail base64
-        obs.thumbnail_base64 = ScreenCaptureManager.to_base64_data_url(
-            img,
-            max_size=(self.config.max_thumbnail_width, self.config.max_thumbnail_height)
-        )
-
-        # 5. Check if Eve should speak / comment
-        time_since_last_comment = now - self.last_commentary_time
-        should_speak = force_commentary or (
-            (obs.is_event or diff_delta >= self.config.change_threshold)
-            and time_since_last_comment >= self.config.cooldown_commentary_sec
-        )
-
-        if should_speak:
-            commentary = MultimodalVisionModel.generate_commentary(
-                observation=obs,
-                mood_directive=mood_directive,
-                dominant_mood=dominant_mood
+            # 3. Analyze scene & classify events
+            obs = VisualAnalyzer.analyze_frame(
+                image=img,
+                previous_observation=self.current_observation,
+                change_delta=diff_delta,
+                hint_scene=hint_scene
             )
-            obs.eve_commentary = commentary
-            self.last_commentary_time = now
 
-        self.current_observation = obs
-        self.recent_observations.append(obs)
-        if len(self.recent_observations) > 15:
-            self.recent_observations.pop(0)
+            # 4. Generate thumbnail base64
+            obs.thumbnail_base64 = ScreenCaptureManager.to_base64_data_url(
+                img,
+                max_size=(self.config.max_thumbnail_width, self.config.max_thumbnail_height)
+            )
 
-        # 6. Trigger broadcast callback if present
-        if self.broadcast_callback and callable(self.broadcast_callback):
-            try:
-                self.broadcast_callback(self.get_state())
-            except Exception as e:
-                print(f"[VisionEngine] Broadcast callback error: {e}")
+            # 5. Check if Eve should speak / comment
+            time_since_last_comment = now - self.last_commentary_time
+            should_speak = force_commentary or (
+                (obs.is_event or diff_delta >= self.config.change_threshold)
+                and time_since_last_comment >= self.config.cooldown_commentary_sec
+            )
+
+            if should_speak:
+                commentary = MultimodalVisionModel.generate_commentary(
+                    observation=obs,
+                    mood_directive=mood_directive,
+                    dominant_mood=dominant_mood
+                )
+                obs.eve_commentary = commentary
+                self.last_commentary_time = now
+
+            self.current_observation = obs
+            self.recent_observations.append(obs)
+            if len(self.recent_observations) > 15:
+                self.recent_observations.pop(0)
+
+            # 6. Trigger broadcast callback if present
+            if self.broadcast_callback and callable(self.broadcast_callback):
+                try:
+                    self.broadcast_callback(self.get_state())
+                except Exception as e:
+                    print(f"[VisionEngine] Broadcast callback error: {e}")
 
         return obs
 

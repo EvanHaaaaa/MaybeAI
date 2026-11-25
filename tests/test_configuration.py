@@ -1,10 +1,14 @@
 import os
 import json
-import shutil
 import tempfile
 import unittest
 import asyncio
 from pathlib import Path
+
+try:
+    import tests  # noqa: F401
+except ImportError:
+    os.environ.setdefault("MAYBEAI_LLM_PROVIDER", "mock")
 
 from core.config_manager import ConfigManager
 from core.orchestrator import Orchestrator
@@ -24,11 +28,12 @@ from run import (
 
 class TestConfigurationCenter(unittest.TestCase):
     def setUp(self):
-        self.temp_dir = tempfile.mkdtemp()
+        self._temp_dir_obj = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.temp_dir = self._temp_dir_obj.name
         self.cfg_mgr = ConfigManager(config_dir=self.temp_dir)
 
     def tearDown(self):
-        shutil.rmtree(self.temp_dir, ignore_errors=True)
+        self._temp_dir_obj.cleanup()
 
     def test_default_config_loading_and_merging(self):
         cfg = self.cfg_mgr.get_public_config()
@@ -175,8 +180,12 @@ class TestConfigurationCenter(unittest.TestCase):
             self.assertGreater(len(schema_data), 10)
 
             # PUT /api/config
-            put_res = await update_configuration({"system": {"debug_mode": True}})
-            self.assertTrue(put_res["success"])
+            prev_debug = cfg.get("system", {}).get("debug_mode", False)
+            try:
+                put_res = await update_configuration({"system": {"debug_mode": True}})
+                self.assertTrue(put_res["success"])
+            finally:
+                await update_configuration({"system": {"debug_mode": prev_debug}})
 
             # POST /api/config/validate
             val_res = await validate_configuration({"llm": {"temperature": 0.7}})
