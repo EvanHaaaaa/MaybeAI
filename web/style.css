@@ -5774,3 +5774,126 @@ body {
   color: #64748b;
   font-size: 0.7rem;
 }
+
+/* ==========================================================================
+   Pillar 1: Modular Tabbed Studio Workspace Navigation & OBS Overlay Button
+   ========================================================================== */
+.status-tags {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.btn-obs-overlay {
+  text-decoration: none;
+  font-size: 0.8rem;
+  padding: 6px 12px;
+  border: 1px solid rgba(0, 240, 255, 0.55);
+  color: #67e8f9;
+  background: rgba(0, 240, 255, 0.1);
+  border-radius: 8px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.2s ease;
+}
+
+.btn-obs-overlay:hover {
+  background: rgba(0, 240, 255, 0.22);
+  border-color: var(--cyan);
+  color: #ffffff;
+  box-shadow: 0 0 12px rgba(0, 240, 255, 0.35);
+}
+
+.workspace-nav {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px;
+  background: rgba(16, 19, 32, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.workspace-tabs-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.workspace-tab {
+  flex: 1 1 160px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 9px;
+  border: 1px solid rgba(148, 163, 184, 0.16);
+  background: rgba(24, 29, 46, 0.72);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.workspace-tab:hover {
+  background: rgba(38, 44, 68, 0.9);
+  color: var(--text);
+  border-color: rgba(0, 240, 255, 0.35);
+}
+
+.workspace-tab.active {
+  background: linear-gradient(135deg, rgba(255, 77, 141, 0.28), rgba(0, 240, 255, 0.2));
+  border-color: var(--accent);
+  color: #ffffff;
+  box-shadow:
+    0 0 14px rgba(255, 77, 141, 0.32),
+    inset 0 0 10px rgba(0, 240, 255, 0.12);
+}
+
+.workspace-panel {
+  display: none;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.workspace-panel.active {
+  display: flex;
+  animation: workspaceFadeIn 0.2s ease-out;
+}
+
+@keyframes workspaceFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 720px) {
+  .workspace-nav {
+    padding: 6px;
+  }
+
+  .workspace-tab {
+    flex: 1 1 calc(50% - 6px);
+    padding: 9px 10px;
+    font-size: 13px;
+  }
+}

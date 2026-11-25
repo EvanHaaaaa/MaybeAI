@@ -104,10 +104,13 @@ class MemoryRetriever:
 
         # 2. Retrieve user-specific and topical episodic memories
         query_text = f"{current_user} {query} {game_context}".strip()
-        matched_episodes = self.db.hybrid_search(
-            query_str=query_text,
-            top_k=top_k
-        )
+        try:
+            matched_episodes = self.db.hybrid_search(
+                query_str=query_text,
+                top_k=top_k
+            )
+        except Exception:
+            matched_episodes = []
 
         # If user has specific memories not yet in matched, prepend them
         if current_user and current_user not in ("Chat", "System"):
@@ -118,6 +121,44 @@ class MemoryRetriever:
                     matched_episodes.insert(0, u_ep)
 
         # 3. Retrieve pending promises
+        promises = self.db.get_pending_promises(user=current_user if current_user not in ("Chat", "System") else None)
+
+        return MemoryRecallResult(
+            episodes=matched_episodes[:top_k],
+            user_profile=user_profile,
+            promises=promises
+        )
+
+    async def arecall(
+        self,
+        query: str,
+        current_user: str = "Chat",
+        game_context: str = "",
+        top_k: int = 3
+    ) -> MemoryRecallResult:
+        """
+        Async counterpart to recall(), using non-blocking ahybrid_search.
+        """
+        user_profile = None
+        if current_user and current_user not in ("Chat", "System", "Eve", "EveMaybe"):
+            user_profile = self.db.get_or_create_user(current_user)
+
+        query_text = f"{current_user} {query} {game_context}".strip()
+        try:
+            matched_episodes = await self.db.ahybrid_search(
+                query_str=query_text,
+                top_k=top_k
+            )
+        except Exception:
+            matched_episodes = []
+
+        if current_user and current_user not in ("Chat", "System"):
+            user_specific = self.db.get_recent_memories(limit=2, user=current_user)
+            seen_ids = {e["id"] for e in matched_episodes}
+            for u_ep in user_specific:
+                if u_ep["id"] not in seen_ids:
+                    matched_episodes.insert(0, u_ep)
+
         promises = self.db.get_pending_promises(user=current_user if current_user not in ("Chat", "System") else None)
 
         return MemoryRecallResult(

@@ -1,17 +1,25 @@
 import asyncio
 import json
+import os
 import time
-from typing import Dict, Any, Optional, Set, Callable
+from typing import Dict, Any, Optional, Set, Callable, List
 from core.brain import Brain
 from core.tts import TTSEngine
 from core.vts_client import VTSClient
 from core.chat_receiver import ChatReceiver, ChatMessage
+from core.platforms import YouTubeLiveAdapter, DiscordAdapter
 from core.moderator import Moderator
 from core.actions import ActionParser
 from core.singer import Singer
 from core.minecraft.controller import MinecraftController
 from core.chess.controller import ChessController
 from core.conversation.chat_curator import ChatInteraction
+from core.event_bus import (
+    EventBus,
+    WS_TO_BUS_EVENT,
+    BUS_TO_WS_EVENT,
+    INTERACTION_STARTED,
+)
 
 class Orchestrator:
     """
@@ -19,9 +27,12 @@ class Orchestrator:
     Chat -> Filter -> Brain -> Action/Emotion Parse -> VTS/Avatar -> TTS Voice -> Web Clients
     """
 
-    def __init__(self, config_dir: str = "config"):
+    def __init__(self, config_dir: str = "config", event_bus: Optional[EventBus] = None):
         self.config_dir = config_dir
+        self.event_bus = event_bus if event_bus is not None else EventBus()
         self.brain = Brain(f"{config_dir}/settings.json", f"{config_dir}/character.json")
+        # Share the same EventBus instance between Orchestrator and ConversationEngine
+        self.brain.conversation.event_bus = self.event_bus
         settings = self.brain.settings
 
         # Load Moderator config
@@ -38,7 +49,8 @@ class Orchestrator:
             voice=tts_cfg.get("voice", "en-US-AnaNeural"),
             rate=tts_cfg.get("rate", "+5%"),
             pitch=tts_cfg.get("pitch", "+10Hz"),
-            enabled=tts_cfg.get("enabled", True)
+            enabled=tts_cfg.get("enabled", True),
+            interruptible=tts_cfg.get("interruptible", True),
         )
 
         # Load VTS config
@@ -72,9 +84,39 @@ class Orchestrator:
         )
 
         self.chat = ChatReceiver()
+        self._configure_platform_adapters(settings)
         self.is_running = False
         self._busy_lock = asyncio.Lock()
         self.web_listeners: Set[Callable[[Dict[str, Any]], None]] = set()
+        self.event_bus.subscribe("*", self._dispatch_to_web_listeners)
+
+    def _configure_platform_adapters(self, settings: Dict[str, Any]) -> None:
+        """Instantiates and registers YouTube Live & Discord chat adapters from settings/env."""
+        yt_cfg = settings.get("youtube", {}) if isinstance(settings, dict) else {}
+        yt_key = str(yt_cfg.get("api_key") or "").strip()
+        if not yt_key or yt_key == "********":
+            yt_key = os.getenv("YOUTUBE_API_KEY", "").strip()
+        yt_adapter = YouTubeLiveAdapter(
+            receiver=self.chat,
+            api_key=yt_key,
+            live_chat_id=str(yt_cfg.get("live_chat_id") or "").strip(),
+            poll_interval_sec=float(yt_cfg.get("poll_interval_sec", 5.0) or 5.0),
+            enabled=bool(yt_cfg.get("enabled", False)),
+        )
+        self.chat.register_adapter(yt_adapter)
+
+        dc_cfg = settings.get("discord", {}) if isinstance(settings, dict) else {}
+        dc_token = str(dc_cfg.get("bot_token") or "").strip()
+        if not dc_token or dc_token == "********":
+            dc_token = os.getenv("DISCORD_BOT_TOKEN", "").strip()
+        dc_adapter = DiscordAdapter(
+            receiver=self.chat,
+            bot_token=dc_token,
+            channel_id=str(dc_cfg.get("channel_id") or "").strip(),
+            poll_interval_sec=float(dc_cfg.get("poll_interval_sec", 3.0) or 3.0),
+            enabled=bool(dc_cfg.get("enabled", False)),
+        )
+        self.chat.register_adapter(dc_adapter)
 
     @property
     def is_busy(self) -> bool:
@@ -86,8 +128,9 @@ class Orchestrator:
     def unregister_listener(self, callback: Callable[[Dict[str, Any]], None]):
         self.web_listeners.discard(callback)
 
-    async def broadcast(self, event_type: str, data: Dict[str, Any]):
-        message = {"type": event_type, "data": data}
+    async def _dispatch_to_web_listeners(self, event_name: str, payload: Dict[str, Any]):
+        ws_type = BUS_TO_WS_EVENT.get(event_name, event_name)
+        message = {"type": ws_type, "data": payload}
         for listener in list(self.web_listeners):
             try:
                 res = listener(message)
@@ -95,6 +138,10 @@ class Orchestrator:
                     await res
             except Exception:
                 pass
+
+    async def broadcast(self, event_type: str, data: Dict[str, Any]):
+        bus_event = WS_TO_BUS_EVENT.get(event_type, event_type)
+        await self.event_bus.publish(bus_event, data)
 
     async def start(self):
         self.is_running = True
@@ -115,6 +162,10 @@ class Orchestrator:
                 )
             )
 
+        # Start configured multi-platform chat adapters (YouTube Live, Discord)
+        await self.chat.start_adapters()
+        await self.broadcast("platform_status", self.chat.get_platforms_status())
+
         # Start master processing loop
         asyncio.create_task(self._process_chat_loop())
         # Start spontaneous banter / idle stream thoughts loop
@@ -126,6 +177,7 @@ class Orchestrator:
         """Gracefully stops background loops and closes external client sessions."""
         self.is_running = False
         self.chat.stop()
+        await self.chat.stop_adapters()
         await self.vts.disconnect()
         await self.brain.close()
 
@@ -145,7 +197,8 @@ class Orchestrator:
             enabled=tts_cfg.get("enabled"),
             voice=tts_cfg.get("voice"),
             rate=tts_cfg.get("rate"),
-            pitch=tts_cfg.get("pitch")
+            pitch=tts_cfg.get("pitch"),
+            interruptible=tts_cfg.get("interruptible"),
         )
         if tts_cfg.get("voice"):
             self.singer.voice = tts_cfg["voice"]
@@ -171,6 +224,13 @@ class Orchestrator:
                     oauth=twitch_cfg.get("oauth_token", "")
                 )
             )
+
+        # 3b. Update Multi-Platform Adapters (YouTube Live, Discord)
+        await self.chat.stop_adapters()
+        self._configure_platform_adapters(new_settings)
+        if self.is_running:
+            await self.chat.start_adapters()
+        await self.broadcast("platform_status", self.chat.get_platforms_status())
 
         # 4. Update Moderator
         mod_cfg = new_settings.get("moderator", {})
@@ -398,7 +458,8 @@ class Orchestrator:
             is_donation=msg.is_donation,
             donation_amount=msg.donation_amount,
             donation_currency=msg.donation_currency,
-            is_creator=is_creator_flag
+            is_creator=is_creator_flag,
+            emit_events=False
         )
         await self.broadcast("mood_updated", self.brain.mood.get_state())
         await self.broadcast("relationship_updated", self.brain.relationships.get_state())
@@ -483,6 +544,14 @@ class Orchestrator:
         clean_input = primary.text
         msg_lower = clean_input.lower()
         is_creator = bool(getattr(primary, "is_creator", False) or primary.source in ("creator", "mic"))
+
+        await self.event_bus.publish(INTERACTION_STARTED, {
+            "user": primary.user,
+            "text": clean_input,
+            "source": primary.source,
+            "interaction_type": interaction.interaction_type,
+            "is_creator": is_creator,
+        })
 
         # Check for spontaneous improv command
         if msg_lower.startswith("!improv"):
@@ -721,20 +790,6 @@ class Orchestrator:
         else:
             llm_input = clean_input
 
-        raw_response = await self.brain.generate_response(
-            user_name=primary.user,
-            message=llm_input,
-            game_context=game_context,
-            is_donation=is_donation,
-            donation_amount=primary.donation_amount,
-            is_group_debate=is_group_debate,
-            debate_users=debate_users
-        )
-
-        _, clean_response = self.moderator.clean_text(raw_response)
-        speech_text, emotions, actions = ActionParser.parse(clean_response)
-        primary_emotion = emotions[0] if emotions else "neutral"
-
         if is_donation:
             user_label = f"Eve (to {primary.user} 🎁 {primary.donation_amount})"
             # In-game celebration if Eve is connected in Minecraft!
@@ -750,35 +805,147 @@ class Orchestrator:
             user_label = "Eve"
 
         channel_name = "creator" if is_creator else "audience"
-        await self.broadcast("ai_response", {
-            "user": user_label,
-            "raw": clean_response,
-            "speech": speech_text,
-            "emotions": emotions,
-            "actions": actions,
-            "source": primary.source,
-            "is_donation": is_donation,
-            "donation_amount": primary.donation_amount,
-            "is_creator": is_creator,
-            "channel": channel_name
-        })
 
-        if primary.source == "minecraft":
-            await self.minecraft.send_chat(speech_text)
+        tts_speak_overridden = (
+            "speak" in getattr(self.tts, "__dict__", {})
+            and "speak_stream" not in getattr(self.tts, "__dict__", {})
+        )
+        brain_gen_overridden = (
+            "generate_response" in getattr(self.brain, "__dict__", {})
+            and "generate_response_stream" not in getattr(self.brain, "__dict__", {})
+        )
+        use_streaming = (
+            hasattr(self.brain, "is_streaming_enabled")
+            and self.brain.is_streaming_enabled()
+            and hasattr(self.brain, "generate_response_stream")
+            and hasattr(self.tts, "speak_stream")
+            and not tts_speak_overridden
+            and not brain_gen_overridden
+        )
 
-        if self.vts.connected:
-            await self.vts.trigger_expression(primary_emotion)
+        if use_streaming:
+            current_emotion = "neutral"
+            raw_chunks: List[str] = []
 
-        async def on_mouth_update(val: float):
-            if self.vts.connected:
-                await self.vts.update_mouth(val)
-            await self.broadcast("avatar_state", {
-                "mouth_open": val,
-                "emotion": primary_emotion
+            async def _stream_chunks():
+                async for chunk in self.brain.generate_response_stream(
+                    user_name=primary.user,
+                    message=llm_input,
+                    game_context=game_context,
+                    is_donation=is_donation,
+                    donation_amount=primary.donation_amount,
+                    is_group_debate=is_group_debate,
+                    debate_users=debate_users,
+                ):
+                    raw_chunks.append(chunk)
+                    yield chunk
+
+            async def on_tag(chunk_emotions: List[str], chunk_actions: List[str]):
+                nonlocal current_emotion
+                if chunk_emotions:
+                    current_emotion = chunk_emotions[0]
+                    if self.vts.connected:
+                        await self.vts.trigger_expression(current_emotion)
+                    await self.broadcast("avatar_state", {
+                        "mouth_open": 0.0,
+                        "emotion": current_emotion,
+                    })
+
+            async def on_sentence_start(sentence_text: str):
+                _, clean_sentence = self.moderator.clean_text(sentence_text)
+                if not clean_sentence:
+                    return
+                print(f"[AI Speech Stream] [{current_emotion}] {clean_sentence}")
+                await self.broadcast("ai_chunk", {
+                    "user": user_label,
+                    "chunk": clean_sentence,
+                    "emotion": current_emotion,
+                    "source": primary.source,
+                    "is_donation": is_donation,
+                    "donation_amount": primary.donation_amount,
+                    "is_creator": is_creator,
+                    "channel": channel_name,
+                })
+
+            async def on_stream_mouth_update(val: float):
+                if self.vts.connected:
+                    await self.vts.update_mouth(val)
+                await self.broadcast("avatar_state", {
+                    "mouth_open": val,
+                    "emotion": current_emotion,
+                })
+
+            await self.tts.speak_stream(
+                _stream_chunks(),
+                on_mouth_update=on_stream_mouth_update,
+                on_sentence_start=on_sentence_start,
+                on_tag=on_tag,
+            )
+
+            raw_response = "".join(raw_chunks).strip()
+            _, clean_response = self.moderator.clean_text(raw_response)
+            speech_text, emotions, actions = ActionParser.parse(clean_response)
+
+            await self.broadcast("ai_response", {
+                "user": user_label,
+                "raw": clean_response,
+                "speech": speech_text,
+                "emotions": emotions,
+                "actions": actions,
+                "source": primary.source,
+                "is_donation": is_donation,
+                "donation_amount": primary.donation_amount,
+                "is_creator": is_creator,
+                "channel": channel_name,
+                "streamed": True,
             })
 
-        print(f"[AI Speech] [{primary_emotion}] {speech_text}")
-        await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+            if primary.source == "minecraft" and speech_text:
+                await self.minecraft.send_chat(speech_text)
+        else:
+            raw_response = await self.brain.generate_response(
+                user_name=primary.user,
+                message=llm_input,
+                game_context=game_context,
+                is_donation=is_donation,
+                donation_amount=primary.donation_amount,
+                is_group_debate=is_group_debate,
+                debate_users=debate_users
+            )
+
+            _, clean_response = self.moderator.clean_text(raw_response)
+            speech_text, emotions, actions = ActionParser.parse(clean_response)
+            primary_emotion = emotions[0] if emotions else "neutral"
+
+            await self.broadcast("ai_response", {
+                "user": user_label,
+                "raw": clean_response,
+                "speech": speech_text,
+                "emotions": emotions,
+                "actions": actions,
+                "source": primary.source,
+                "is_donation": is_donation,
+                "donation_amount": primary.donation_amount,
+                "is_creator": is_creator,
+                "channel": channel_name
+            })
+
+            if primary.source == "minecraft":
+                await self.minecraft.send_chat(speech_text)
+
+            if self.vts.connected:
+                await self.vts.trigger_expression(primary_emotion)
+
+            async def on_mouth_update(val: float):
+                if self.vts.connected:
+                    await self.vts.update_mouth(val)
+                await self.broadcast("avatar_state", {
+                    "mouth_open": val,
+                    "emotion": primary_emotion
+                })
+
+            print(f"[AI Speech] [{primary_emotion}] {speech_text}")
+            await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
 
         if self.vts.connected:
             await self.vts.trigger_expression("neutral")

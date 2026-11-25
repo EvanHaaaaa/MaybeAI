@@ -6,13 +6,13 @@
 
 <p align="center">
   <strong>Autonomous AI VTuber Streamer System inspired by Neuro-sama</strong><br>
-  <em>Featuring Multi-Provider LLMs, Edge-TTS Lip-Sync, Live2D/Canvas Rendering, Minecraft Autonomy, Screen Vision, Desktop Companion, Mini-Games, Storytelling RPG, Dynamic Karaoke Performance, and Centralized Cyberpunk Configuration Center.</em>
+  <em>Featuring Streaming Multi-Provider LLMs, Pipelined Sentence-Chunked Edge-TTS Lip-Sync, Dedicated Transparent OBS Overlay &amp; Tabbed Studio UI, Typed Async EventBus, Semantic Memory Embeddings, Multi-Platform Live Chat (Twitch / YouTube Live / Discord), Live2D/Canvas Rendering, Minecraft Autonomy, Screen Vision, Desktop Companion, Mini-Games, Storytelling RPG, Dynamic Karaoke Performance, and Centralized Cyberpunk Configuration Center.</em>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python 3.12" />
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688.svg" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Tests-208%20Passed%20(100%25)-success.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-246%20Passed%20(100%25)-success.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/UI-Cyberpunk%20Futuristic-8b5cf6.svg" alt="UI" />
   <img src="https://img.shields.io/badge/Live2D-VTube%20Studio%20API-ff69b4.svg" alt="VTS" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
@@ -67,34 +67,35 @@ Eve terintegrasi secara *full-duplex* dengan browser Web Canvas, VTube Studio (L
 ```mermaid
 flowchart TD
     subgraph Inputs ["Input Layer"]
-        Twitch["Twitch IRC Chat"]
-        WebChat["Web Dashboard Chat"]
+        Twitch["Twitch IRC / YouTube Live / Discord"]
+        WebChat["Web Dashboard Chat (Creator &amp; Audience)"]
         Microphone["Microphone / STT (Whisper)"]
-        Vision["Screen Capture & Vision OCR"]
+        Vision["Screen Capture &amp; Vision OCR"]
         MC_Bridge["Minecraft Server Events"]
     end
 
-    subgraph Core ["MaybeAI Autonomous Orchestrator"]
-        Mod["Safety & Moderation Filter"]
-        ConfigMgr["Configuration Manager (Atomic & Hot-Reload)"]
-        Brain["LLM Brain (Gemini / OpenAI / Ollama / Mock)"]
-        MoodSys["Dynamic Mood & Emotion System"]
-        PersEvo["Personality Evolution (EXP & Leveling)"]
-        RelDossier["Relationship Matrix & Second Brain"]
-        GoalPlan["Goal Planning & Autonomous Agent"]
+    subgraph Core ["MaybeAI Autonomous Orchestrator &amp; EventBus"]
+        EventBus["Typed Async EventBus (Pub/Sub &amp; History)"]
+        Mod["Safety &amp; Moderation Filter"]
+        ConfigMgr["Configuration Manager (Atomic &amp; Hot-Reload)"]
+        Brain["Streaming LLM Brain (Gemini / OpenAI / Ollama / Mock)"]
+        MoodSys["Dynamic Mood &amp; Emotion System"]
+        PersEvo["Personality Evolution (EXP &amp; Leveling)"]
+        RelDossier["Semantic Memory Embeddings &amp; Second Brain"]
+        GoalPlan["Goal Planning &amp; Autonomous Agent"]
         Minigames["Interactive Mini-Games Engine"]
-        StoryRPG["Dynamic Storytelling & RPG"]
-        PerfDir["Karaoke & Performance Director"]
-        DesktopComp["Desktop Companion & Permission Gate"]
-        MCEngine["Minecraft Dual-Engine & Social AI"]
-        ChessEng["Chess Engine & FICS Bridge"]
+        StoryRPG["Dynamic Storytelling &amp; RPG"]
+        PerfDir["Karaoke &amp; Performance Director"]
+        DesktopComp["Desktop Companion &amp; Permission Gate"]
+        MCEngine["Minecraft Dual-Engine &amp; Social AI"]
+        ChessEng["Chess Engine &amp; FICS Bridge"]
     end
 
-    subgraph Outputs ["Output & Presentation Layer"]
-        TTS["Edge-TTS & Dynamic Lip-Sync"]
-        CanvasAvatar["Built-in HTML5 Canvas 2D Avatar"]
+    subgraph Outputs ["Output &amp; Presentation Layer"]
+        TTS["Pipelined Streaming Edge-TTS &amp; Lip-Sync"]
+        OBSOverlay["Dedicated Transparent OBS Overlay (/overlay)"]
         VTS["VTube Studio API (Live2D Model)"]
-        WebHUD["Web Streamer Dashboard (/ & /settings)"]
+        WebHUD["Tabbed Web Studio Dashboard (/ &amp; /settings)"]
         DesktopAct["Desktop OS Actions (Media/Apps)"]
         MC_Act["Minecraft Bot Actions (Mineflayer)"]
     end
@@ -109,26 +110,29 @@ flowchart TD
 
 ## 🚀 Katalog Fitur Komprehensif
 
-### 1. Autonomous Brain & Multi-Provider LLM
+### 1. Autonomous Brain & Multi-Provider LLM (with Streaming)
 - **Multi-Provider Architecture:** Mendukung **Google Gemini** (default: `gemini-3-flash-preview` via `config/settings.json`, otomatis *fallback* ke Mock Mode jika `GEMINI_API_KEY` belum diisi), **OpenAI** (GPT-4o / GPT-4o-mini), **Local Ollama** (Llama 3.2 / Mistral / DeepSeek), serta **Mock Mode** bawaan (bisa langsung dijalankan tanpa internet dan tanpa API key). Provider dapat di-override via `MAYBEAI_LLM_PROVIDER` atau flag `--provider`.
+- **Streaming Brain-to-TTS (`llm.streaming_enabled: true`):** `Brain.generate_response_stream()` mengalirkan token secara real-time melalui Gemini SSE (`streamGenerateContent?alt=sse`), OpenAI SSE (`stream: true`), Ollama NDJSON, maupun Mock chunking sehingga Eve mulai berbicara segera setelah kalimat pertama selesai dibentuk.
 - **Fallback Otomatis:** Jika API provider utama tidak memiliki API key, kehabisan kuota, atau mengalami timeout, sistem otomatis beralih ke respons persona cadangan (`mock`) tanpa memutus siaran.
 - **Dynamic Emotion & Action Tags:** Brain secara cerdas membubuhkan tag ekspresi (seperti `[emotion: neutral]`, `[emotion: happy]`, `[emotion: smug]`, `[emotion: angry]`, `[emotion: blush]`, `[emotion: surprised]`, `[emotion: confused]`) dan tag aksi (`[action: giggle]`, `[action: sigh]`, `[action: wink]`) yang diparsing oleh `ActionParser` (`core/actions.py`) untuk menggerakkan ekspresi avatar secara presisi.
 - **Token & Temperature Hot-Reload:** Parameter kreativitas (*temperature*) dan panjang respons (*max_tokens*) dapat diubah langsung dari Configuration Center tanpa me-restart aplikasi.
 
-### 2. Edge-TTS & Dynamic Lip-Sync
+### 2. Pipelined Streaming Edge-TTS & Dynamic Lip-Sync
+- **Pipelined Sentence-Chunked Streaming (`SentenceChunker` + `TTSEngine.speak_stream()`):** Memecah aliran teks LLM per kalimat (`.`, `!`, `?`, `\n`, `~`) sambil menjaga tag `[emotion:]`/`[action:]`, singkatan, dan angka desimal tetap utuh. Kalimat $N+1$ disintesis secara konkuren saat kalimat $N$ sedang diputar, dengan pembersihan file sementara `speech_*.mp3` yang terjamin.
 - **Sintesis Suara Natural:** Memanfaatkan teknologi Edge-TTS berkecepatan tinggi dengan berbagai pilihan suara jernih (`en-US-AnaNeural`, `id-ID-GadisNeural`, `ja-JP-NanamiNeural`, dll).
 - **Real-Time Lip-Sync Calculation:** Menghitung amplitudo vokal dan pergerakan fonem mulut secara proporsional (`mouth_open` 0.0 – 1.0) untuk menganimasikan bibir avatar sinkron dengan audio.
 - **Graceful Mouth Flapping Fallback:** Apabila TTS dinonaktifkan oleh pengguna, avatar tetap menggerakkan bibirnya secara halus saat membalas teks, mencegah avatar terlihat kaku atau *freeze*.
 - **Live Voice Modulation:** Pengaturan kecepatan bicara (*rate*), tinggi nada (*pitch*), dan volume suara dapat disesuaikan per milidetik.
 
-### 3. Dual Avatar Rendering
-- **Built-in HTML5 Canvas 2D Avatar:** Siap pakai di browser (`http://localhost:7860`). Menampilkan animasi mata berkedip (*blinking*), gerakan kepala melayang (*floating idle*), perona pipi (*blushing*), efek partikel, dan sinkronisasi bibir. Sangat ringan dan siap dijadikan *Browser Source* di OBS Studio!
+### 3. Dual Avatar Rendering, Dedicated OBS Overlay & Tabbed Studio UI
+- **Dedicated Transparent OBS Overlay (`/overlay`):** Halaman khusus tanpa kontrol studio di `http://localhost:7860/overlay` (`web/overlay.html`, `overlay.css`, `overlay.js`) dengan latar belakang transparan, Virtual Avatar Canvas (`#avatarCanvas`), subtitle melayang (*glassmorphic*), dan banner notifikasi Donasi/SuperChat real-time—siap pakai sebagai *Browser Source* OBS Studio.
+- **Modular 4-Tab Studio Workspace (`/`):** Dashboard utama (`http://localhost:7860`) tertata dalam 4 tab workspace (*sticky nav* dengan persistensi `localStorage`): **🎤 Live Stage**, **🎮 Gaming**, **🎲 RPG & Mini-Games**, dan **🧠 Brain & Memory**, dilengkapi tombol pintas **📺 OBS Overlay**.
 - **VTube Studio (VTS) WebSocket API Integration:** Menghubungkan Eve ke model Live2D profesional di VTube Studio (`ws://localhost:8001`). Jika VTS belum berjalan, sistem otomatis masuk ke mode *Standby/Virtual* tanpa menyebabkan error, dan menyediakan tombol *probe reconnect* sekali klik.
 
 ### 4. Centralized Cyberpunk Configuration Center
 - **Dedicated GUI URL:** Halaman khusus di `http://localhost:7860/settings` dengan tema estetika Cyberpunk / Futuristic AI (aksen neon, glow cards, toggle switch, slider nilai interaktif).
-- **15 Kategori Pengaturan Lengkap:** Meliputi General, Brain, Personality, Memory, Mood, Voice/TTS, Speech-to-Text (`stt`), Avatar/VTS, Karaoke, Twitch, Moderation, Security (`security`), Minecraft, Autonomous Agent, dan Performance.
-- **Secret Protection:** Token OAuth Twitch (`twitch.oauth_token`), Creator Access Token (`security.creator_token`), dan API Key **tidak pernah diekspos dalam bentuk plaintext** via HTTP GET (`"********"` masking) dan tidak akan terhapus jika form disimpan tanpa mengubah token.
+- **17 Kategori Pengaturan Lengkap:** Meliputi General, Brain (`streaming_enabled`), Personality, Memory (`embedding_provider`), Mood, Voice/TTS, Speech-to-Text (`stt`), Avatar/VTS, Karaoke, Twitch, YouTube Live (`youtube`), Discord (`discord`), Moderation, Security (`security`), Minecraft, Autonomous Agent, dan Performance.
+- **Secret Protection:** Token OAuth Twitch (`twitch.oauth_token`), YouTube API Key (`youtube.api_key`), Discord Bot Token (`discord.bot_token`), dan Creator Access Token (`security.creator_token`) **tidak pernah diekspos dalam bentuk plaintext** via HTTP GET (`"********"` masking) dan tidak akan terhapus jika form disimpan tanpa mengubah token.
 - **Atomic Persistence:** Menggunakan mekanisme *temp-write* (`.settings.json.tmp`) dan atomic `os.replace()` untuk mencegah korupsi file saat listrik mati atau crash.
 - **Live Hot-Reload:** Perubahan diterapkan seketika ke seluruh modul aktif di runtime tanpa perlu restart server.
 - **Interactive Diagnostic Test Runners:** Tombol uji live probe untuk LLM, TTS, VTS, Twitch, Moderator, dan Memory langsung dari browser.
@@ -191,7 +195,8 @@ flowchart TD
 - **Autonomous Mission Loop:** Eve memiliki tujuan mandiri selama streaming (misalnya: membangun benteng di Minecraft, mencapai ELO 1500 di Catur, atau menyelesaikan setlist lagu).
 - **Idle Banter Scheduler:** Jika chat sepi dalam interval tertentu, Eve secara proaktif membuka topik pembicaraan baru atau menceritakan pengalamannya agar stream tetap hidup.
 
-### 15. User Relationships & Second Brain Memory
+### 15. User Relationships, Semantic Embeddings & Second Brain Memory
+- **Multi-Backend Semantic Embeddings (`core/memory/embedding.py`):** Mendukung provider `auto | local | gemini | openai | hash` (otomatis memilih `sentence-transformers`/`fastembed` lokal, Gemini `text-embedding-004`, OpenAI `text-embedding-3-small`, atau *sublinear-TF hash* offline dengan LRU cache dan keamanan *dimension-mismatch* pada `MemoryDatabase` & `MemoryRetriever`).
 - **Profil Hubungan Per Penonton (Viewer Dossier):** Eve mengingat siapa saja penontonnya, melacak frekuensi obrolan, skor keakraban (*Familiarity*), tingkat kepercayaan (*Trust*), hubungan rivalitas (*Rivalry*), dan kasih sayang (*Affection*).
 - **Shared Inside Jokes:** Mencatat lelucon lokal dan kenangan khusus bersama penonton tertentu ke dalam file Markdown tersinkronisasi di folder `data/second_brain/relationships/`.
 
@@ -205,12 +210,15 @@ flowchart TD
 ### 18. Speech-To-Text & Microphone Input
 - **Dukungan Input Suara Creator:** Mendengarkan suara Anda melalui mikrofon menggunakan model OpenAI Whisper (mendukung mode CPU dan GPU) sehingga Anda bisa mengobrol secara langsung dengan Eve layaknya partner nyata.
 
-### 19. Twitch IRC & Web Chat Ingestion (Dual Channel: Creator VIP & Public Stream)
-- **Koneksi Siap Pakai:** Terhubung ke server Twitch IRC port 6667 dengan dukungan token OAuth.
-- **Anti-Spam Cooldown & Mention Filter:** Mengatur jeda pesan masuk dan opsi hanya merespons saat Eve di-mention (`@EveMaybe`).
+### 19. Multi-Platform Live Chat (Twitch, YouTube Live, Discord, Web) & Event-Driven Core (`EventBus`)
+- **Multi-Platform Adapter Registry (`core/platforms/`, `core/chat_receiver.py`):**
+  - **Twitch IRC:** Terhubung ke server Twitch IRC port 6667 dengan dukungan token OAuth, anti-spam cooldown, dan mention filter.
+  - **YouTube Live (`YouTubeLiveAdapter`):** Polling YouTube Data API v3 (`liveChatMessages`) via `aiohttp`, otomatis memetakan **SuperChat** dan **SuperSticker** menjadi event donasi (`is_donation=True`, `source="youtube"`).
+  - **Discord (`DiscordAdapter`):** Polling Discord REST API v10 menggunakan Bot Token & Channel ID (`source="discord"`), memfilter pesan bot, dan terdegradasi aman saat tidak dikonfigurasi.
+- **Typed Async EventBus (`core/event_bus.py`):** Menghubungkan `Orchestrator`, `ConversationEngine`, dan WebSocket broadcast melalui pub/sub asinkron dengan dukungan wildcard `*`, isolasi exception per handler, *ring buffer* riwayat event, dan endpoint diagnostik `GET /api/eventbus/stats`.
 - **Pemisahan Jalur Komunikasi (Dual Channel Tabs):**
   - **👑 Tab Chat Saya (Creator VIP):** Jalur eksklusif streamer dengan prioritas antrian absolut (`priority_score = 350.0`, melompati antrian penonton umum dan saweran). Dilengkapi dock mikrofon bawaan (Web Speech STT / Whisper) untuk berbicara langsung secara verbal ke Eve.
-  - **👥 Tab Stream Chat (Penonton Publik):** Jalur pesan publik (Twitch & penonton web). Pesan masuk ke antrian kurasi reguler dan dievaluasi berdasarkan relevansi, saweran, atau topik perdebatan.
+  - **👥 Tab Stream Chat (Penonton Publik):** Jalur pesan publik (Twitch, YouTube, Discord, & penonton web). Pesan masuk ke antrian kurasi reguler dan dievaluasi berdasarkan relevansi, saweran, atau topik perdebatan.
 - **Strict Permission Guardrails:** Perintah krusial sistem (peluncuran aplikasi Desktop Companion `!desktop`, pergantian mode gameplay/server Minecraft `!mc mode/server`, dan reset/pengaturan ELO catur `!chess elo/new`) diproteksi penuh dan hanya dapat dijalankan oleh Creator. Jika penonton mencoba mengeksekusinya, Eve akan menolak dengan nada sarkas khasnya tanpa mengeksekusi aksi fisik pada sistem.
 
 ---
@@ -230,19 +238,21 @@ MaybeAI/
 │   └── minecraft_servers.json     # Daftar server Minecraft tersimpan
 ├── core/
 │   ├── actions.py                 # Parser tag [emotion: x] dan [action: x]
-│   ├── brain.py                   # Otak LLM (Gemini, OpenAI, Ollama, Mock)
-│   ├── tts.py                     # Edge-TTS Engine & Simulasi Lip-Sync
+│   ├── brain.py                   # Otak LLM Streaming (Gemini, OpenAI, Ollama, Mock)
+│   ├── event_bus.py               # Typed Async Pub/Sub EventBus & Event History
+│   ├── tts.py                     # Pipelined Streaming Edge-TTS (SentenceChunker) & Lip-Sync
 │   ├── vts_client.py              # Client WebSocket VTube Studio API
-│   ├── chat_receiver.py           # Ingestion Twitch IRC & Web Chat Queue
+│   ├── chat_receiver.py           # Ingestion Twitch IRC, Web Chat, & Multi-Platform Registry
+│   ├── platforms/                 # Adapter Live Chat (YouTube Live + SuperChat, Discord)
 │   ├── moderator.py               # Filter keamanan, spam, & prompt injection
 │   ├── singer.py                  # Player BGM Karaoke & sinkronisasi lirik
 │   ├── stt.py                     # Whisper Speech-to-Text via Microphone
-│   ├── orchestrator.py            # Event loop pusat, hot-reload, & WebSocket router
+│   ├── orchestrator.py            # Event loop pusat, streaming pipeline, EventBus, & hot-reload
 │   ├── config_manager.py          # Centralized Config Engine, Atomic Save, & Diagnostics
 │   ├── chess/                     # Modul logika catur, ELO scaling, & komentar
 │   ├── conversation/              # Manajemen konteks percakapan & memory window
 │   ├── desktop/                   # Desktop Companion, App launcher, & Permission gate
-│   ├── memory/                    # Episodic memory & Second Brain Markdown sync
+│   ├── memory/                    # Semantic Embeddings, Episodic memory, & Second Brain sync
 │   ├── minecraft/                 # Minecraft engine, Casual & Speedrun agents, Controller
 │   │   └── multiplayer/           # Multiplayer Social Intelligence & Contribution ledger
 │   ├── minigames/                 # Interactive Mini-Games Engine (Trivia, Riddle, dll)
@@ -271,16 +281,19 @@ MaybeAI/
 │   ├── node/                      # Runtime Node.js portabel (Windows)
 │   └── node_modules/              # Paket Node.js terbundel
 ├── web/
-│   ├── index.html                 # Dashboard Web utama & 2D Canvas Avatar
-│   ├── style.css                  # Styling Cyberpunk dashboard & HUD
-│   ├── app.js                     # Logika Web client, rendering avatar, & WebSocket
+│   ├── index.html                 # Tabbed Web Studio Dashboard & 2D Canvas Avatar
+│   ├── style.css                  # Styling Cyberpunk dashboard, workspace tabs, & HUD
+│   ├── app.js                     # Logika Web client, workspace tabs, rendering avatar, & WebSocket
+│   ├── overlay.html               # Dedicated Transparent OBS Browser Source Overlay (/overlay)
+│   ├── overlay.css                # Styling transparan OBS, floating subtitles, & donation alert
+│   ├── overlay.js                 # Renderer avatar & subtitle real-time untuk OBS Overlay
 │   ├── settings.html              # Antarmuka Cyberpunk Configuration Center
 │   ├── settings.css               # Styling khusus Configuration Center
 │   └── settings.js                # Form engine, secret protection, & test runner
 ├── tests/
 │   ├── __init__.py                # Menetapkan MAYBEAI_LLM_PROVIDER=mock saat test berjalan
 │   ├── test_guard_runner.js       # Uji unit guard mode Minecraft (Node.js)
-│   └── test_*.py                  # 20 modul pengujian unit & integrasi Python (208 tests)
+│   └── test_*.py                  # 25 modul pengujian unit & integrasi Python (246 tests)
 ├── run.py                         # FastAPI Web Server & Application Launcher
 ├── requirements.txt               # Daftar dependensi Python
 ├── LICENSE                        # Lisensi MIT (EvanH 2026)
@@ -333,6 +346,11 @@ MAYBEAI_CREATOR_TOKEN=
 TWITCH_OAUTH_TOKEN=oauth:...
 TWITCH_CHANNEL=nama_channel_kamu
 TWITCH_BOT_NICK=EveMaybe
+
+# YouTube Live Chat & Discord (Opsional)
+YOUTUBE_API_KEY=
+DISCORD_BOT_TOKEN=
+MAYBEAI_EMBEDDING_PROVIDER=
 ```
 
 ### 4. Menjalankan Aplikasi
@@ -373,9 +391,9 @@ Akses halaman kontrol konfigurasi di: 👉 **`http://localhost:7860/settings`**
 *(Atau klik tombol **⚙️ Configuration Center** di bagian atas Web Dashboard utama).*
 
 ### Fitur Utama Configuration Center:
-1. **Navigasi Sidebar Responsif:** 15 kategori pengaturan (termasuk `stt` dan `security`) plus tampilan *System Diagnostics* dengan ikon khas cyberpunk.
-2. **Pencarian Real-Time (*Search Box*):** Menemukan pengaturan apapun hanya dengan mengetikkan kata kunci (contoh: *temperature*, *volume*, *minecraft*, *token*, *stt*).
-3. **Perlindungan Token & Masking:** Secret sensitif seperti `twitch.oauth_token` dan `security.creator_token` disamarkan menjadi `********` dan dipertahankan saat penyimpanan atomik bila tidak diubah.
+1. **Navigasi Sidebar Responsif:** 17 kategori pengaturan (termasuk `stt`, `security`, `youtube`, dan `discord`) plus tampilan *System Diagnostics* dengan ikon khas cyberpunk.
+2. **Pencarian Real-Time (*Search Box*):** Menemukan pengaturan apapun hanya dengan mengetikkan kata kunci (contoh: *temperature*, *streaming*, *embedding*, *youtube*, *discord*, *token*, *stt*).
+3. **Perlindungan Token & Masking:** Secret sensitif seperti `twitch.oauth_token`, `youtube.api_key`, `discord.bot_token`, dan `security.creator_token` disamarkan menjadi `********` dan dipertahankan saat penyimpanan atomik bila tidak diubah.
 4. **Live Slider & Toggle:** Setiap slider menampilkan nilai numerik secara *real-time*, ditambah editor list interaktif untuk `security.allowed_origins`.
 5. **Indikator Unsaved Changes:** Memunculkan banner konfirmasi di bawah layar saat terdapat perubahan yang belum disimpan.
 6. **Shortcut Keyboard:** Tekan **`Ctrl + S`** di halaman settings untuk menyimpan secara instan.
@@ -448,9 +466,12 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
 
 ### REST Endpoints
 - **Web UI:**
-  - `GET /`: Halaman utama Web Dashboard & Virtual Avatar.
+  - `GET /`: Halaman utama Tabbed Web Studio Dashboard & Virtual Avatar.
+  - `GET /overlay`: Halaman Dedicated Transparent OBS Browser Source Overlay (Avatar, Subtitles, Donation Alerts).
   - `GET /settings`: Halaman Cyberpunk Configuration Center.
-- **Configuration & Diagnostics:**
+- **Configuration, EventBus, Platforms & Diagnostics:**
+  - `GET /api/eventbus/stats`: Statistik subscriber, total event terpublikasi, error handler, dan riwayat EventBus.
+  - `GET /api/platforms/status`: Status koneksi live seluruh platform chat (Twitch IRC, YouTube Live, Discord).
   - `GET /api/config`: Mengambil data konfigurasi publik (secret dimasking sebagai `********`).
   - `GET /api/config/schema`: Metadata skema konfigurasi (tipe, range, label).
   - `PUT /api/config`: Menyimpan konfigurasi secara atomik dan mengeksekusi hot-reload.
@@ -498,9 +519,10 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
   - `set_llm_provider` / `trigger_improv`: Pengaturan cepat LLM provider atau pemicu improv spontan.
   - `*_action`: Event aksi subsistem (`minecraft_action`, `chess_action`, `memory_action`, `mood_action`, `goal_action`, `relationship_action`, `vision_action`, `multiplayer_action`, `desktop_action`, `minigame_action`, `story_action`, `performance_action`, `personality_action`, `config_action`).
 - **Server $\rightarrow$ Client:**
-  - `ai_response`: `{"type": "ai_response", "data": {"user": "Eve", "raw": "...", "speech": "...", "emotions": ["happy"], "actions": ["wink"]}}`
+  - `ai_chunk`: `{"type": "ai_chunk", "data": {"user": "Eve", "chunk": "...", "emotion": "happy"}}` (potongan kalimat streaming real-time).
+  - `ai_response`: `{"type": "ai_response", "data": {"user": "Eve", "raw": "...", "speech": "...", "emotions": ["happy"], "actions": ["wink"], "streamed": true}}`
   - `avatar_state` & `avatar_movement`: `{"type": "avatar_state", "data": {"mouth_open": 0.85, "emotion": "smug"}}` serta gerakan panggung (`movement`, `action`, `lighting`).
-  - `chat_received` & `donation_received`: Broadcast pesan chat masuk dan notifikasi donasi.
+  - `chat_received`, `donation_received`, & `platform_status`: Broadcast pesan chat masuk, notifikasi donasi/SuperChat, dan status adapter multi-platform.
   - `song_started`, `lyric_line`, `song_ended`, `audience_cheer`: Event sinkronisasi karaoke & sorakan penonton.
   - `*_state` / `*_updated` & hasil query: `minecraft_state`, `chess_state`, `conversation_state`, `llm_provider_changed`, `memory_updated`, `memory_search_results`, `memory_journal_data`, `memory_recent_data`, `memory_user_profile_data`, `mood_updated`, `goal_updated`, `goal_completed`, `strategy_adapted`, `relationship_updated`, `vision_updated`, `multiplayer_updated`, `desktop_updated`, `minigame_updated`, `story_updated`, `performance_updated`, `personality_updated`, `system_diagnostics`, `config_saved`, `configuration_updated`, `feature_test_result`.
 
@@ -508,16 +530,15 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
 
 ## 🎥 Panduan Integrasi OBS Studio
 
-1. **Menampilkan Avatar di Layar Live Stream:**
+1. **Menampilkan Avatar Transparan di Layar Live Stream (`/overlay`):**
    - Di OBS Studio, klik tombol `+` pada panel **Sources**, pilih **Browser**.
-   - Beri nama (misal: *Eve Avatar*), klik **OK**.
-   - Masukkan URL: `http://localhost:7860`
-   - Atur resolusi: **Width:** `520`, **Height:** `620`.
+   - Beri nama (misal: *Eve OBS Overlay*), klik **OK**.
+   - Masukkan URL: `http://localhost:7860/overlay` *(halaman khusus berlatar transparan tanpa kontrol studio, lengkap dengan Canvas Avatar, floating subtitles, dan banner Donasi/SuperChat)*.
+   - Atur resolusi: **Width:** `520`, **Height:** `620` (atau ukuran kanvas OBS pilihan Anda).
    - Centang opsi **"Shutdown source when not visible"** dan **"Control audio via OBS"** (jika ingin output audio browser masuk ke audio mixer OBS).
-2. **Koneksi Live Chat Twitch:**
-   - Buka `/settings` di browser, masuk ke kategori **Twitch Chat Integration**.
-   - Aktifkan toggle, masukkan nama channel Twitch Anda dan Token OAuth.
-   - Klik **Save Changes**. Eve akan langsung mendengarkan dan merespons obrolan penonton Twitch Anda!
+2. **Koneksi Multi-Platform Live Chat (Twitch, YouTube Live, Discord):**
+   - Buka `/settings` di browser, masuk ke kategori **Twitch**, **YouTube Live**, atau **Discord**.
+   - Aktifkan toggle, masukkan kredensial/ID channel Anda (disimpan terenkripsi/dimasking sebagai `********`), lalu klik **Save Changes**. Eve akan langsung mendengarkan dan merespons obrolan penonton dari seluruh platform aktif!
 
 ---
 
@@ -535,12 +556,12 @@ node tests/test_guard_runner.js
 
 ### Hasil Verifikasi:
 ```text
-Ran 208 tests in 5.091s
+Ran 246 tests
 OK
 ```
-- **Total Test Cases:** 208 Python unit/integration tests + `test_guard_runner.js` (Node.js)
+- **Total Test Cases:** 246 Python unit/integration tests + `test_guard_runner.js` (Node.js)
 - **Success Rate:** **100% PASS (0 Failures, 0 Errors)**
-- **Modul Teruji:** `test_brain`, `test_chat_receiver`, `test_chess`, `test_configuration`, `test_desktop_companion`, `test_goals`, `test_guard_mode`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_performance`, `test_personality`, `test_relationships`, `test_storytelling`, `test_system_integrity`, `test_tts`, `test_vision`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
+- **Modul Teruji:** `test_brain`, `test_chat_receiver`, `test_chess`, `test_configuration`, `test_desktop_companion`, `test_event_bus`, `test_goals`, `test_guard_mode`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_relationships`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
 
 ---
 

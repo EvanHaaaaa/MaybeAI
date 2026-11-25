@@ -31,6 +31,7 @@ config_mgr = ConfigManager()
 async def lifespan(app: FastAPI):
     await orchestrator.start()
     yield
+    await orchestrator.shutdown()
 
 app = FastAPI(title="MaybeAI - Eve Maybe AI VTuber", lifespan=lifespan)
 
@@ -122,6 +123,14 @@ async def get_index():
 async def get_settings_page():
     return FileResponse("web/settings.html")
 
+@app.get("/overlay")
+async def get_overlay_page():
+    return FileResponse("web/overlay.html")
+
+@app.get("/api/eventbus/stats")
+async def get_eventbus_stats():
+    return orchestrator.event_bus.get_stats()
+
 # --- Centralized Configuration Center Endpoints ---
 @app.get("/api/config")
 async def get_configuration():
@@ -171,8 +180,14 @@ async def get_status():
         "status": "online",
         "busy": orchestrator.is_busy,
         "vts_connected": orchestrator.vts.connected,
-        "llm_provider": orchestrator.brain.settings.get("llm", {}).get("provider", "gemini")
+        "llm_provider": orchestrator.brain.settings.get("llm", {}).get("provider", "gemini"),
+        "streaming_enabled": orchestrator.brain.is_streaming_enabled(),
+        "platforms": orchestrator.chat.get_platforms_status(),
     }
+
+@app.get("/api/platforms/status")
+async def get_platforms_status():
+    return orchestrator.chat.get_platforms_status()
 
 @app.get("/api/memory/stats")
 async def get_memory_stats():

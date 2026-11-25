@@ -16,10 +16,10 @@ class MemoryDatabase:
     - User Profiles, Viewer Dossiers, and Promises/Challenges tracking
     """
 
-    def __init__(self, db_path: str = "data/memory.db"):
+    def __init__(self, db_path: str = "data/memory.db", embedding_provider: str = "auto"):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.embedder = EmbeddingEngine()
+        self.embedder = EmbeddingEngine(provider=embedding_provider)
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -191,22 +191,106 @@ class MemoryDatabase:
             rows = cur.fetchall()
             return [self._row_to_memory(r) for r in rows]
 
+    def _memory_embedding_text(self, mem: Dict[str, Any]) -> str:
+        return (
+            f"{mem.get('title', '')} {mem.get('content', '')} "
+            f"{mem.get('user', '')} {mem.get('episode_type', '')} {mem.get('game_context', '')}"
+        ).strip()
+
+    def _update_memory_embedding(self, memory_id: int, vec: np.ndarray) -> None:
+        try:
+            blob = self.embedder.serialize(vec)
+            with self._get_connection() as con:
+                con.execute(
+                    "UPDATE episodic_memories SET embedding = ? WHERE id = ?",
+                    (blob, memory_id),
+                )
+                con.commit()
+        except Exception:
+            pass
+
     def vector_search(
         self,
         query_vec: np.ndarray,
         top_k: int = 5,
         user: Optional[str] = None,
-        min_score: float = 0.15
+        min_score: float = 0.15,
+        reencode_mismatched: bool = True,
     ) -> List[Tuple[Dict[str, Any], float]]:
-        """Dense vector search over episodic memories using cosine similarity."""
+        """
+        Dense vector search over episodic memories using cosine similarity.
+        Gracefully handles mismatched vector dimensions (e.g., legacy 128-d blobs
+        vs new 384-d/768-d embeddings) by re-encoding when compatible or safely skipping.
+        """
+        if query_vec is None:
+            return []
+        q_vec = np.asarray(query_vec, dtype=np.float32).reshape(-1)
+        if q_vec.size == 0:
+            return []
+
         memories = self.get_recent_memories(limit=300, user=user)
         results = []
 
         for mem in memories:
             vec = mem.get("_embedding_vec")
-            if vec is None:
-                continue
-            sim = self.embedder.cosine_similarity(query_vec, vec)
+            if vec is None or getattr(vec, "shape", None) != q_vec.shape:
+                if reencode_mismatched and mem.get("id") is not None:
+                    try:
+                        reencoded = self.embedder.encode(self._memory_embedding_text(mem))
+                        if reencoded is not None and reencoded.shape == q_vec.shape:
+                            vec = reencoded
+                            mem["_embedding_vec"] = vec
+                            self._update_memory_embedding(mem["id"], vec)
+                        else:
+                            continue
+                    except Exception:
+                        continue
+                else:
+                    continue
+
+            sim = self.embedder.cosine_similarity(q_vec, vec)
+            if sim >= min_score:
+                results.append((mem, sim))
+
+        results.sort(key=lambda x: x[1], reverse=True)
+        return results[:top_k]
+
+    async def avector_search(
+        self,
+        query_vec: np.ndarray,
+        top_k: int = 5,
+        user: Optional[str] = None,
+        min_score: float = 0.15,
+        reencode_mismatched: bool = True,
+    ) -> List[Tuple[Dict[str, Any], float]]:
+        """Async dense vector search using aencode for mismatched legacy embeddings."""
+        if query_vec is None:
+            return []
+        q_vec = np.asarray(query_vec, dtype=np.float32).reshape(-1)
+        if q_vec.size == 0:
+            return []
+
+        memories = self.get_recent_memories(limit=300, user=user)
+        results = []
+
+        for mem in memories:
+            vec = mem.get("_embedding_vec")
+            if vec is None or getattr(vec, "shape", None) != q_vec.shape:
+                if reencode_mismatched and mem.get("id") is not None:
+                    try:
+                        reencoded = await self.embedder.aencode(self._memory_embedding_text(mem))
+                        if reencoded is not None and reencoded.shape == q_vec.shape:
+                            vec = reencoded
+                            mem["_embedding_vec"] = vec
+                            self._update_memory_embedding(mem["id"], vec)
+                        else:
+                            continue
+                    except Exception:
+                        continue
+                else:
+                    continue
+
+            sim = self.embedder.cosine_similarity(q_vec, vec)
             if sim >= min_score:
                 results.append((mem, sim))
 
@@ -293,6 +377,52 @@ class MemoryDatabase:
             combined_scores[mid] = (mem, score)
 
         # Include FTS matches that vector might have missed
+        if fts_matches:
+            with self._get_connection() as con:
+                cur = con.cursor()
+                for mid, f_score in fts_matches.items():
+                    if mid not in combined_scores:
+                        cur.execute("SELECT * FROM episodic_memories WHERE id = ?", (mid,))
+                        r = cur.fetchone()
+                        if r:
+                            mem = self._row_to_memory(r)
+                            importance = mem.get("importance_score", 0.5)
+                            age_days = (now - mem.get("timestamp", now)) / 86400.0
+                            recency = max(0.2, 1.0 / (1.0 + (age_days * 0.05)))
+                            score = (0.30 * f_score) + (0.10 * importance) + (0.10 * recency)
+                            combined_scores[mid] = (mem, score)
+
+        ranked = sorted(combined_scores.values(), key=lambda x: x[1], reverse=True)
+        return [mem for mem, _ in ranked[:top_k]]
+
+    async def ahybrid_search(
+        self,
+        query_str: str,
+        query_vec: Optional[np.ndarray] = None,
+        top_k: int = 5,
+        user: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Async hybrid search using aencode for non-blocking semantic retrieval."""
+        if query_vec is None:
+            query_vec = await self.embedder.aencode(query_str)
+
+        vec_matches = {
+            mem["id"]: (mem, score)
+            for mem, score in await self.avector_search(query_vec, top_k=top_k * 2, user=user)
+        }
+        fts_matches = {m["id"]: score for m, score in self.fts_search(query_str, top_k=top_k * 2, user=user)}
+
+        combined_scores: Dict[int, Tuple[Dict[str, Any], float]] = {}
+        now = time.time()
+
+        for mid, (mem, v_score) in vec_matches.items():
+            f_score = fts_matches.get(mid, 0.0)
+            importance = mem.get("importance_score", 0.5)
+            age_days = (now - mem.get("timestamp", now)) / 86400.0
+            recency = max(0.2, 1.0 / (1.0 + (age_days * 0.05)))
+            score = (0.50 * v_score) + (0.30 * f_score) + (0.10 * importance) + (0.10 * recency)
+            combined_scores[mid] = (mem, score)
+
         if fts_matches:
             with self._get_connection() as con:
                 cur = con.cursor()
@@ -497,5 +627,7 @@ class MemoryDatabase:
             return {
                 "total_memories": mem_count,
                 "known_users": user_count,
-                "pending_promises": pending_promises
+                "pending_promises": pending_promises,
+                "embedding_provider": self.embedder.active_backend,
+                "embedding_dimension": self.embedder.dimension,
             }

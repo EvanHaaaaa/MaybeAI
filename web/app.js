@@ -1,5 +1,48 @@
 // MaybeAI Frontend App & Virtual Avatar Renderer
 document.addEventListener("DOMContentLoaded", () => {
+  // --- Modular Studio Workspace Tabs (localStorage persisted) ---
+  const WORKSPACE_STORAGE_KEY = "maybeai_active_workspace";
+  const workspaceTabs = document.querySelectorAll(".workspace-tab");
+  const workspacePanels = document.querySelectorAll(".workspace-panel");
+
+  function switchWorkspaceTab(workspaceId, persist = true) {
+    const validIds = Array.from(workspacePanels).map(p => p.getAttribute("data-workspace"));
+    const targetId = validIds.includes(workspaceId) ? workspaceId : (validIds[0] || "stage");
+
+    workspaceTabs.forEach(tab => {
+      const isActive = tab.getAttribute("data-workspace") === targetId;
+      tab.classList.toggle("active", isActive);
+      tab.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+
+    workspacePanels.forEach(panel => {
+      const isActive = panel.getAttribute("data-workspace") === targetId;
+      panel.classList.toggle("active", isActive);
+      panel.hidden = !isActive;
+    });
+
+    if (persist) {
+      try {
+        localStorage.setItem(WORKSPACE_STORAGE_KEY, targetId);
+      } catch (e) {}
+    }
+  }
+
+  if (workspaceTabs.length > 0 && workspacePanels.length > 0) {
+    workspaceTabs.forEach(tab => {
+      tab.addEventListener("click", () => {
+        const targetId = tab.getAttribute("data-workspace");
+        switchWorkspaceTab(targetId, true);
+      });
+    });
+
+    let savedWorkspace = "stage";
+    try {
+      savedWorkspace = localStorage.getItem(WORKSPACE_STORAGE_KEY) || "stage";
+    } catch (e) {}
+    switchWorkspaceTab(savedWorkspace, false);
+  }
+
   const canvas = document.getElementById("avatarCanvas");
   const ctx = canvas.getContext("2d");
   const meterFill = document.getElementById("meter-fill");

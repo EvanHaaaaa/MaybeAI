@@ -1,0 +1,181 @@
+/* MaybeAI Dedicated OBS Browser Source Overlay
+   Transparent background, responsive for 520x620 or any OBS scene dimensions */
+
+:root {
+  --accent: #ff4d8d;
+  --cyan: #00f0ff;
+  --gold: #f59e0b;
+  --gold-bright: #fbbf24;
+  --text: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  background: transparent !important;
+  overflow: hidden;
+  font-family: 'Outfit', sans-serif;
+  color: var(--text);
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.obs-stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background: transparent !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  overflow: hidden;
+}
+
+/* Virtual Avatar Canvas Container */
+.obs-avatar-wrap {
+  position: relative;
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent !important;
+}
+
+#avatarCanvas {
+  width: min(92vw, 76vh, 480px);
+  height: auto;
+  aspect-ratio: 1 / 1;
+  background: transparent !important;
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.45));
+}
+
+/* Floating Subtitles Overlay */
+.obs-subtitles {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92vw, 488px);
+  padding: 12px 18px;
+  border-radius: 14px;
+  background: rgba(13, 15, 23, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border: 1px solid rgba(0, 240, 255, 0.38);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.55),
+    0 0 18px rgba(255, 77, 141, 0.22);
+  text-align: center;
+  font-size: clamp(14px, 3vw, 18px);
+  font-weight: 600;
+  line-height: 1.4;
+  color: #ffffff;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.85);
+  word-wrap: break-word;
+  opacity: 1;
+  transition: opacity 0.3s ease, transform 0.3s ease, border-color 0.3s ease;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.obs-subtitles.is-hidden {
+  opacity: 0;
+  transform: translate(-50%, 10px);
+}
+
+.obs-subtitles.is-singing {
+  border-color: rgba(255, 77, 141, 0.72);
+  box-shadow:
+    0 8px 28px rgba(0, 0, 0, 0.55),
+    0 0 22px rgba(255, 77, 141, 0.45);
+  color: #ffe4f0;
+}
+
+/* Real-Time Donation & Superchat Alert Banner */
+.donation-alert {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, rgba(24, 20, 10, 0.94), rgba(38, 28, 12, 0.94));
+  border: 2px solid var(--gold);
+  box-shadow:
+    0 0 26px rgba(245, 158, 11, 0.65),
+    inset 0 0 14px rgba(245, 158, 11, 0.28);
+  border-radius: 14px;
+  padding: 14px 22px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 260px;
+  max-width: min(92vw, 460px);
+  animation: donationSlideIn 0.48s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  pointer-events: none;
+}
+
+@keyframes donationSlideIn {
+  0% {
+    transform: translate(-50%, -30px) scale(0.84);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+.donation-alert-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.donation-icon {
+  font-size: 28px;
+  animation: iconPulse 1s infinite alternate;
+}
+
+@keyframes iconPulse {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.18); }
+}
+
+.donation-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.donation-user {
+  font-size: 16px;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.donation-amount {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--gold-bright);
+  text-shadow: 0 0 8px rgba(251, 191, 36, 0.8);
+}
+
+.donation-text {
+  font-size: 13px;
+  color: #fef08a;
+  text-align: center;
+  font-style: italic;
+  line-height: 1.35;
+  max-width: 360px;
+}

@@ -16,6 +16,13 @@ from core.minigames import MiniGameEngine
 from core.storytelling import StoryEngine
 from core.performance import PerformanceDirector
 from core.personality import PersonalityEvolutionEngine
+from core.event_bus import (
+    EventBus,
+    CHAT_RECEIVED,
+    DONATION_RECEIVED,
+    MOOD_UPDATED,
+    AI_RESPONSE,
+)
 
 class ConversationEngine:
     """
@@ -36,8 +43,9 @@ class ConversationEngine:
     INTENT_DONATION = "donation"
     INTENT_GENERAL = "general"
 
-    def __init__(self, character: Dict[str, Any]):
+    def __init__(self, character: Dict[str, Any], event_bus: Optional[EventBus] = None):
         self.character = character
+        self.event_bus = event_bus if event_bus is not None else EventBus()
         self.user_memory = UserMemory()
         self.context_memory = ContextMemory(max_buffer_turns=16)
         self.topic_tracker = TopicTracker()
@@ -57,15 +65,25 @@ class ConversationEngine:
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
 
-    def record_incoming(self, user: str, text: str):
+    def record_incoming(self, user: str, text: str, emit_events: bool = True):
         """Legacy / direct ingress wrapper."""
         self.last_interaction_time = time.time()
         self.user_memory.record_message(user, text)
         self.topic_tracker.update_topic(text)
         self.episodic_memory.extract_from_chat(user=user, text=text)
         self.relationships.record_chat_interaction(user, text, False, "")
-        self._apply_chat_stimulus(user, text, False, "")
-        return self.chat_curator.add_message(user=user, text=text, source="direct")
+        self._apply_chat_stimulus(user, text, False, "", emit_events=emit_events)
+        msg = self.chat_curator.add_message(user=user, text=text, source="direct")
+        if emit_events and self.event_bus is not None:
+            self.event_bus.publish_nowait(CHAT_RECEIVED, {
+                "user": user,
+                "text": text,
+                "source": "direct",
+                "is_donation": False,
+                "donation_amount": "",
+                "is_creator": False,
+            })
+        return msg
 
     def record_incoming_chat(
         self,
@@ -75,7 +93,8 @@ class ConversationEngine:
         is_donation: bool = False,
         donation_amount: str = "",
         donation_currency: str = "",
-        is_creator: Optional[bool] = None
+        is_creator: Optional[bool] = None,
+        emit_events: bool = True
     ) -> LiveChatMessage:
         """Full live stream chat message ingestion with metadata and priority curation."""
         self.last_interaction_time = time.time()
@@ -93,8 +112,8 @@ class ConversationEngine:
             is_donation=is_donation,
             donation_amount=donation_amount
         )
-        self._apply_chat_stimulus(user, text, is_donation, donation_amount)
-        return self.chat_curator.add_message(
+        self._apply_chat_stimulus(user, text, is_donation, donation_amount, emit_events=emit_events)
+        msg = self.chat_curator.add_message(
             user=user,
             text=text,
             source=source,
@@ -103,43 +122,78 @@ class ConversationEngine:
             donation_currency=donation_currency,
             is_creator=is_creator
         )
+        if emit_events and self.event_bus is not None:
+            self.event_bus.publish_nowait(CHAT_RECEIVED, {
+                "user": user,
+                "text": text,
+                "source": source,
+                "is_donation": is_donation,
+                "donation_amount": donation_amount,
+                "is_creator": bool(is_creator),
+            })
+            if is_donation:
+                self.event_bus.publish_nowait(DONATION_RECEIVED, {
+                    "user": user,
+                    "amount": donation_amount,
+                    "currency": donation_currency,
+                    "text": text,
+                })
+        return msg
 
-    def _apply_chat_stimulus(self, user: str, text: str, is_donation: bool, donation_amount: str):
+    def _apply_chat_stimulus(self, user: str, text: str, is_donation: bool, donation_amount: str, emit_events: bool = True):
+        mood_changed = False
         if is_donation:
             self.mood.apply_stimulus("donation")
+            mood_changed = True
             if hasattr(self, "personality") and self.personality:
                 self.personality.record_experience("friendly_interaction", {"user": user, "note": f"Donation {donation_amount}"})
                 self.personality.sync_to_mood_baselines(self.mood)
+            if emit_events and self.event_bus is not None:
+                self.event_bus.publish_nowait(MOOD_UPDATED, self.mood.get_state())
             return
 
         lower = text.lower()
         if any(w in lower for w in ["bodoh", "noob", "cupu", "jelek", "loser", "bego", "roast", "hina"]):
             self.mood.apply_stimulus("insult")
+            mood_changed = True
             if hasattr(self, "personality") and self.personality:
                 self.personality.record_experience("troll_encountered", {"user": user})
                 self.personality.sync_to_mood_baselines(self.mood)
         elif any(w in lower for w in ["cantik", "hebat", "pinter", "keren", "imut", "love", "suka", "gg", "cute"]):
             self.mood.apply_stimulus("compliment")
+            mood_changed = True
             if hasattr(self, "personality") and self.personality:
                 self.personality.record_experience("friendly_interaction", {"user": user})
                 self.personality.sync_to_mood_baselines(self.mood)
         elif any(w in lower for w in ["wkwk", "haha", "lmao", "kekw", "lucu", "lawak", "joke"]):
             self.mood.apply_stimulus("joke")
+            mood_changed = True
         elif any(w in lower for w in ["arti hidup", "kesadaran ai", "filosofi", "alam semesta", "tujuan hidup"]):
             self.mood.apply_stimulus("philosophical_query")
+            mood_changed = True
             if hasattr(self, "personality") and self.personality:
                 self.personality.record_experience("deep_conversation", {"topic": text, "user": user})
                 self.personality.sync_to_mood_baselines(self.mood)
         elif lower.endswith("?") or any(lower.startswith(q) for q in ["kenapa", "mengapa", "apa", "gimana", "bagaimana", "why", "how", "what"]):
             self.mood.apply_stimulus("question")
+            mood_changed = True
+
+        if mood_changed and emit_events and self.event_bus is not None:
+            self.event_bus.publish_nowait(MOOD_UPDATED, self.mood.get_state())
 
     def select_next_interaction(self) -> Optional[ChatInteraction]:
         """Intelligently pulls the highest priority message or group debate."""
         return self.chat_curator.select_next_interaction()
 
-    def record_turn(self, user: str, user_text: str, bot_response: str):
+    def record_turn(self, user: str, user_text: str, bot_response: str, emit_events: bool = False):
         self.context_memory.add_turn("user", user, user_text)
         self.context_memory.add_turn("assistant", self.character.get("nickname", "Eve"), bot_response)
+        if emit_events and self.event_bus is not None:
+            self.event_bus.publish_nowait(AI_RESPONSE, {
+                "user": self.character.get("nickname", "Eve"),
+                "reply_to": user,
+                "raw": bot_response,
+            })
 
     def analyze_intent(self, user: str, text: str) -> Tuple[str, Optional[str]]:
         clean = text.strip()

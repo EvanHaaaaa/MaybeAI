@@ -2,6 +2,8 @@ import asyncio
 import re
 from typing import Optional, Callable, Dict, Any, List
 
+from core.platforms.base import BasePlatformAdapter
+
 class ChatMessage:
     def __init__(
         self,
@@ -38,6 +40,55 @@ class ChatReceiver:
         self.last_error: Optional[str] = None
         self._reader: Optional[asyncio.StreamReader] = None
         self._writer: Optional[asyncio.StreamWriter] = None
+        self.adapters: Dict[str, BasePlatformAdapter] = {}
+
+    def register_adapter(self, adapter: BasePlatformAdapter) -> None:
+        """Registers a multi-platform chat adapter and binds it to this receiver."""
+        adapter.set_receiver(self)
+        self.adapters[adapter.platform_name] = adapter
+
+    def unregister_adapter(self, platform_name: str) -> Optional[BasePlatformAdapter]:
+        """Removes a registered platform adapter by name."""
+        return self.adapters.pop(platform_name, None)
+
+    async def start_adapters(self) -> Dict[str, bool]:
+        """Starts all registered platform adapters, returning {platform: started}."""
+        results: Dict[str, bool] = {}
+        for name, adapter in list(self.adapters.items()):
+            try:
+                results[name] = await adapter.start()
+            except Exception as e:
+                adapter.last_error = str(e)
+                adapter.is_running = False
+                adapter.is_connected = False
+                results[name] = False
+        return results
+
+    async def stop_adapters(self) -> None:
+        """Stops all registered platform adapters gracefully."""
+        for adapter in list(self.adapters.values()):
+            try:
+                await adapter.stop()
+            except Exception:
+                pass
+
+    def get_platforms_status(self) -> Dict[str, Any]:
+        """Returns live status for Twitch IRC plus every registered platform adapter."""
+        platforms: Dict[str, Any] = {
+            "twitch": {
+                "platform": "twitch",
+                "is_running": self.is_running,
+                "is_connected": self.is_connected,
+                "channel": self.twitch_channel,
+                "last_error": self.last_error,
+            }
+        }
+        for name, adapter in self.adapters.items():
+            try:
+                platforms[name] = adapter.get_status()
+            except Exception as e:
+                platforms[name] = {"platform": name, "is_running": False, "last_error": str(e)}
+        return platforms
 
     def get_status(self) -> Dict[str, Any]:
         return {
@@ -45,7 +96,8 @@ class ChatReceiver:
             "is_connected": self.is_connected,
             "channel": self.twitch_channel,
             "queue_size": self.queue.qsize(),
-            "last_error": self.last_error
+            "last_error": self.last_error,
+            "platforms": self.get_platforms_status(),
         }
 
     async def put_message(

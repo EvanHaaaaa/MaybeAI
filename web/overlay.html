@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MaybeAI - OBS Stage Overlay</title>
+  <link rel="stylesheet" href="/static/overlay.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="obs-stage" id="obsStage">
+    <!-- Real-Time Donation & Superchat Alert Banner -->
+    <div id="donation-alert-banner" class="donation-alert" style="display: none;" aria-live="polite">
+      <div class="donation-alert-box">
+        <span class="donation-icon">🎁</span>
+        <div class="donation-info">
+          <span class="donation-user" id="don-user">User</span>
+          <span class="donation-amount" id="don-amount">$10.00</span>
+        </div>
+      </div>
+      <div class="donation-text" id="don-text">"Donation message"</div>
+    </div>
+
+    <!-- Virtual Avatar Canvas -->
+    <div class="obs-avatar-wrap">
+      <canvas id="avatarCanvas" width="450" height="450"></canvas>
+    </div>
+
+    <!-- Floating Subtitles Overlay -->
+    <div id="subtitles" class="obs-subtitles is-hidden" aria-live="polite"></div>
+  </div>
+
+  <script src="/static/overlay.js"></script>
+</body>
+</html>

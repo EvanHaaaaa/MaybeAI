@@ -100,6 +100,8 @@ document.addEventListener("DOMContentLoaded", () => {
       avatar: { title: "👤 Avatar & VTube Studio", desc: "Integrasi WebSocket VTube Studio (port 8001), intensitas gerakan, dan ekspresi Live2D." },
       karaoke: { title: "🎤 Karaoke & Performance", desc: "Pengaturan volume vokal/BGM panggung idol, katalog lagu, dan glowstick crowd cheer." },
       twitch: { title: "💬 Twitch & Chat Stream", desc: "Koneksi live chat Twitch IRC, bot nick, dan perlindungan keamanan OAuth token." },
+      youtube: { title: "▶️ YouTube Live Chat", desc: "Polling live chat & SuperChat YouTube Data API v3 dengan perlindungan keamanan API key." },
+      discord: { title: "👾 Discord Bot Chat", desc: "Koneksi channel Discord menggunakan Bot Token dan Channel ID secara aman." },
       moderator: { title: "🛡️ Moderation & Safety", desc: "Filter kata terlarang, batas panjang pesan penonton, dan pencegahan prompt injection." },
       security: { title: "🔐 Security & Access", desc: "Token otentikasi Creator WebSocket dan daftar origin tambahan yang diizinkan." },
       minecraft: { title: "⛏️ Minecraft Engine", desc: "Mode santai vs kompe, jarak follow bodyguard player, dan batas keselamatan HP." },

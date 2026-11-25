@@ -40,7 +40,7 @@ class ConfigManager:
             "ollama_url": "http://localhost:11434",
             "ollama_model": "llama3.2",
             "fallback_provider": "mock",
-            "streaming_enabled": False,
+            "streaming_enabled": True,
             "retry_attempts": 2
         },
         "personality": {
@@ -61,7 +61,8 @@ class ConfigManager:
             "second_brain_sync": True,
             "retrieval_limit": 5,
             "similarity_threshold": 0.70,
-            "auto_extract": True
+            "auto_extract": True,
+            "embedding_provider": "auto"
         },
         "mood": {
             "enabled": True,
@@ -105,6 +106,18 @@ class ConfigManager:
             "oauth_token": "",
             "message_cooldown_sec": 3.0,
             "mention_only": False
+        },
+        "youtube": {
+            "enabled": False,
+            "api_key": "",
+            "live_chat_id": "",
+            "poll_interval_sec": 5.0
+        },
+        "discord": {
+            "enabled": False,
+            "bot_token": "",
+            "channel_id": "",
+            "poll_interval_sec": 3.0
         },
         "moderator": {
             "strict_mode": True,
@@ -176,6 +189,8 @@ class ConfigManager:
 
     SECRET_MASK_FIELDS = (
         ("twitch", "oauth_token", "oauth_configured"),
+        ("youtube", "api_key", "api_key_configured"),
+        ("discord", "bot_token", "bot_token_configured"),
         ("security", "creator_token", "creator_token_configured"),
     )
 
@@ -441,6 +456,22 @@ class ConfigManager:
                 "default": True,
                 "restart_required": False
             },
+            {
+                "path": "memory.embedding_provider",
+                "category": "memory",
+                "label": "Semantic Embedding Provider",
+                "description": "Backend vektor semantik untuk pencarian memori episodik (auto memilih local -> gemini -> openai -> hash).",
+                "type": "select",
+                "options": [
+                    {"label": "Auto (Best Available Backend)", "value": "auto"},
+                    {"label": "Local (sentence-transformers / fastembed)", "value": "local"},
+                    {"label": "Google Gemini (text-embedding-004)", "value": "gemini"},
+                    {"label": "OpenAI (text-embedding-3-small)", "value": "openai"},
+                    {"label": "Hash (Offline Zero-Dependency Fallback)", "value": "hash"}
+                ],
+                "default": "auto",
+                "restart_required": False
+            },
 
             # 5. Mood & Emotion
             {
@@ -597,6 +628,86 @@ class ConfigManager:
                 "description": "OAuth token bot Twitch (oauth:xxxx). Disembunyikan demi keamanan.",
                 "type": "secret",
                 "default": "",
+                "restart_required": False
+            },
+
+            # 9b. YouTube Live Chat
+            {
+                "path": "youtube.enabled",
+                "category": "youtube",
+                "label": "YouTube Live Chat Listener",
+                "description": "Mengaktifkan polling pesan live chat & SuperChat dari YouTube Data API v3.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "youtube.api_key",
+                "category": "youtube",
+                "label": "YouTube Data API Key",
+                "description": "API Key Google Cloud untuk YouTube Data API v3. Disembunyikan demi keamanan.",
+                "type": "secret",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "youtube.live_chat_id",
+                "category": "youtube",
+                "label": "YouTube Live Chat ID",
+                "description": "ID ruang live chat dari siaran YouTube Live yang sedang aktif.",
+                "type": "text",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "youtube.poll_interval_sec",
+                "category": "youtube",
+                "label": "YouTube Poll Interval (sec)",
+                "description": "Jeda minimum antar polling YouTube liveChatMessages (dalam detik).",
+                "type": "number",
+                "min": 1.0,
+                "max": 60.0,
+                "default": 5.0,
+                "restart_required": False
+            },
+
+            # 9c. Discord Bot Chat
+            {
+                "path": "discord.enabled",
+                "category": "discord",
+                "label": "Discord Chat Listener",
+                "description": "Mengaktifkan pembacaan pesan dari channel Discord menggunakan Bot Token.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "discord.bot_token",
+                "category": "discord",
+                "label": "Discord Bot Token",
+                "description": "Token bot Discord untuk membaca pesan channel. Disembunyikan demi keamanan.",
+                "type": "secret",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "discord.channel_id",
+                "category": "discord",
+                "label": "Discord Channel ID",
+                "description": "ID channel teks Discord yang dipantau oleh Eve.",
+                "type": "text",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "discord.poll_interval_sec",
+                "category": "discord",
+                "label": "Discord Poll Interval (sec)",
+                "description": "Jeda polling pesan baru dari Discord REST API (dalam detik).",
+                "type": "number",
+                "min": 1.0,
+                "max": 60.0,
+                "default": 3.0,
                 "restart_required": False
             },
 
@@ -802,7 +913,7 @@ class ConfigManager:
             if ctrl_type == "toggle" and not isinstance(val, bool):
                 errors.append(f"Field '{path}' must be a boolean (True/False).")
             elif ctrl_type in ("number", "slider"):
-                if not isinstance(val, (int, float)):
+                if not isinstance(val, (int, float)) or isinstance(val, bool):
                     errors.append(f"Field '{path}' must be a numeric value.")
                 else:
                     if "min" in meta and val < meta["min"]:
@@ -813,6 +924,9 @@ class ConfigManager:
                 allowed = [opt["value"] for opt in meta.get("options", [])]
                 if allowed and val not in allowed:
                     errors.append(f"Field '{path}' value '{val}' is not in allowed options: {allowed}")
+            elif ctrl_type == "text":
+                if not isinstance(val, str):
+                    errors.append(f"Field '{path}' must be a string.")
             elif ctrl_type == "secret":
                 if not isinstance(val, str):
                     errors.append(f"Field '{path}' must be a string.")
