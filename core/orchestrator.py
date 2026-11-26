@@ -217,9 +217,12 @@ class Orchestrator:
             cooldown_sec=float(highlights_cfg.get("cooldown_sec", 30.0) or 30.0),
             enabled=bool(highlights_cfg.get("enabled", True)),
         )
-        self.clipper = ClipPipeline(clips_dir="data/clips")
+        data_root = os.getenv("MAYBEAI_DATA_DIR", "").strip()
+        clips_dir = os.path.join(data_root, "clips") if data_root else "data/clips"
+        streams_dir = os.path.join(data_root, "second_brain", "streams") if data_root else "data/second_brain/streams"
+        self.clipper = ClipPipeline(clips_dir=clips_dir)
         self.vod_summarizer = VODSummarizer(
-            streams_dir="data/second_brain/streams",
+            streams_dir=streams_dir,
             event_bus=self.event_bus,
         )
 
@@ -305,12 +308,34 @@ class Orchestrator:
                 sec_obj[flag_name] = bool(raw_val and raw_val != "********")
         return masked
 
-    async def _on_tts_audio_ready(self, audio_bytes: bytes, text: str, voice: str) -> None:
+    @staticmethod
+    def _detect_audio_mime(audio_bytes: bytes) -> str:
+        """Infers MIME type from audio container magic bytes."""
+        if len(audio_bytes) >= 12 and audio_bytes[:4] == b"RIFF" and audio_bytes[8:12] == b"WAVE":
+            return "audio/wav"
+        if audio_bytes.startswith(b"OggS"):
+            return "audio/ogg"
+        if audio_bytes.startswith(b"fLaC"):
+            return "audio/flac"
+        if audio_bytes.startswith(b"ID3") or (
+            len(audio_bytes) >= 2 and audio_bytes[0] == 0xFF and (audio_bytes[1] & 0xE0) == 0xE0
+        ):
+            return "audio/mpeg"
+        return "audio/mpeg"
+
+    async def _on_tts_audio_ready(
+        self,
+        audio_bytes: bytes,
+        text: str,
+        voice: str,
+        mime: Optional[str] = None,
+    ) -> None:
         if not audio_bytes:
             return
+        resolved_mime = mime.strip() if isinstance(mime, str) and mime.strip() else self._detect_audio_mime(audio_bytes)
         await self.broadcast("audio_chunk", {
             "audio_b64": base64.b64encode(audio_bytes).decode("ascii"),
-            "mime": "audio/mpeg",
+            "mime": resolved_mime,
             "text": text,
             "voice": voice,
             "emotion": self._current_emotion,
@@ -465,13 +490,30 @@ class Orchestrator:
         highlights_cfg = self.brain.settings.get("highlights", {}) if isinstance(self.brain.settings, dict) else {}
         if getattr(self, "vod_summarizer", None) is not None and bool(highlights_cfg.get("vod_summary_enabled", True)):
             try:
-                self.vod_summarizer.generate_summary(event_bus=self.event_bus)
+                await asyncio.to_thread(self.vod_summarizer.generate_summary, event_bus=self.event_bus)
             except Exception as exc:
                 print(f"[Orchestrator] VOD summary generation error: {exc}")
         self.chat.stop()
         await self.chat.stop_adapters()
         await self.obs.disconnect()
         await self.vts.disconnect()
+        for component in (
+            getattr(self, "tts", None),
+            getattr(self, "stt", None),
+            getattr(self, "singer", None),
+            getattr(getattr(self.brain, "episodic_memory", None), "embedding_engine", None),
+            getattr(self.brain, "embedding_engine", None),
+        ):
+            if component is None:
+                continue
+            close_fn = getattr(component, "close", None) or getattr(component, "aclose", None)
+            if callable(close_fn):
+                try:
+                    res = close_fn()
+                    if inspect.isawaitable(res):
+                        await res
+                except Exception:
+                    pass
         await self.brain.close()
 
     async def ensure_plugins_loaded(self) -> None:
@@ -1799,7 +1841,7 @@ class Orchestrator:
         # 4. Post-Show MC & Self Evaluation
         outro_speech, score = director.finish_performance()
         if hasattr(self.brain, "personality") and self.brain.personality:
-            self.brain.personality.record_experience("stage_performance", {"song": actual_song_id, "score": score})
+            await asyncio.to_thread(self.brain.personality.record_experience, "stage_performance", {"song": actual_song_id, "score": score})
             self.brain.personality.sync_to_mood_baselines(self.brain.mood)
             await self.broadcast("personality_updated", self.brain.personality.get_state())
         await self.broadcast("performance_updated", director.get_state())
@@ -1932,15 +1974,20 @@ class Orchestrator:
 
     async def _on_chess_game_event(self, event_type: str, data: Dict[str, Any]):
         if event_type == "queen_captured":
-            self.brain.episodic_memory.on_chess_queen_capture(
+            await asyncio.to_thread(
+                self.brain.episodic_memory.on_chess_queen_capture,
                 player=data.get("player", "Player"),
                 eve_captured_player_queen=True,
                 san=data.get("san", "")
             )
             self.brain.mood.apply_stimulus("chess_queen_capture")
-            self.brain.relationships.record_gaming_event(data.get("player", "Player"), "chess", "queen_captured", data)
+            await asyncio.to_thread(
+                self.brain.relationships.record_gaming_event,
+                data.get("player", "Player"), "chess", "queen_captured", data
+            )
         elif event_type == "game_over":
-            self.brain.episodic_memory.on_chess_game_ended(
+            await asyncio.to_thread(
+                self.brain.episodic_memory.on_chess_game_ended,
                 player=data.get("player", "Player"),
                 eve_won=data.get("eve_won", False),
                 player_won=data.get("player_won", False),
@@ -1948,19 +1995,29 @@ class Orchestrator:
                 moves_count=data.get("moves_count", 0),
                 elo=data.get("elo", 1200)
             )
-            self.brain.relationships.record_gaming_event(data.get("player", "Player"), "chess", "game_over", data)
+            await asyncio.to_thread(
+                self.brain.relationships.record_gaming_event,
+                data.get("player", "Player"), "chess", "game_over", data
+            )
             if data.get("eve_won"):
                 self.brain.mood.apply_stimulus("chess_victory")
                 if hasattr(self.brain, "personality") and self.brain.personality:
-                    self.brain.personality.record_experience("game_victory", {"game": "chess", "opponent": data.get("player")})
+                    await asyncio.to_thread(
+                        self.brain.personality.record_experience,
+                        "game_victory", {"game": "chess", "opponent": data.get("player")}
+                    )
                     self.brain.personality.sync_to_mood_baselines(self.brain.mood)
                 await self.evaluate_goal_event("chess_game_won", data)
             elif data.get("player_won"):
                 self.brain.mood.apply_stimulus("chess_defeat")
                 if hasattr(self.brain, "personality") and self.brain.personality:
-                    self.brain.personality.record_experience("game_defeat", {"game": "chess", "opponent": data.get("player")})
+                    await asyncio.to_thread(
+                        self.brain.personality.record_experience,
+                        "game_defeat", {"game": "chess", "opponent": data.get("player")}
+                    )
                     self.brain.personality.sync_to_mood_baselines(self.brain.mood)
-        await self.broadcast("memory_updated", self.brain.episodic_memory.get_stats())
+        mem_stats = await asyncio.to_thread(self.brain.episodic_memory.get_stats)
+        await self.broadcast("memory_updated", mem_stats)
         await self.broadcast("mood_updated", self.brain.mood.get_state())
         await self.broadcast("relationship_updated", self.brain.relationships.get_state())
         if hasattr(self.brain, "personality") and self.brain.personality:
@@ -1975,10 +2032,14 @@ class Orchestrator:
                 self.brain.mood.apply_stimulus("goal_all_completed")
                 g_dict = details.get("goal", {})
                 if hasattr(self.brain, "personality") and self.brain.personality:
-                    self.brain.personality.record_experience("challenge_completed", {"task": g_dict.get("title")})
+                    await asyncio.to_thread(
+                        self.brain.personality.record_experience,
+                        "challenge_completed", {"task": g_dict.get("title")}
+                    )
                     self.brain.personality.sync_to_mood_baselines(self.brain.mood)
                     await self.broadcast("personality_updated", self.brain.personality.get_state())
-                self.brain.episodic_memory.record_episode(
+                await asyncio.to_thread(
+                    self.brain.episodic_memory.record_episode,
                     title=f"Misi Selesai: {g_dict.get('title')}",
                     content=f"Eve berhasil menyelesaikan seluruh target '{g_dict.get('title')}' secara mandiri!",
                     episode_type="achievement",
@@ -1987,7 +2048,8 @@ class Orchestrator:
                     importance_score=0.9
                 )
                 await self.broadcast("goal_completed", details)
-                await self.broadcast("memory_updated", self.brain.episodic_memory.get_stats())
+                mem_stats = await asyncio.to_thread(self.brain.episodic_memory.get_stats)
+                await self.broadcast("memory_updated", mem_stats)
             elif details.get("subtask_completed"):
                 self.brain.mood.apply_stimulus("goal_milestone_completed")
 

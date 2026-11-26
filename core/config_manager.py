@@ -1172,8 +1172,8 @@ class ConfigManager:
             {
                 "path": "performance.max_concurrent_tasks",
                 "category": "performance",
-                "label": "Max Concurrent Tasks",
-                "description": "Batas antrean tugas simultan di master orchestrator loop.",
+                "label": "Max Concurrent Tasks (Advisory)",
+                "description": "Reserved/advisory batas antrean tugas simultan di master orchestrator loop.",
                 "type": "number",
                 "min": 1,
                 "max": 10,
@@ -1183,12 +1183,23 @@ class ConfigManager:
             {
                 "path": "performance.websocket_ping_interval_sec",
                 "category": "performance",
-                "label": "WebSocket Keepalive Ping",
-                "description": "Interval heartbeat ping ke dashboard Web UI.",
+                "label": "WebSocket Keepalive Ping (Advisory)",
+                "description": "Reserved/advisory interval heartbeat ping ke dashboard Web UI.",
                 "type": "number",
                 "min": 5,
                 "max": 120,
                 "default": 30,
+                "restart_required": False
+            },
+            {
+                "path": "performance.audio_buffer_size_kb",
+                "category": "performance",
+                "label": "Audio Buffer Size KB (Advisory)",
+                "description": "Reserved/advisory ukuran buffer audio streaming dalam kilobyte.",
+                "type": "number",
+                "min": 16,
+                "max": 4096,
+                "default": 256,
                 "restart_required": False
             },
 
@@ -1502,6 +1513,389 @@ class ConfigManager:
                 "description": "Buat ringkasan stream Markdown di data/second_brain/streams/ saat shutdown.",
                 "type": "toggle",
                 "default": True,
+                "restart_required": False
+            },
+
+            # Additional schematized defaults for full DEFAULT_SETTINGS validation coverage
+            {
+                "path": "system.name",
+                "category": "general",
+                "label": "Application Name",
+                "description": "Nama identitas sistem aplikasi.",
+                "type": "text",
+                "default": "MaybeAI",
+                "restart_required": True
+            },
+            {
+                "path": "system.version",
+                "category": "general",
+                "label": "Application Version",
+                "description": "Versi konfigurasi sistem aplikasi.",
+                "type": "text",
+                "default": "1.0.0",
+                "restart_required": False
+            },
+            {
+                "path": "system.response_timeout_sec",
+                "category": "general",
+                "label": "Response Timeout (Advisory)",
+                "description": "Reserved/advisory batas waktu respons pemrosesan dalam detik.",
+                "type": "number",
+                "min": 1,
+                "max": 300,
+                "default": 15,
+                "restart_required": False
+            },
+            {
+                "path": "llm.context_window_turns",
+                "category": "brain",
+                "label": "Context Window Turns",
+                "description": "Jumlah giliran percakapan yang dikirim ke jendela konteks LLM.",
+                "type": "number",
+                "min": 1,
+                "max": 100,
+                "default": 16,
+                "restart_required": False
+            },
+            {
+                "path": "llm.fallback_provider",
+                "category": "brain",
+                "label": "Fallback LLM Provider",
+                "description": "Provider cadangan saat provider LLM utama gagal.",
+                "type": "select",
+                "options": [
+                    {"label": "Mock Offline Persona", "value": "mock"},
+                    {"label": "Google Gemini", "value": "gemini"},
+                    {"label": "OpenAI", "value": "openai"},
+                    {"label": "Ollama Local", "value": "ollama"}
+                ],
+                "default": "mock",
+                "restart_required": False
+            },
+            {
+                "path": "llm.retry_attempts",
+                "category": "brain",
+                "label": "LLM Retry Attempts",
+                "description": "Jumlah percobaan ulang otomatis saat pemanggilan LLM gagal.",
+                "type": "number",
+                "min": 0,
+                "max": 10,
+                "default": 2,
+                "restart_required": False
+            },
+            {
+                "path": "personality.enabled",
+                "category": "personality",
+                "label": "Personality Engine Enabled",
+                "description": "Mengaktifkan modul kepribadian dinamis Eve.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "personality.curiosity",
+                "category": "personality",
+                "label": "Curiosity",
+                "description": "Tingkat keingintahuan karakter dalam merespons chat.",
+                "type": "slider",
+                "min": 0,
+                "max": 100,
+                "default": 65,
+                "restart_required": False
+            },
+            {
+                "path": "personality.roasting_level",
+                "category": "personality",
+                "label": "Roasting Level",
+                "description": "Intensitas lelucon tajam terhadap viewer atau pemain.",
+                "type": "slider",
+                "min": 0,
+                "max": 100,
+                "default": 55,
+                "restart_required": False
+            },
+            {
+                "path": "personality.response_creativity",
+                "category": "personality",
+                "label": "Response Creativity",
+                "description": "Tingkat variasi dan kreativitas gaya bahasa.",
+                "type": "slider",
+                "min": 0,
+                "max": 100,
+                "default": 80,
+                "restart_required": False
+            },
+            {
+                "path": "memory.episodic_memory_enabled",
+                "category": "memory",
+                "label": "Episodic Memory Enabled",
+                "description": "Menyimpan memori episodik jangka panjang.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "memory.retrieval_limit",
+                "category": "memory",
+                "label": "Memory Retrieval Limit",
+                "description": "Jumlah maksimum memori relevan yang diambil per kueri.",
+                "type": "number",
+                "min": 1,
+                "max": 50,
+                "default": 5,
+                "restart_required": False
+            },
+            {
+                "path": "memory.similarity_threshold",
+                "category": "memory",
+                "label": "Memory Similarity Threshold",
+                "description": "Ambang batas skor kemiripan pencarian memori semantik.",
+                "type": "slider",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "default": 0.70,
+                "restart_required": False
+            },
+            {
+                "path": "memory.auto_extract",
+                "category": "memory",
+                "label": "Auto-Extract Memories",
+                "description": "Ekstraksi otomatis fakta penting dari percakapan.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "mood.mood_sensitivity",
+                "category": "mood",
+                "label": "Mood Sensitivity",
+                "description": "Pengali sensitivitas perubahan mood terhadap stimulus.",
+                "type": "slider",
+                "min": 0.1,
+                "max": 3.0,
+                "step": 0.1,
+                "default": 1.0,
+                "restart_required": False
+            },
+            {
+                "path": "mood.default_baseline_happiness",
+                "category": "mood",
+                "label": "Baseline Happiness",
+                "description": "Nilai dasar dimensi mood happiness.",
+                "type": "slider",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "default": 0.60,
+                "restart_required": False
+            },
+            {
+                "path": "mood.default_baseline_annoyance",
+                "category": "mood",
+                "label": "Baseline Annoyance",
+                "description": "Nilai dasar dimensi mood annoyance.",
+                "type": "slider",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "default": 0.10,
+                "restart_required": False
+            },
+            {
+                "path": "mood.default_baseline_curiosity",
+                "category": "mood",
+                "label": "Baseline Curiosity",
+                "description": "Nilai dasar dimensi mood curiosity.",
+                "type": "slider",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "default": 0.50,
+                "restart_required": False
+            },
+            {
+                "path": "mood.default_baseline_excitement",
+                "category": "mood",
+                "label": "Baseline Excitement",
+                "description": "Nilai dasar dimensi mood excitement.",
+                "type": "slider",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "default": 0.40,
+                "restart_required": False
+            },
+            {
+                "path": "mood.default_baseline_competitiveness",
+                "category": "mood",
+                "label": "Baseline Competitiveness",
+                "description": "Nilai dasar dimensi mood competitiveness.",
+                "type": "slider",
+                "min": 0.0,
+                "max": 1.0,
+                "step": 0.05,
+                "default": 0.30,
+                "restart_required": False
+            },
+            {
+                "path": "tts.volume",
+                "category": "voice",
+                "label": "TTS Volume",
+                "description": "Penyesuaian volume keluaran suara TTS.",
+                "type": "text",
+                "default": "+0%",
+                "restart_required": False
+            },
+            {
+                "path": "tts.lipsync_sensitivity",
+                "category": "voice",
+                "label": "Lip-Sync Sensitivity",
+                "description": "Sensitivitas amplitudo audio untuk sinkronisasi bibir avatar.",
+                "type": "slider",
+                "min": 0.1,
+                "max": 3.0,
+                "step": 0.1,
+                "default": 1.0,
+                "restart_required": False
+            },
+            {
+                "path": "vts.plugin_name",
+                "category": "avatar",
+                "label": "VTube Studio Plugin Name",
+                "description": "Nama plugin yang didaftarkan ke VTube Studio API.",
+                "type": "text",
+                "default": "MaybeAI-VTuber",
+                "restart_required": True
+            },
+            {
+                "path": "vts.plugin_developer",
+                "category": "avatar",
+                "label": "VTube Studio Plugin Developer",
+                "description": "Nama developer yang didaftarkan ke VTube Studio API.",
+                "type": "text",
+                "default": "MaybeAI Dev",
+                "restart_required": True
+            },
+            {
+                "path": "vts.auto_reconnect",
+                "category": "avatar",
+                "label": "VTube Studio Auto Reconnect",
+                "description": "Otomatis menyambung ulang ke VTube Studio jika terputus.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "vts.movement_intensity",
+                "category": "avatar",
+                "label": "Avatar Movement Intensity",
+                "description": "Skala intensitas gerakan kepala dan tubuh avatar.",
+                "type": "slider",
+                "min": 0.0,
+                "max": 2.0,
+                "step": 0.1,
+                "default": 1.0,
+                "restart_required": False
+            },
+            {
+                "path": "karaoke.vocal_volume",
+                "category": "karaoke",
+                "label": "Karaoke Vocal Volume",
+                "description": "Volume vokal utama saat mode karaoke aktif.",
+                "type": "slider",
+                "min": 0,
+                "max": 100,
+                "default": 100,
+                "restart_required": False
+            },
+            {
+                "path": "karaoke.glowsticks_enabled",
+                "category": "karaoke",
+                "label": "Glowsticks Enabled",
+                "description": "Menampilkan efek glowstick di panggung konser karaoke.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "twitch.message_cooldown_sec",
+                "category": "twitch",
+                "label": "Twitch Message Cooldown (sec)",
+                "description": "Jeda minimal antar balasan pesan di Twitch chat.",
+                "type": "number",
+                "min": 0.0,
+                "max": 60.0,
+                "default": 3.0,
+                "restart_required": False
+            },
+            {
+                "path": "twitch.mention_only",
+                "category": "twitch",
+                "label": "Twitch Mention Only",
+                "description": "Hanya merespons pesan Twitch yang menyebut nama bot.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "moderator.spam_rate_limit",
+                "category": "moderator",
+                "label": "Spam Rate Limit",
+                "description": "Batas jumlah pesan per jendela waktu sebelum dianggap spam.",
+                "type": "number",
+                "min": 1,
+                "max": 100,
+                "default": 5,
+                "restart_required": False
+            },
+            {
+                "path": "minecraft.casual_follow_player",
+                "category": "minecraft",
+                "label": "Casual Follow Player",
+                "description": "Bot mengikuti pemain dalam mode santai.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "minecraft.casual_head_tracking",
+                "category": "minecraft",
+                "label": "Casual Head Tracking",
+                "description": "Bot menoleh mengikuti arah pemain dalam mode santai.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "minecraft.speedrun_autonomous",
+                "category": "minecraft",
+                "label": "Speedrun Autonomous Mode",
+                "description": "Mengizinkan langkah speedrun otonom di Minecraft.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "minecraft.guard_radius",
+                "category": "minecraft",
+                "label": "Guard Radius (Blocks)",
+                "description": "Radius patroli perlindungan pemain dalam blok.",
+                "type": "number",
+                "min": 1.0,
+                "max": 64.0,
+                "default": 15.0,
+                "restart_required": False
+            },
+            {
+                "path": "autonomous_agent.max_planning_steps",
+                "category": "autonomous",
+                "label": "Max Planning Steps",
+                "description": "Batas maksimum langkah perencanaan beruntun per sesi.",
+                "type": "number",
+                "min": 1,
+                "max": 50,
+                "default": 5,
                 "restart_required": False
             }
         ]

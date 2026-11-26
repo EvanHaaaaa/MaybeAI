@@ -53,7 +53,7 @@ class TestTTSEngine(unittest.IsolatedAsyncioTestCase):
             mixer_state["initialized"] = True
 
         fake_channel = MagicMock()
-        fake_channel.get_busy.return_value = False
+        fake_channel.get_busy.side_effect = [True, False, True, False]
         fake_sound = MagicMock()
         fake_sound.play.return_value = fake_channel
         fake_mixer = MagicMock()

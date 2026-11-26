@@ -10,7 +10,7 @@ try:
 except ImportError:
     os.environ.setdefault("MAYBEAI_LLM_PROVIDER", "mock")
 
-from core.brain import Brain
+from core.brain import Brain, ContextBudgetManager
 
 
 class _FakeAsyncResp:
@@ -133,6 +133,71 @@ class TestBrain(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(chosen2, "openai")
         persisted2 = json.loads(custom_path.read_text(encoding="utf-8"))
         self.assertEqual(persisted2["llm"]["provider"], "openai")
+
+    def test_max_tokens_aligned_between_openai_and_gemini(self):
+        no_max_path = self.temp_dir / "no_max_settings.json"
+        no_max_path.write_text(json.dumps({"llm": {"provider": "openai"}}), encoding="utf-8")
+        brain = Brain(settings_path=str(no_max_path), character_path="config/character.json")
+
+        openai_payload = brain._build_openai_payload("sys", "Viewer", "hi", False, "")
+        gemini_payload = brain._build_gemini_payload("sys", "Viewer", "hi", False, "")
+        self.assertEqual(openai_payload["max_tokens"], 800)
+        self.assertEqual(gemini_payload["generationConfig"]["maxOutputTokens"], 800)
+
+    def test_context_budget_manager_priority_truncation(self):
+        mgr = ContextBudgetManager({"llm": {"input_token_budget": 180}})
+        system_prompt = "\n\n".join([
+            "You are Eve Maybe.",
+            "[CREATOR VERIFIED]\nCreator authority active.",
+            "[MOOD DIRECTIVE]\n" + ("mood " * 40),
+            "[EVE'S SECOND BRAIN & EPISODIC MEMORY RECALL]\n" + ("memory " * 60),
+            "CORE CHARACTER LORE:\n" + ("lore " * 120),
+            "10 CONVERSATIONAL PILLARS (NEURO-SAMA STYLE):\nKeep snappy.",
+        ])
+        history = [
+            {"role": "user", "content": "oldest turn " + ("x" * 120)},
+            {"role": "assistant", "content": "newest reply"},
+        ]
+
+        bounded_prompt, bounded_history = mgr.apply("openai", system_prompt, history, "Viewer: hi")
+        total_tokens = (
+            mgr.estimate_tokens(bounded_prompt)
+            + sum(mgr.estimate_tokens(item["content"]) for item in bounded_history)
+            + mgr.estimate_tokens("Viewer: hi")
+        )
+        self.assertLessEqual(total_tokens, 180)
+        self.assertIn("You are Eve Maybe.", bounded_prompt)
+        self.assertIn("[CREATOR VERIFIED]", bounded_prompt)
+        self.assertNotIn("CORE CHARACTER LORE:", bounded_prompt)
+        self.assertNotIn("EPISODIC MEMORY RECALL", bounded_prompt)
+
+    async def test_is_creator_plumbed_to_live_prompt_and_error_fallbacks(self):
+        brain = Brain(settings_path=str(self.settings_path), character_path="config/character.json")
+        captured = {}
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            captured["json"] = json
+            return _FakeAsyncResp(status=500, text_data="Internal Server Error")
+
+        fake_session = MagicMock()
+        fake_session.post = fake_post
+
+        try:
+            with patch.dict(
+                os.environ,
+                {"MAYBEAI_LLM_PROVIDER": "gemini", "GEMINI_API_KEY": "test-gem-secret"},
+                clear=False,
+            ), patch.object(brain, "_get_session", new=AsyncMock(return_value=fake_session)), patch.object(
+                brain.conversation, "generate_mock_response", wraps=brain.conversation.generate_mock_response
+            ) as mock_fallback:
+                await brain.generate_response("Evan", "buka notepad", is_creator=True)
+
+            sys_text = captured["json"]["systemInstruction"]["parts"][0]["text"]
+            self.assertIn("[CREATOR VERIFIED]", sys_text)
+            mock_fallback.assert_called_once()
+            self.assertTrue(mock_fallback.call_args.kwargs.get("is_creator"))
+        finally:
+            await brain.close()
 
 
 if __name__ == "__main__":

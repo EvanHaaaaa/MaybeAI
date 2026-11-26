@@ -8,7 +8,16 @@ from typing import Dict, Any, Optional, Callable, List, Set
 import edge_tts
 import pygame
 
-from core.tts_providers import RVCVoiceConverter
+from core.tts_providers import (
+    BaseTTSProvider,
+    EdgeTTSProvider,
+    RVCVoiceConverter,
+    create_tts_provider,
+    detect_audio_format,
+    extract_rms_envelope_from_sound,
+    extract_rms_envelope_from_wav,
+    is_edge_tts_voice,
+)
 
 class Singer:
     """
@@ -25,14 +34,26 @@ class Singer:
         rvc_enabled: bool = False,
         rvc_url: str = "",
         rvc_pitch_shift: int = 0,
+        provider: str = "edge-tts",
+        fallback_voice: str = "en-US-AriaNeural",
+        elevenlabs_voice_id: str = "",
+        kokoro_url: str = "",
+        custom_tts_url: str = "",
     ):
         self.songs_config_path = Path(songs_config_path)
         self.voice = voice
+        self.fallback_voice = str(fallback_voice or "en-US-AriaNeural").strip() or "en-US-AriaNeural"
         mode = str(output_mode or "both").strip().lower()
         self.output_mode = mode if mode in ("server", "browser", "both") else "both"
+        self.provider = str(provider or "edge-tts").strip().lower()
+        self.elevenlabs_voice_id = str(elevenlabs_voice_id or "").strip()
+        self.kokoro_url = str(kokoro_url or "").strip()
+        self.custom_tts_url = str(custom_tts_url or "").strip()
         self.rvc_enabled = bool(rvc_enabled)
         self.rvc_url = str(rvc_url or "").strip()
         self.rvc_pitch_shift = int(rvc_pitch_shift)
+        self._fallback_provider: EdgeTTSProvider = EdgeTTSProvider()
+        self._provider: BaseTTSProvider = self._build_provider()
         self._rvc = RVCVoiceConverter(
             enabled=self.rvc_enabled,
             rvc_url=self.rvc_url,
@@ -46,6 +67,19 @@ class Singer:
         self._active_channel: Any = None
         self.load_songs()
 
+    def _build_provider(self) -> BaseTTSProvider:
+        try:
+            return create_tts_provider(
+                self.provider,
+                kokoro_url=self.kokoro_url,
+                elevenlabs_voice_id=self.elevenlabs_voice_id,
+                custom_tts_url=self.custom_tts_url,
+            )
+        except ValueError as exc:
+            print(f"[Singer Warning] {exc}. Falling back to edge-tts.")
+            self.provider = "edge-tts"
+            return EdgeTTSProvider()
+
     def update_config(
         self,
         voice: Optional[str] = None,
@@ -53,13 +87,35 @@ class Singer:
         rvc_enabled: Optional[bool] = None,
         rvc_url: Optional[str] = None,
         rvc_pitch_shift: Optional[int] = None,
+        provider: Optional[str] = None,
+        fallback_voice: Optional[str] = None,
+        elevenlabs_voice_id: Optional[str] = None,
+        kokoro_url: Optional[str] = None,
+        custom_tts_url: Optional[str] = None,
     ) -> None:
         if voice:
             self.voice = voice.strip()
+        if fallback_voice:
+            self.fallback_voice = str(fallback_voice).strip()
         if output_mode is not None:
             mode = str(output_mode).strip().lower()
             if mode in ("server", "browser", "both"):
                 self.output_mode = mode
+        rebuild_provider = False
+        if provider is not None:
+            self.provider = str(provider or "edge-tts").strip().lower()
+            rebuild_provider = True
+        if elevenlabs_voice_id is not None:
+            self.elevenlabs_voice_id = str(elevenlabs_voice_id).strip()
+            rebuild_provider = True
+        if kokoro_url is not None:
+            self.kokoro_url = str(kokoro_url).strip()
+            rebuild_provider = True
+        if custom_tts_url is not None:
+            self.custom_tts_url = str(custom_tts_url).strip()
+            rebuild_provider = True
+        if rebuild_provider:
+            self._provider = self._build_provider()
         if rvc_enabled is not None:
             self.rvc_enabled = bool(rvc_enabled)
         if rvc_url is not None:
@@ -71,6 +127,55 @@ class Singer:
             rvc_url=self.rvc_url,
             pitch_shift=self.rvc_pitch_shift,
         )
+
+    async def close(self) -> None:
+        """Closes persistent HTTP sessions held by TTS provider and RVC converter."""
+        for component in (self._provider, self._fallback_provider, self._rvc):
+            if component is not None and hasattr(component, "close"):
+                try:
+                    await component.close()
+                except Exception:
+                    pass
+
+    async def _synthesize_vocal(
+        self,
+        text: str,
+        rate: str = "+0%",
+        pitch: str = "+0Hz",
+        emotion: str = "happy",
+    ) -> bytes:
+        try:
+            vocal_bytes = await self._provider.synthesize(
+                text=text,
+                voice=self.voice,
+                rate=rate,
+                pitch=pitch,
+                emotion=emotion,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if not isinstance(self._provider, EdgeTTSProvider):
+                fb_voice = self.voice if is_edge_tts_voice(self.voice) else self.fallback_voice
+                print(
+                    f"[Singer Provider Warning] {self.provider} failed ({exc}); "
+                    f"falling back to edge-tts ({fb_voice})."
+                )
+                vocal_bytes = await self._fallback_provider.synthesize(
+                    text=text,
+                    voice=fb_voice,
+                    rate=rate,
+                    pitch=pitch,
+                    emotion=emotion,
+                )
+            else:
+                raise
+
+        if self._rvc.enabled and self.rvc_url:
+            converted = await self._rvc.convert(vocal_bytes, pitch_shift=self.rvc_pitch_shift)
+            if converted:
+                vocal_bytes = converted
+        return vocal_bytes
 
     def load_songs(self):
         if self.songs_config_path.exists():
@@ -171,54 +276,59 @@ class Singer:
                     if inspect.isawaitable(res):
                         await res
 
-                # Generate melodic vocal file
-                vocal_file = str(self.temp_dir / f"vocal_{song_id}_{idx}.mp3")
-                created_vocal_files.add(vocal_file)
-                comm = edge_tts.Communicate(
+                # Generate melodic vocal audio via configured TTS provider + optional RVC
+                vocal_bytes = await self._synthesize_vocal(
                     text=text,
-                    voice=self.voice,
+                    rate=rate,
                     pitch=pitch,
-                    rate=rate
+                    emotion=emotion,
                 )
-                await comm.save(vocal_file)
 
-                if self._rvc.enabled and self.rvc_url:
-                    raw_vocal_bytes = Path(vocal_file).read_bytes()
-                    converted_vocal_bytes = await self._rvc.convert(
-                        raw_vocal_bytes, pitch_shift=self.rvc_pitch_shift
-                    )
-                    if converted_vocal_bytes and converted_vocal_bytes != raw_vocal_bytes:
-                        Path(vocal_file).write_bytes(converted_vocal_bytes)
-
-                if on_vocal_audio and self.output_mode in ("browser", "both"):
+                if on_vocal_audio and self.output_mode in ("browser", "both") and vocal_bytes:
                     try:
-                        audio_bytes = Path(vocal_file).read_bytes()
-                        if audio_bytes:
-                            cb_res = on_vocal_audio(audio_bytes, text)
-                            if inspect.isawaitable(cb_res):
-                                await cb_res
+                        cb_res = on_vocal_audio(vocal_bytes, text)
+                        if inspect.isawaitable(cb_res):
+                            await cb_res
                     except Exception:
                         pass
 
-                if use_server_audio:
-                    # Play vocal on dedicated channel so BGM keeps playing simultaneously
-                    sound = pygame.mixer.Sound(vocal_file)
-                    sound.set_volume(1.0)
+                if use_server_audio and vocal_bytes:
+                    _, ext = detect_audio_format(vocal_bytes)
+                    vocal_file = str(self.temp_dir / f"vocal_{song_id}_{idx}{ext}")
+                    created_vocal_files.add(vocal_file)
+                    await asyncio.to_thread(Path(vocal_file).write_bytes, vocal_bytes)
+
+                    def _load_vocal_sound() -> Any:
+                        snd = pygame.mixer.Sound(vocal_file)
+                        snd.set_volume(1.0)
+                        env, _ = extract_rms_envelope_from_sound(snd, frame_ms=50)
+                        if not env:
+                            env, _ = extract_rms_envelope_from_wav(vocal_bytes, frame_ms=50)
+                        return snd, env
+
+                    sound, envelope = await asyncio.to_thread(_load_vocal_sound)
                     channel = sound.play()
                     self._active_channel = channel
 
-                    # Dynamic lip-sync while vocal line plays
+                    # Real audio-envelope RMS lip-sync while vocal line plays
+                    interval = 0.05
+                    elapsed = 0.0
                     step = 0
-                    while channel is not None and channel.get_busy() and not self._stop_requested:
-                        await asyncio.sleep(0.08)
-                        step += 1
+                    while channel is not None and channel.get_busy() in (True, 1) and not self._stop_requested:
                         if on_mouth_update:
-                            val = 0.7 if step % 2 == 0 else 0.2
+                            if envelope:
+                                env_idx = min(len(envelope) - 1, int(elapsed / interval))
+                                val = envelope[env_idx]
+                            else:
+                                val = 0.6 if step % 2 == 0 else 0.2
                             m_res = on_mouth_update(val)
                             if inspect.isawaitable(m_res):
                                 await m_res
+                        await asyncio.sleep(interval)
+                        elapsed += interval
+                        step += 1
                     self._active_channel = None
-                else:
+                elif not use_server_audio and on_vocal_audio is None:
                     est_duration = max(1.0, len(text.split()) / 2.6)
                     steps = max(1, int(est_duration / 0.1))
                     for step in range(steps):
@@ -226,7 +336,7 @@ class Singer:
                             break
                         await asyncio.sleep(0.1)
                         if on_mouth_update:
-                            val = 0.7 if step % 2 == 0 else 0.2
+                            val = 0.6 if step % 2 == 0 else 0.1
                             m_res = on_mouth_update(val)
                             if inspect.isawaitable(m_res):
                                 await m_res

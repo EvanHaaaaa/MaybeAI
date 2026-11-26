@@ -1,6 +1,7 @@
 import asyncio
 import re
 import ssl
+import time
 from typing import Optional, Callable, Dict, Any, List
 
 from core.platforms.base import BasePlatformAdapter
@@ -22,7 +23,7 @@ class ChatMessage:
         self.is_donation = is_donation
         self.donation_amount = donation_amount
         self.donation_currency = donation_currency
-        self.timestamp = asyncio.get_event_loop().time()
+        self.timestamp = time.monotonic()
         if is_creator is not None:
             self.is_creator = bool(is_creator)
         else:
@@ -33,9 +34,10 @@ class ChatReceiver:
     Handles live chat ingestion from Twitch IRC or Web UI queue.
     """
 
-    def __init__(self, twitch_channel: Optional[str] = None):
+    def __init__(self, twitch_channel: Optional[str] = None, max_queue_size: int = 500):
         self.twitch_channel = twitch_channel
-        self.queue: asyncio.Queue[ChatMessage] = asyncio.Queue()
+        self.max_queue_size = max(1, int(max_queue_size))
+        self.queue: asyncio.Queue[ChatMessage] = asyncio.Queue(maxsize=self.max_queue_size)
         self.is_running = False
         self.is_connected = False
         self.last_error: Optional[str] = None
@@ -112,7 +114,7 @@ class ChatReceiver:
         is_creator: Optional[bool] = None
     ):
         """
-        Push message into the active queue.
+        Push message into the active queue, dropping the oldest message if full.
         """
         msg = ChatMessage(
             user=user,
@@ -123,7 +125,21 @@ class ChatReceiver:
             donation_currency=donation_currency,
             is_creator=is_creator
         )
-        await self.queue.put(msg)
+        if self.queue.full():
+            try:
+                self.queue.get_nowait()
+                self.queue.task_done()
+            except asyncio.QueueEmpty:
+                pass
+        try:
+            self.queue.put_nowait(msg)
+        except asyncio.QueueFull:
+            try:
+                self.queue.get_nowait()
+                self.queue.task_done()
+            except asyncio.QueueEmpty:
+                pass
+            self.queue.put_nowait(msg)
 
     async def get_next_message(self) -> ChatMessage:
         return await self.queue.get()
@@ -244,7 +260,7 @@ class ChatReceiver:
 
                 # Anonymously join or auth
                 pass_str = oauth if oauth else "SCHMOOPIIE"
-                nick_str = bot_nick if bot_nick else f"justinfan{asyncio.get_event_loop().time():.0f}"
+                nick_str = bot_nick if bot_nick else f"justinfan{asyncio.get_running_loop().time():.0f}"
 
                 writer.write(f"PASS {pass_str}\r\n".encode())
                 writer.write(f"NICK {nick_str}\r\n".encode())

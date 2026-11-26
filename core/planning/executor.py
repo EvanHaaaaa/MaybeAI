@@ -36,6 +36,8 @@ class AutonomousMissionExecutor:
         enabled: bool = True,
         scene_switcher: Optional[Callable[[str, str], Any]] = None,
         scene_map: Optional[Dict[str, str]] = None,
+        telemetry_timeout_sec: float = 2.0,
+        telemetry_poll_interval_sec: float = 0.2,
     ):
         self.goal_engine = goal_engine
         self.mood_engine = mood_engine
@@ -48,6 +50,8 @@ class AutonomousMissionExecutor:
         self.tick_interval_sec = max(0.05, float(tick_interval_sec))
         self.enabled = bool(enabled)
         self.scene_switcher = scene_switcher
+        self.telemetry_timeout_sec = max(0.05, float(telemetry_timeout_sec))
+        self.telemetry_poll_interval_sec = max(0.01, float(telemetry_poll_interval_sec))
         self.scene_map: Dict[str, str] = dict(DEFAULT_SCENE_MAP)
         if scene_map:
             for k, v in scene_map.items():
@@ -304,12 +308,21 @@ class AutonomousMissionExecutor:
                     await self._maybe_await(self.minecraft.jump())
 
                 if use_real_telemetry:
-                    after_count = self.minecraft.get_inventory_count(item_terms)
-                    observed_delta = (
-                        max(0, int(after_count) - int(before_count))
-                        if isinstance(after_count, (int, float)) and not isinstance(after_count, bool)
-                        else 0
-                    )
+                    deadline = time.monotonic() + self.telemetry_timeout_sec
+                    observed_delta = 0
+                    while True:
+                        latest_snapshot = self.minecraft.get_telemetry()
+                        after_count = (
+                            self.minecraft.get_inventory_count(item_terms)
+                            if isinstance(latest_snapshot, dict)
+                            else None
+                        )
+                        if isinstance(after_count, (int, float)) and not isinstance(after_count, bool):
+                            observed_delta = max(0, int(after_count) - int(before_count))
+                        if observed_delta > 0 or time.monotonic() >= deadline:
+                            break
+                        await asyncio.sleep(self.telemetry_poll_interval_sec)
+
                     if observed_delta <= 0:
                         return {
                             "success": False,
@@ -334,20 +347,15 @@ class AutonomousMissionExecutor:
                         {"item": item_name, "count": delta, "connected": True},
                     )
         else:
-            commentary = (
-                f"[emotion: happy] [Minecraft Expedition] Eve lagi jalanin misi '{subtask.title}' "
-                f"({subtask.strategy or 'fokus kumpulin progres'})! [action: wink]"
-            )
-            await self._speak(commentary)
-            if action_name == "minecraft_speedrun_advance":
-                eval_res = self.goal_engine.evaluate_event("minecraft_speedrun_advance", {"simulated": True, "delta": delta})
-            elif action_name == "minecraft_guard":
-                eval_res = self.goal_engine.evaluate_event("minecraft_guard_victory", {"simulated": True, "delta": delta})
-            else:
-                eval_res = self.goal_engine.evaluate_event(
-                    "minecraft_item_collected",
-                    {"item": params.get("item", "logs"), "count": delta, "simulated": True},
-                )
+            return {
+                "success": False,
+                "connected": False,
+                "blocked": True,
+                "status": "blocked",
+                "mode": params.get("mode"),
+                "error": "Minecraft is not connected; mission step blocked.",
+                "eval": {"advanced": False},
+            }
 
         if not eval_res.get("advanced"):
             eval_res = self.goal_engine.evaluate_event(

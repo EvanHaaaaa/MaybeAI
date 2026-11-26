@@ -400,7 +400,10 @@ async def _handle_highlights_action(payload: Dict[str, Any]) -> tuple[int, Dict[
         if vod is None:
             return 503, {"success": False, "error": "VOD summarizer is not initialized"}
         if hasattr(vod, "generate_summary"):
-            res = await _maybe_await(vod.generate_summary())
+            if asyncio.iscoroutinefunction(vod.generate_summary):
+                res = await vod.generate_summary()
+            else:
+                res = await _maybe_await(await asyncio.to_thread(vod.generate_summary))
         elif hasattr(vod, "summarize"):
             res = await _maybe_await(vod.summarize())
         else:
@@ -481,7 +484,7 @@ async def get_configuration_schema():
 
 @app.put("/api/config")
 async def update_configuration(payload: Dict[str, Any]):
-    success, errors, restart_required = config_mgr.save_config(payload)
+    success, errors, restart_required = await asyncio.to_thread(config_mgr.save_config, payload)
     if not success:
         return {"success": False, "errors": errors}
     await orchestrator.apply_configuration_hot_reload(config_mgr.settings)
@@ -563,7 +566,7 @@ async def get_goals_state():
 async def get_goals_agenda_markdown():
     p = Path("data/goals/agenda.md")
     if p.exists():
-        return {"markdown": p.read_text(encoding="utf-8")}
+        return {"markdown": await asyncio.to_thread(p.read_text, encoding="utf-8")}
     return {"markdown": "# No agenda yet."}
 
 @app.get("/api/relationships")
@@ -901,6 +904,32 @@ async def websocket_endpoint(websocket: WebSocket):
             raise
 
     orchestrator.register_listener(listener)
+
+    voice_queue: asyncio.Queue[Optional[tuple[bytes, str, Optional[str]]]] = asyncio.Queue(maxsize=64)
+    voice_worker_task: Optional[asyncio.Task] = None
+
+    async def _voice_worker() -> None:
+        while True:
+            item = await voice_queue.get()
+            try:
+                if item is None:
+                    return
+                pcm_bytes, voice_user, voice_lang = item
+                res = await orchestrator.process_voice_chunk(
+                    pcm_bytes,
+                    user=voice_user,
+                    language=voice_lang,
+                )
+                try:
+                    await websocket.send_json({"type": "voice_chunk_ack", "data": res})
+                except Exception:
+                    pass
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                pass
+            finally:
+                voice_queue.task_done()
 
     # Send initial minecraft state immediately upon connection
     await websocket.send_json({
@@ -1261,7 +1290,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     await orchestrator.broadcast("goal_updated", orchestrator.brain.goals.get_state())
                 elif act == "get_agenda":
                     p = Path("data/goals/agenda.md")
-                    agenda_text = p.read_text(encoding="utf-8") if p.exists() else ""
+                    agenda_text = await asyncio.to_thread(p.read_text, encoding="utf-8") if p.exists() else ""
                     await websocket.send_json({"type": "goal_agenda_data", "data": {"markdown": agenda_text}})
             elif data.get("type") == "relationship_action":
                 act = data.get("action")
@@ -1277,7 +1306,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     tier = data.get("tier", "new_friend")
                     p = orchestrator.brain.relationships.get_relationship(uname)
                     p.tier = tier
-                    orchestrator.brain.relationships.save()
+                    await asyncio.to_thread(orchestrator.brain.relationships.save)
                     orchestrator.brain.relationships.sync_to_markdown(uname)
                     await orchestrator.broadcast("relationship_updated", orchestrator.brain.relationships.get_state())
                 elif act == "simulate_event":
@@ -1318,21 +1347,21 @@ async def websocket_endpoint(websocket: WebSocket):
                     item = data.get("item", "diamond")
                     cnt = int(data.get("count", 1))
                     orchestrator.brain.multiplayer.ledger.record_donation(p_name, item, cnt)
-                    orchestrator.brain.multiplayer.save()
+                    await asyncio.to_thread(orchestrator.brain.multiplayer.save)
                     orchestrator.brain.multiplayer.sync_to_second_brain()
                     await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
                 elif act == "record_combat":
                     p_name = data.get("player_name", "Alex")
                     mob = data.get("mob", "Creeper")
                     orchestrator.brain.multiplayer.ledger.record_combat_aid(p_name, mob)
-                    orchestrator.brain.multiplayer.save()
+                    await asyncio.to_thread(orchestrator.brain.multiplayer.save)
                     orchestrator.brain.multiplayer.sync_to_second_brain()
                     await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
                 elif act == "record_build":
                     p_name = data.get("player_name", "Steve")
                     task = data.get("task", "Konstruksi Dinding Base")
                     orchestrator.brain.multiplayer.ledger.record_building_help(p_name, task)
-                    orchestrator.brain.multiplayer.save()
+                    await asyncio.to_thread(orchestrator.brain.multiplayer.save)
                     orchestrator.brain.multiplayer.sync_to_second_brain()
                     await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
                 elif act == "in_game_chat":
@@ -1353,7 +1382,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     offering = data.get("offering", {"iron_ingot": 8})
                     requesting = data.get("requesting", {"diamond": 1})
                     _, verdict, _ = orchestrator.brain.multiplayer.negotiation.evaluate_incoming_trade(p_name, offering, requesting)
-                    orchestrator.brain.multiplayer.save()
+                    await asyncio.to_thread(orchestrator.brain.multiplayer.save)
                     await orchestrator.broadcast("multiplayer_updated", orchestrator.brain.multiplayer.get_state())
                     await orchestrator.broadcast("ai_response", {
                         "user": "Eve (Barter Desk)",
@@ -1586,7 +1615,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 act = data.get("action")
                 if act == "save":
                     payload = data.get("config", {})
-                    success, errors, restart = config_mgr.save_config(payload)
+                    success, errors, restart = await asyncio.to_thread(config_mgr.save_config, payload)
                     if success:
                         await orchestrator.apply_configuration_hot_reload(config_mgr.settings)
                     await websocket.send_json({
@@ -1624,12 +1653,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 raw_audio = data.get("audio_b64") or data.get("pcm_b64") or data.get("chunk") or data.get("pcm")
                 pcm_bytes = _decode_pcm_chunk(raw_audio)
                 if pcm_bytes:
-                    res = await orchestrator.process_voice_chunk(
+                    if voice_worker_task is None or voice_worker_task.done():
+                        voice_worker_task = asyncio.create_task(_voice_worker())
+                    if voice_queue.full():
+                        try:
+                            voice_queue.get_nowait()
+                            voice_queue.task_done()
+                        except asyncio.QueueEmpty:
+                            pass
+                    voice_queue.put_nowait((
                         pcm_bytes,
-                        user=str(data.get("user") or "Creator"),
-                        language=data.get("language"),
-                    )
-                    await websocket.send_json({"type": "voice_chunk_ack", "data": res})
+                        str(data.get("user") or "Creator"),
+                        data.get("language"),
+                    ))
             elif data.get("type") == "mission_action":
                 if not ws_creator_authorized:
                     await websocket.send_json({
@@ -1685,10 +1721,18 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
                 _, body = await _handle_plugin_action(data)
                 await websocket.send_json({"type": "plugin_event", "data": body})
-    except WebSocketDisconnect:
+    except (WebSocketDisconnect, Exception):
+        pass
+    finally:
         orchestrator.unregister_listener(listener)
-    except Exception as e:
-        orchestrator.unregister_listener(listener)
+        if voice_worker_task is not None and not voice_worker_task.done():
+            try:
+                await asyncio.wait_for(voice_queue.join(), timeout=0.05)
+            except Exception:
+                pass
+            if not voice_worker_task.done():
+                voice_worker_task.cancel()
+                await asyncio.gather(voice_worker_task, return_exceptions=True)
 
 
 @app.websocket("/ws/collab")

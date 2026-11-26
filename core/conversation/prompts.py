@@ -43,13 +43,22 @@ class MasterPromptBuilder:
         minigame_directive: str = "",
         storytelling_directive: str = "",
         performance_directive: str = "",
-        personality_directive: str = ""
+        personality_directive: str = "",
+        is_creator: bool = False
     ) -> str:
         name = character.get("name", "Eve Maybe")
         nickname = character.get("nickname", "Eve")
         creator = character.get("creator", "Creator")
         bio = character.get("bio", "")
         lore = json.dumps(character.get("lore", {}), indent=2)
+
+        creator_directive = ""
+        if is_creator:
+            creator_directive = f"""
+[CREATOR VERIFIED]
+You are speaking directly with your verified Creator ({creator}).
+Acknowledge their authority, prioritize their instructions and system/desktop requests, and respond with special warmth and loyalty while keeping your Eve personality.
+"""
 
         roleplay_directive = ""
         if active_roleplay:
@@ -100,7 +109,7 @@ Actively commentate on their discussion, poke fun at their rivalry, or declare a
         prompt = f"""You are {name} (known as {nickname}), an autonomous AI VTuber streaming live on the internet.
 Your creator is {creator}.
 Bio: {bio}
-
+{creator_directive}
 {special_event_directive}
 {roleplay_directive}
 {story_directive}

@@ -6,8 +6,158 @@ import random
 import tempfile
 import aiohttp
 from pathlib import Path
-from typing import List, Dict, Any, Optional, AsyncIterator
+from typing import List, Dict, Any, Optional, AsyncIterator, Tuple
 from core.conversation.engine import ConversationEngine
+
+
+class ContextBudgetManager:
+    """
+    Enforces per-provider input token budgets using priority-ordered truncation:
+    system core > creator/safety > mood/personality > recent conversation turns > retrieved memories > lore.
+    """
+
+    DEFAULT_INPUT_BUDGET = 1800
+    DEFAULT_PROVIDER_BUDGETS: Dict[str, int] = {
+        "openai": 1800,
+        "gemini": 1800,
+        "ollama": 1600,
+        "mock": 1800,
+    }
+
+    _MOOD_PERSONALITY_MARKERS = (
+        "[MOOD",
+        "CURRENT MOOD",
+        "MOOD:",
+        "BEHAVIORAL DIRECTIVE",
+        "[PERSONALITY",
+        "PERSONALITY:",
+        "EXPERIENCE-BASED PERSONALITY",
+        "CONTROLLED EVOLUTIONARY BEHAVIOR",
+        "AUTONOMOUS GOALS",
+        "RELATIONSHIP DOSSIER",
+        "LIVE VISUAL PERCEPTION",
+        "MULTIPLAYER SOCIAL INTELLIGENCE",
+        "COMMUNITY BEHAVIORAL RULES",
+        "DESKTOP COMPANION",
+        "INTERACTIVE MINI-GAME",
+        "LIVE INTERACTIVE RPG",
+        "DYNAMIC PERFORMANCE DIRECTOR",
+        "[GOAL",
+        "[RELATIONSHIP",
+        "[MULTIPLAYER",
+        "[DESKTOP",
+        "[MINIGAME",
+        "[STORYTELLING",
+        "[PERFORMANCE",
+    )
+
+    def __init__(self, settings: Optional[Dict[str, Any]] = None):
+        self.settings = settings or {}
+
+    @staticmethod
+    def estimate_tokens(text: str) -> int:
+        if not text:
+            return 0
+        return (len(text) + 3) // 4
+
+    def get_budget(self, provider: str) -> int:
+        prov = (provider or "mock").strip().lower()
+        llm_cfg = self.settings.get("llm", {}) if isinstance(self.settings, dict) else {}
+        per_provider = llm_cfg.get("provider_token_budgets", {})
+        if isinstance(per_provider, dict) and prov in per_provider:
+            return max(128, int(per_provider[prov]))
+        if "input_token_budget" in llm_cfg and llm_cfg["input_token_budget"] is not None:
+            return max(128, int(llm_cfg["input_token_budget"]))
+        return self.DEFAULT_PROVIDER_BUDGETS.get(prov, self.DEFAULT_INPUT_BUDGET)
+
+    @classmethod
+    def _classify_block(cls, block: str, current_tier: str) -> Tuple[str, str]:
+        upper = block.upper()
+        if (
+            "10 CONVERSATIONAL PILLARS" in upper
+            or "LANGUAGE ADAPTATION:" in upper
+            or "OUTPUT FORMATTING RULES:" in upper
+            or "CURRENT STREAM SITUATION" in upper
+            or "[ACTIVE ROLEPLAY MODE" in upper
+            or "[ACTIVE STORYTELLING MODE]" in upper
+            or "SPECIAL DONATION" in upper
+            or "LIVE CHAT DEBATE COMMENTARY" in upper
+        ):
+            return "system_core", "system_core"
+        if "CORE CHARACTER LORE:" in upper:
+            return "lore", "lore"
+        if "SECOND BRAIN" in upper or "EPISODIC MEMORY RECALL" in upper:
+            return "memories", "memories"
+        if "[CREATOR VERIFIED]" in upper:
+            return "creator_safety", "system_core"
+        if any(marker in upper for marker in cls._MOOD_PERSONALITY_MARKERS):
+            return "mood_personality", "mood_personality"
+        if current_tier in ("lore", "memories", "mood_personality"):
+            return current_tier, current_tier
+        return "system_core", "system_core"
+
+    @classmethod
+    def _segment_system_prompt(cls, system_prompt: str) -> List[Tuple[str, str]]:
+        if not system_prompt:
+            return []
+        raw_blocks = [b.strip() for b in system_prompt.split("\n\n") if b.strip()]
+        segmented: List[Tuple[str, str]] = []
+        current_tier = "system_core"
+        for block in raw_blocks:
+            tier, current_tier = cls._classify_block(block, current_tier)
+            segmented.append((tier, block))
+        return segmented
+
+    def apply(
+        self,
+        provider: str,
+        system_prompt: str,
+        history_items: Optional[List[Dict[str, Any]]] = None,
+        current_message_text: str = "",
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        budget = self.get_budget(provider)
+        blocks = self._segment_system_prompt(system_prompt)
+        history = [dict(item) for item in (history_items or [])]
+        msg_tokens = self.estimate_tokens(current_message_text)
+
+        def total_tokens() -> int:
+            sys_tok = sum(self.estimate_tokens(text) for _, text in blocks)
+            hist_tok = sum(self.estimate_tokens(str(item.get("content", ""))) for item in history)
+            return sys_tok + hist_tok + msg_tokens
+
+        def drop_tier(target_tier: str) -> bool:
+            for idx in range(len(blocks) - 1, -1, -1):
+                if blocks[idx][0] == target_tier:
+                    blocks.pop(idx)
+                    return True
+            return False
+
+        # Priority-ordered truncation (drop lowest priority first):
+        # lore -> retrieved memories -> oldest conversation turns -> mood/personality -> creator/safety -> system core
+        while total_tokens() > budget:
+            if drop_tier("lore"):
+                continue
+            if drop_tier("memories"):
+                continue
+            if history:
+                history.pop(0)
+                continue
+            if drop_tier("mood_personality"):
+                continue
+            if drop_tier("creator_safety"):
+                continue
+            break
+
+        # Final safeguard if system_core + current_message_text still exceeds budget
+        if total_tokens() > budget and blocks:
+            available_chars = max(0, (budget - msg_tokens) * 4)
+            joined = "\n\n".join(text for _, text in blocks)
+            if len(joined) > available_chars:
+                joined = joined[:available_chars].rstrip()
+            return joined, history
+
+        return "\n\n".join(text for _, text in blocks), history
+
 
 class Brain:
     """
@@ -25,6 +175,7 @@ class Brain:
         self.character = self._load_json(character_path)
         self.conversation = ConversationEngine(self.character)
         self.system_prompt = self.conversation.build_system_prompt("Chat")
+        self.budget_manager = ContextBudgetManager(self.settings)
         self._session: Optional[aiohttp.ClientSession] = None
 
     @property
@@ -137,6 +288,7 @@ class Brain:
 
     def reload_settings(self, new_settings: Dict[str, Any]):
         self.settings = new_settings
+        self.budget_manager = ContextBudgetManager(self.settings)
 
     def set_provider(self, provider: str) -> str:
         prov = provider.lower().strip()
@@ -212,15 +364,16 @@ class Brain:
             donation_amount=donation_amount,
             is_group_debate=is_group_debate,
             debate_users=debate_users,
-            current_message=message
+            current_message=message,
+            is_creator=is_creator
         )
 
         if provider == "openai":
-            response = await self._generate_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
+            response = await self._generate_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
         elif provider == "ollama":
-            response = await self._generate_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
+            response = await self._generate_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
         elif provider == "gemini":
-            response = await self._generate_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
+            response = await self._generate_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
         else:
             response = self.conversation.generate_mock_response(
                 user_name=user_name,
@@ -268,15 +421,16 @@ class Brain:
             donation_amount=donation_amount,
             is_group_debate=is_group_debate,
             debate_users=debate_users,
-            current_message=message
+            current_message=message,
+            is_creator=is_creator
         )
 
         if provider == "openai":
-            stream = self._stream_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
+            stream = self._stream_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
         elif provider == "ollama":
-            stream = self._stream_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
+            stream = self._stream_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
         elif provider == "gemini":
-            stream = self._stream_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
+            stream = self._stream_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
         else:
             stream = self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
@@ -386,14 +540,19 @@ class Brain:
     ) -> Dict[str, Any]:
         model = self.settings.get("llm", {}).get("model", "gpt-4o-mini")
         temperature = float(self.settings.get("llm", {}).get("temperature", 0.85))
-        max_tokens = int(self.settings.get("llm", {}).get("max_tokens", 150))
-
-        messages = [{"role": "system", "content": system_prompt}]
-        for item in self.conversation.context_memory.get_history_for_llm():
-            messages.append({"role": item["role"], "content": item["content"]})
+        max_tokens = int(self.settings.get("llm", {}).get("max_tokens", 800))
 
         user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
         prompt_text = f"{user_prefix}: {message}"
+
+        history_items = self.conversation.context_memory.get_history_for_llm()
+        bounded_prompt, bounded_history = self.budget_manager.apply(
+            "openai", system_prompt, history_items, prompt_text
+        )
+
+        messages = [{"role": "system", "content": bounded_prompt}]
+        for item in bounded_history:
+            messages.append({"role": item["role"], "content": item["content"]})
 
         if image_base64:
             raw_b64 = image_base64.split("base64,")[1] if "base64," in image_base64 else image_base64
@@ -419,11 +578,11 @@ class Brain:
     async def _generate_openai(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
         is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None, is_creator: bool = False
     ) -> str:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
@@ -440,19 +599,19 @@ class Brain:
                     return data["choices"][0]["message"]["content"].strip()
                 else:
                     print(f"[Brain Warning] OpenAI status {resp.status}. Using persona fallback.")
-                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
         except Exception as e:
             print(f"[Brain Error] OpenAI connection error: {e}")
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
     async def _stream_openai(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
         is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None, is_creator: bool = False
     ) -> AsyncIterator[str]:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users):
+            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator):
                 yield chunk
             return
 
@@ -493,7 +652,7 @@ class Brain:
             print(f"[Brain Error] OpenAI stream error: {e}")
 
         if not yielded_any:
-            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users):
+            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator):
                 yield chunk
 
     def _build_ollama_payload(
@@ -503,12 +662,19 @@ class Brain:
     ) -> Dict[str, Any]:
         model = self.settings.get("llm", {}).get("ollama_model", "llama3.2")
 
-        messages = [{"role": "system", "content": system_prompt}]
-        for item in self.conversation.context_memory.get_history_for_llm():
+        user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
+        prompt_text = f"{user_prefix}: {message}"
+
+        history_items = self.conversation.context_memory.get_history_for_llm()
+        bounded_prompt, bounded_history = self.budget_manager.apply(
+            "ollama", system_prompt, history_items, prompt_text
+        )
+
+        messages = [{"role": "system", "content": bounded_prompt}]
+        for item in bounded_history:
             messages.append({"role": item["role"], "content": item["content"]})
 
-        user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
-        user_msg: Dict[str, Any] = {"role": "user", "content": f"{user_prefix}: {message}"}
+        user_msg: Dict[str, Any] = {"role": "user", "content": prompt_text}
         if image_base64:
             raw_b64 = image_base64.split("base64,")[1] if "base64," in image_base64 else image_base64
             user_msg["images"] = [raw_b64]
@@ -523,7 +689,7 @@ class Brain:
     async def _generate_ollama(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
         is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None, is_creator: bool = False
     ) -> str:
         base_url = os.getenv("OLLAMA_BASE_URL") or self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
         url = f"{base_url}/api/chat"
@@ -535,14 +701,14 @@ class Brain:
                 if resp.status == 200:
                     data = await resp.json()
                     return data.get("message", {}).get("content", "").strip()
-                return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+                return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
         except Exception:
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
     async def _stream_ollama(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
         is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None, is_creator: bool = False
     ) -> AsyncIterator[str]:
         base_url = os.getenv("OLLAMA_BASE_URL") or self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
         url = f"{base_url}/api/chat"
@@ -571,22 +737,29 @@ class Brain:
             print(f"[Brain Error] Ollama stream error: {e}")
 
         if not yielded_any:
-            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users):
+            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator):
                 yield chunk
 
     def _build_gemini_payload(
         self, system_prompt: str, user_name: str, message: str,
         is_donation: bool, donation_amount: str, image_base64: Optional[str] = None
     ) -> Dict[str, Any]:
+        user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
+        prompt_text = f"{user_prefix}: {message}"
+
+        history_items = self.conversation.context_memory.get_history_for_llm()
+        bounded_prompt, bounded_history = self.budget_manager.apply(
+            "gemini", system_prompt, history_items, prompt_text
+        )
+
         # Build contents from conversational history
         contents = []
-        for item in self.conversation.context_memory.get_history_for_llm():
+        for item in bounded_history:
             role = "user" if item["role"] == "user" else "model"
             contents.append({"role": role, "parts": [{"text": item["content"]}]})
 
         # Append current message with optional vision part
-        user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
-        user_parts: List[Dict[str, Any]] = [{"text": f"{user_prefix}: {message}"}]
+        user_parts: List[Dict[str, Any]] = [{"text": prompt_text}]
         if image_base64:
             raw_b64 = image_base64.split("base64,")[1] if "base64," in image_base64 else image_base64
             user_parts.append({
@@ -600,7 +773,7 @@ class Brain:
         cfg_temp = float(self.settings.get("llm", {}).get("temperature", 0.85))
         cfg_max_tokens = int(self.settings.get("llm", {}).get("max_tokens", 800))
         return {
-            "systemInstruction": {"parts": [{"text": system_prompt}]},
+            "systemInstruction": {"parts": [{"text": bounded_prompt}]},
             "contents": contents,
             "generationConfig": {
                 "temperature": cfg_temp,
@@ -612,11 +785,11 @@ class Brain:
     async def _generate_gemini(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
         is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None, is_creator: bool = False
     ) -> str:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
         model = self.settings.get("llm", {}).get("gemini_model", "gemini-3-flash-preview")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -639,23 +812,23 @@ class Brain:
                         if text:
                             return text
                     print(f"[Brain Warning] Gemini response missing valid parts. Falling back to persona.")
-                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
                 else:
                     err_text = await resp.text()
                     print(f"[Brain Warning] Gemini returned status {resp.status}: {err_text[:120]}. Using persona fallback.")
-                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
         except Exception as e:
             print(f"[Brain Warning] Gemini request error/timeout ({e}). Using persona fallback.")
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
     async def _stream_gemini(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
         is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None, is_creator: bool = False
     ) -> AsyncIterator[str]:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users):
+            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator):
                 yield chunk
             return
 
@@ -699,5 +872,5 @@ class Brain:
             print(f"[Brain Warning] Gemini stream error/timeout ({e}). Using persona fallback.")
 
         if not yielded_any:
-            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users):
+            async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator):
                 yield chunk

@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import uuid
 import shutil
 import subprocess
@@ -32,7 +33,14 @@ class MinecraftController:
         self.speedrun_agent = SpeedrunAgent(bot_name=bot_name)
         self.guard_agent = GuardAgent(bot_name=bot_name)
         self.guard_target: Optional[str] = None
-        self.multiplayer = MultiplayerSocialEngine()
+        data_root = os.getenv("MAYBEAI_DATA_DIR", "").strip()
+        if data_root:
+            self.multiplayer = MultiplayerSocialEngine(
+                data_dir=os.path.join(data_root, "minecraft"),
+                second_brain_dir=os.path.join(data_root, "second_brain"),
+            )
+        else:
+            self.multiplayer = MultiplayerSocialEngine()
 
         # Multi-Server List
         self.servers: List[Dict[str, Any]] = []

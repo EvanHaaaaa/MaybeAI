@@ -268,6 +268,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let browserAudioData = null;
   const browserAudioQueue = [];
   let isPlayingAudioQueue = false;
+  let isLocalAudioPlaying = false;
   let currentAudioSource = null;
   let audioLipSyncRaf = null;
 
@@ -338,6 +339,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (browserAudioQueue.length > 0 && browserAudioEnabled) {
         playNextAudioChunk();
       } else {
+        isLocalAudioPlaying = false;
         targetMouthOpen = 0.0;
         if (meterFill) meterFill.style.width = "0%";
         markEveSpeaking(false);
@@ -346,13 +348,18 @@ document.addEventListener("DOMContentLoaded", () => {
 
     try {
       source.start(0);
+      isLocalAudioPlaying = true;
       if (!audioLipSyncRaf) {
         audioLipSyncRaf = requestAnimationFrame(updateBrowserAudioLipSync);
       }
     } catch (e) {
       isPlayingAudioQueue = false;
+      isLocalAudioPlaying = browserAudioQueue.length > 0 && browserAudioEnabled;
       currentAudioSource = null;
-      markEveSpeaking(false);
+      if (!isLocalAudioPlaying) {
+        targetMouthOpen = 0.0;
+        markEveSpeaking(false);
+      }
     }
   }
 
@@ -384,6 +391,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function stopBrowserAudioOutput() {
     browserAudioQueue.length = 0;
     isPlayingAudioQueue = false;
+    isLocalAudioPlaying = false;
     if (audioLipSyncRaf) {
       cancelAnimationFrame(audioLipSyncRaf);
       audioLipSyncRaf = null;
@@ -392,6 +400,8 @@ document.addEventListener("DOMContentLoaded", () => {
       try { currentAudioSource.onended = null; currentAudioSource.stop(); } catch (e) {}
       currentAudioSource = null;
     }
+    targetMouthOpen = 0.0;
+    if (meterFill) meterFill.style.width = "0%";
     try {
       if (window.speechSynthesis && window.speechSynthesis.speaking) {
         window.speechSynthesis.cancel();
@@ -541,20 +551,23 @@ document.addEventListener("DOMContentLoaded", () => {
         micTranscriptPreview.textContent = `Terkirim: "${finalText}"`;
       }
     } else if (msg.type === "avatar_state") {
-      targetMouthOpen = msg.data.mouth_open || 0.0;
-      if (msg.data.vts_params && typeof msg.data.vts_params === "object") {
-        latestVtsParams = msg.data.vts_params;
+      const serverData = msg.data || {};
+      if (!isLocalAudioPlaying) {
+        targetMouthOpen = serverData.mouth_open || 0.0;
+        if (targetMouthOpen > 0.05) {
+          markEveSpeaking(true);
+        } else {
+          markEveSpeaking(false);
+        }
       }
-      if (targetMouthOpen > 0.05) {
-        markEveSpeaking(true);
-      } else {
-        markEveSpeaking(false);
+      if (serverData.vts_params && typeof serverData.vts_params === "object") {
+        latestVtsParams = serverData.vts_params;
       }
-      if (msg.data.emotion) {
-        setEmotion(msg.data.emotion);
+      if (serverData.emotion) {
+        setEmotion(serverData.emotion);
       }
-      if (msg.data.is_singing !== undefined) {
-        isSinging = msg.data.is_singing;
+      if (serverData.is_singing !== undefined) {
+        isSinging = serverData.is_singing;
       }
     } else if (msg.type === "song_started") {
       isSinging = true;

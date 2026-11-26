@@ -14,6 +14,10 @@ from core.tts_providers import (
     EdgeTTSProvider,
     RVCVoiceConverter,
     create_tts_provider,
+    detect_audio_format,
+    extract_rms_envelope_from_sound,
+    extract_rms_envelope_from_wav,
+    is_edge_tts_voice,
 )
 
 
@@ -161,8 +165,10 @@ class TTSEngine:
         elevenlabs_voice_id: str = "",
         kokoro_url: str = "",
         custom_tts_url: str = "",
+        fallback_voice: str = "en-US-AriaNeural",
     ):
         self.voice = voice
+        self.fallback_voice = str(fallback_voice or "en-US-AriaNeural").strip() or "en-US-AriaNeural"
         self.rate = rate
         self.pitch = pitch
         self.enabled = enabled
@@ -239,11 +245,14 @@ class TTSEngine:
         elevenlabs_voice_id: Optional[str] = None,
         kokoro_url: Optional[str] = None,
         custom_tts_url: Optional[str] = None,
+        fallback_voice: Optional[str] = None,
     ):
         if enabled is not None:
             self.enabled = bool(enabled)
         if voice:
             self.voice = voice.strip()
+        if fallback_voice:
+            self.fallback_voice = str(fallback_voice).strip()
         if rate:
             self.rate = rate.strip()
         if pitch:
@@ -306,6 +315,15 @@ class TTSEngine:
             "last_error": self.last_error,
         }
 
+    async def close(self) -> None:
+        """Closes persistent HTTP sessions held by providers and RVC converter."""
+        for component in (self._provider, self._fallback_provider, self._rvc):
+            if component is not None and hasattr(component, "close"):
+                try:
+                    await component.close()
+                except Exception:
+                    pass
+
     async def _synthesize_audio(self, text: str, emotion: Optional[str] = None) -> bytes:
         active_emotion = str(emotion or self.emotion or "neutral").strip().lower()
         try:
@@ -320,10 +338,14 @@ class TTSEngine:
             raise
         except Exception as exc:
             if not isinstance(self._provider, EdgeTTSProvider):
-                print(f"[TTS Provider Warning] {self.provider} failed ({exc}); falling back to edge-tts.")
+                fb_voice = self.voice if is_edge_tts_voice(self.voice) else self.fallback_voice
+                print(
+                    f"[TTS Provider Warning] {self.provider} failed ({exc}); "
+                    f"falling back to edge-tts ({fb_voice})."
+                )
                 audio_bytes = await self._fallback_provider.synthesize(
                     text=text,
-                    voice=self.voice,
+                    voice=fb_voice,
                     rate=self.rate,
                     pitch=self.pitch,
                     emotion=active_emotion,
@@ -335,9 +357,10 @@ class TTSEngine:
             audio_bytes = await self._rvc.convert(audio_bytes)
         return audio_bytes
 
-    def _make_temp_audio_path(self) -> str:
+    def _make_temp_audio_path(self, ext: str = ".mp3") -> str:
         ts_ms = int(asyncio.get_running_loop().time() * 1000)
-        return str(self.temp_dir / f"speech_{ts_ms}_{uuid.uuid4().hex[:6]}.mp3")
+        suffix = ext if ext.startswith(".") else f".{ext}"
+        return str(self.temp_dir / f"speech_{ts_ms}_{uuid.uuid4().hex[:6]}{suffix}")
 
     @staticmethod
     async def _invoke_callback(cb: Optional[Callable], *args):
@@ -402,24 +425,24 @@ class TTSEngine:
         self._active_mouth_callback = on_mouth_update
         output_file: Optional[str] = None
 
-        async def _emit_browser_audio(out_path: str, spoken_text: str) -> None:
-            if self.on_audio_ready is None or self.output_mode not in ("browser", "both"):
-                return
-            try:
-                audio_bytes = Path(out_path).read_bytes()
-            except Exception:
-                return
-            if audio_bytes:
-                await self._invoke_callback(self.on_audio_ready, audio_bytes, spoken_text, self.voice)
-
-        async def _run_speak(out_path: str) -> str:
+        async def _run_speak() -> Optional[str]:
+            nonlocal output_file
             audio_bytes = await self._synthesize_audio(text, emotion=self.emotion)
-            Path(out_path).write_bytes(audio_bytes)
-            await _emit_browser_audio(out_path, text)
-            if self.output_mode in ("server", "both"):
-                await self._play_and_lipsync(out_path, text, on_mouth_update)
-            else:
-                await self._simulate_mouth_flap(text, on_mouth_update)
+            if self.on_audio_ready is not None and self.output_mode in ("browser", "both") and audio_bytes:
+                await self._invoke_callback(self.on_audio_ready, audio_bytes, text, self.voice)
+
+            if self.output_mode == "browser":
+                if self.on_audio_ready is None:
+                    await self._simulate_mouth_flap(text, on_mouth_update)
+                self.last_error = None
+                return None
+
+            _, ext = detect_audio_format(audio_bytes)
+            out_path = self._make_temp_audio_path(ext=ext)
+            output_file = out_path
+            self._active_temp_files.add(out_path)
+            await asyncio.to_thread(Path(out_path).write_bytes, audio_bytes)
+            await self._play_and_lipsync(out_path, text, on_mouth_update)
             self.last_error = None
             return out_path
 
@@ -430,9 +453,7 @@ class TTSEngine:
                 await task
                 return None
 
-            output_file = self._make_temp_audio_path()
-            self._active_temp_files.add(output_file)
-            task = asyncio.create_task(_run_speak(output_file))
+            task = asyncio.create_task(_run_speak())
             self._active_speak_task = task
             return await task
         except asyncio.CancelledError:
@@ -483,7 +504,9 @@ class TTSEngine:
         self._active_mouth_callback = on_mouth_update
 
         chunker = SentenceChunker()
-        audio_queue: asyncio.Queue[Optional[Tuple[Optional[str], str, List[str], List[str]]]] = asyncio.Queue(maxsize=4)
+        audio_queue: asyncio.Queue[Optional[Tuple[Optional[str], Optional[bytes], str, List[str], List[str]]]] = (
+            asyncio.Queue(maxsize=4)
+        )
         pending_files: Set[str] = set()
         raw_parts: List[str] = []
 
@@ -493,35 +516,42 @@ class TTSEngine:
                 return
 
             if not clean_text:
-                await audio_queue.put((None, "", emotions, actions))
+                await audio_queue.put((None, None, "", emotions, actions))
                 return
 
             if not self.enabled:
-                await audio_queue.put((None, clean_text, emotions, actions))
+                await audio_queue.put((None, None, clean_text, emotions, actions))
                 return
 
-            out_file = self._make_temp_audio_path()
-            pending_files.add(out_file)
-            self._active_temp_files.add(out_file)
+            out_file: Optional[str] = None
+            audio_bytes: Optional[bytes] = None
             sentence_emotion = emotions[-1] if emotions else self.emotion
             try:
                 audio_bytes = await self._synthesize_audio(clean_text, emotion=sentence_emotion)
-                Path(out_file).write_bytes(audio_bytes)
+                if self.output_mode in ("server", "both") and audio_bytes:
+                    _, ext = detect_audio_format(audio_bytes)
+                    out_file = self._make_temp_audio_path(ext=ext)
+                    pending_files.add(out_file)
+                    self._active_temp_files.add(out_file)
+                    await asyncio.to_thread(Path(out_file).write_bytes, audio_bytes)
                 self.last_error = None
             except asyncio.CancelledError:
-                self._cleanup_audio_file(out_file)
-                pending_files.discard(out_file)
-                self._active_temp_files.discard(out_file)
+                if out_file:
+                    self._cleanup_audio_file(out_file)
+                    pending_files.discard(out_file)
+                    self._active_temp_files.discard(out_file)
                 raise
             except Exception as e:
                 self.last_error = str(e)
                 print(f"[TTS Stream Error] {e}")
-                self._cleanup_audio_file(out_file)
-                pending_files.discard(out_file)
-                self._active_temp_files.discard(out_file)
+                if out_file:
+                    self._cleanup_audio_file(out_file)
+                    pending_files.discard(out_file)
+                    self._active_temp_files.discard(out_file)
                 out_file = None
+                audio_bytes = None
 
-            await audio_queue.put((out_file, clean_text, emotions, actions))
+            await audio_queue.put((out_file, audio_bytes, clean_text, emotions, actions))
 
         async def _producer():
             try:
@@ -548,27 +578,24 @@ class TTSEngine:
                     audio_queue.task_done()
                     break
 
-                file_path, clean_text, emotions, actions = item
+                file_path, audio_bytes, clean_text, emotions, actions = item
                 try:
                     if emotions or actions:
                         await self._invoke_callback(on_tag, emotions, actions)
 
                     if clean_text:
                         await self._invoke_callback(on_sentence_start, clean_text)
-                        if file_path:
-                            if self.on_audio_ready is not None and self.output_mode in ("browser", "both"):
-                                try:
-                                    audio_bytes = Path(file_path).read_bytes()
-                                    if audio_bytes:
-                                        await self._invoke_callback(
-                                            self.on_audio_ready, audio_bytes, clean_text, self.voice
-                                        )
-                                except Exception:
-                                    pass
-                            if self.output_mode in ("server", "both"):
-                                await self._play_and_lipsync(file_path, clean_text, on_mouth_update)
-                            else:
-                                await self._simulate_mouth_flap(clean_text, on_mouth_update)
+                        if audio_bytes and self.on_audio_ready is not None and self.output_mode in ("browser", "both"):
+                            try:
+                                await self._invoke_callback(
+                                    self.on_audio_ready, audio_bytes, clean_text, self.voice
+                                )
+                            except Exception:
+                                pass
+                        if self.output_mode in ("server", "both") and file_path:
+                            await self._play_and_lipsync(file_path, clean_text, on_mouth_update)
+                        elif self.output_mode == "browser" and audio_bytes and self.on_audio_ready is not None:
+                            pass
                         else:
                             await self._simulate_mouth_flap(clean_text, on_mouth_update)
                 finally:
@@ -650,44 +677,57 @@ class TTSEngine:
 
     async def _play_and_lipsync(self, file_path: str, text: str, on_mouth_update: Optional[Callable[[float], Any]]):
         """
-        Simulate/Play audio via dedicated pygame.mixer.Sound channel and fire dynamic lip-sync mouth pulses.
+        Play audio via dedicated pygame.mixer.Sound channel and drive lip-sync from
+        the real per-frame RMS audio envelope, stopping immediately when playback ends.
         """
         if self.output_mode == "browser":
-            await self._simulate_mouth_flap(text, on_mouth_update)
+            if self.on_audio_ready is None:
+                await self._simulate_mouth_flap(text, on_mouth_update)
             self._cleanup_audio_file(file_path)
             return
 
-        # Estimate duration roughly based on word count (approx 150 words/min = 2.5 words/sec)
-        words = len(text.split())
-        est_duration = max(1.0, words / 2.6)
         channel = None
 
         try:
             import pygame
-            if not self._mixer_initialized:
-                if not isinstance(pygame.mixer.get_init(), tuple):
-                    pygame.mixer.init()
-                self._mixer_initialized = True
-            sound = pygame.mixer.Sound(file_path)
+
+            def _load_sound_and_envelope() -> Tuple[Any, List[float]]:
+                if not self._mixer_initialized:
+                    if not isinstance(pygame.mixer.get_init(), tuple):
+                        pygame.mixer.init()
+                    self._mixer_initialized = True
+                snd = pygame.mixer.Sound(file_path)
+                env, _ = extract_rms_envelope_from_sound(snd, frame_ms=50)
+                if not env:
+                    try:
+                        env, _ = extract_rms_envelope_from_wav(Path(file_path).read_bytes(), frame_ms=50)
+                    except Exception:
+                        env = []
+                return snd, env
+
+            sound, envelope = await asyncio.to_thread(_load_sound_and_envelope)
             self._tts_sound = sound
             channel = sound.play()
             self._tts_channel = channel
 
-            # Dynamic lip sync while dedicated TTS channel is playing
-            interval = 0.08
+            # Real audio-envelope RMS lip sync while dedicated TTS channel is playing
+            interval = 0.05
             elapsed = 0.0
             step = 0
-            while (channel is not None and channel.get_busy() in (True, 1)) or elapsed < est_duration:
+            while channel is not None and channel.get_busy() in (True, 1):
+                if on_mouth_update:
+                    if envelope:
+                        idx = min(len(envelope) - 1, int(elapsed / interval))
+                        val = envelope[idx]
+                    else:
+                        val = 0.6 if step % 2 == 0 else 0.2
+                    await self._invoke_callback(on_mouth_update, val)
                 await asyncio.sleep(interval)
                 elapsed += interval
                 step += 1
-                if on_mouth_update:
-                    # Rhythmic mouth flap simulation (0.1 to 0.95 amplitude)
-                    val = 0.5 + 0.45 * (1 if step % 2 == 0 else 0)
-                    await self._invoke_callback(on_mouth_update, val)
 
             if on_mouth_update:
-                await self._invoke_callback(on_mouth_update, 0.0)  # Close mouth when done
+                await self._invoke_callback(on_mouth_update, 0.0)
         except asyncio.CancelledError:
             if on_mouth_update:
                 try:
@@ -696,15 +736,21 @@ class TTSEngine:
                     pass
             raise
         except Exception:
-            # Fallback if pygame audio device isn't available
-            steps = int(est_duration / 0.1)
-            for i in range(steps):
-                await asyncio.sleep(0.1)
+            # Fallback if pygame audio device isn't available: use WAV RMS envelope if available
+            envelope: List[float] = []
+            try:
+                envelope, _ = extract_rms_envelope_from_wav(Path(file_path).read_bytes(), frame_ms=50)
+            except Exception:
+                envelope = []
+            if envelope:
+                for val in envelope:
+                    await asyncio.sleep(0.05)
+                    if on_mouth_update:
+                        await self._invoke_callback(on_mouth_update, val)
                 if on_mouth_update:
-                    val = 0.6 if i % 2 == 0 else 0.1
-                    await self._invoke_callback(on_mouth_update, val)
-            if on_mouth_update:
-                await self._invoke_callback(on_mouth_update, 0.0)
+                    await self._invoke_callback(on_mouth_update, 0.0)
+            else:
+                await self._simulate_mouth_flap(text, on_mouth_update)
         finally:
             if channel is not None:
                 try:

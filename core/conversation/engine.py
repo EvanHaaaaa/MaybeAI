@@ -1,3 +1,4 @@
+import os
 import random
 import re
 import time
@@ -50,17 +51,55 @@ class ConversationEngine:
         self.context_memory = ContextMemory(max_buffer_turns=16)
         self.topic_tracker = TopicTracker()
         self.chat_curator = ChatCurator(max_buffer_size=50)
-        self.episodic_memory = EpisodicMemoryStore(db_path="data/memory.db", markdown_dir="data/second_brain")
-        self.mood = MoodEngine()
-        self.goals = GoalEngine()
-        self.relationships = RelationshipEngine()
-        self.vision = VisionEngine()
-        self.multiplayer = MultiplayerSocialEngine()
-        self.desktop = DesktopCompanionEngine()
-        self.minigames = MiniGameEngine()
-        self.storytelling = StoryEngine()
-        self.performance = PerformanceDirector()
-        self.personality = PersonalityEvolutionEngine()
+        data_root = os.getenv("MAYBEAI_DATA_DIR", "").strip()
+        if data_root:
+            self.episodic_memory = EpisodicMemoryStore(
+                db_path=os.path.join(data_root, "memory.db"),
+                markdown_dir=os.path.join(data_root, "second_brain"),
+            )
+            self.mood = MoodEngine()
+            self.goals = GoalEngine(storage_dir=os.path.join(data_root, "goals"))
+            self.relationships = RelationshipEngine(
+                storage_path=os.path.join(data_root, "relationships", "relationships.json"),
+                markdown_dir=os.path.join(data_root, "second_brain", "relationships"),
+            )
+            self.vision = VisionEngine()
+            self.multiplayer = MultiplayerSocialEngine(
+                data_dir=os.path.join(data_root, "minecraft"),
+                second_brain_dir=os.path.join(data_root, "second_brain"),
+            )
+            self.desktop = DesktopCompanionEngine(
+                data_dir=os.path.join(data_root, "desktop"),
+                second_brain_dir=os.path.join(data_root, "second_brain"),
+            )
+            self.minigames = MiniGameEngine(
+                data_dir=os.path.join(data_root, "minigames"),
+                second_brain_dir=os.path.join(data_root, "second_brain"),
+            )
+            self.storytelling = StoryEngine(
+                data_dir=os.path.join(data_root, "storytelling"),
+                second_brain_dir=os.path.join(data_root, "second_brain"),
+            )
+            self.performance = PerformanceDirector(
+                data_dir=os.path.join(data_root, "performance"),
+                second_brain_dir=os.path.join(data_root, "second_brain"),
+            )
+            self.personality = PersonalityEvolutionEngine(
+                storage_path=os.path.join(data_root, "personality", "evolution.json"),
+                second_brain_path=os.path.join(data_root, "second_brain", "personality", "evolution.md"),
+            )
+        else:
+            self.episodic_memory = EpisodicMemoryStore(db_path="data/memory.db", markdown_dir="data/second_brain")
+            self.mood = MoodEngine()
+            self.goals = GoalEngine()
+            self.relationships = RelationshipEngine()
+            self.vision = VisionEngine()
+            self.multiplayer = MultiplayerSocialEngine()
+            self.desktop = DesktopCompanionEngine()
+            self.minigames = MiniGameEngine()
+            self.storytelling = StoryEngine()
+            self.performance = PerformanceDirector()
+            self.personality = PersonalityEvolutionEngine()
         self.personality.sync_to_mood_baselines(self.mood)
         self.recent_mock_responses: List[str] = []
         self.last_interaction_time: float = time.time()
@@ -265,6 +304,7 @@ class ConversationEngine:
         donation_amount: str = "",
         is_group_debate: bool = False,
         debate_users: Optional[List[str]] = None,
+        is_creator: bool = False,
     ) -> str:
         social_context = self.user_memory.get_social_context(current_user)
         chat_digest = self.chat_curator.get_chat_digest()
@@ -314,7 +354,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             minigame_directive=minigame_directive,
             storytelling_directive=storytelling_directive,
             performance_directive=performance_directive,
-            personality_directive=personality_directive
+            personality_directive=personality_directive,
+            is_creator=is_creator
         )
 
     def build_system_prompt(
@@ -325,7 +366,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
         donation_amount: str = "",
         is_group_debate: bool = False,
         debate_users: Optional[List[str]] = None,
-        current_message: str = ""
+        current_message: str = "",
+        is_creator: bool = False
     ) -> str:
         recall_res = self.episodic_memory.recall(
             query=current_message,
@@ -341,6 +383,7 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             donation_amount=donation_amount,
             is_group_debate=is_group_debate,
             debate_users=debate_users,
+            is_creator=is_creator,
         )
 
     async def abuild_system_prompt(
@@ -351,7 +394,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
         donation_amount: str = "",
         is_group_debate: bool = False,
         debate_users: Optional[List[str]] = None,
-        current_message: str = ""
+        current_message: str = "",
+        is_creator: bool = False
     ) -> str:
         """Async counterpart to build_system_prompt using non-blocking retriever.arecall."""
         recall_res = await self.episodic_memory.retriever.arecall(
@@ -368,6 +412,7 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             donation_amount=donation_amount,
             is_group_debate=is_group_debate,
             debate_users=debate_users,
+            is_creator=is_creator,
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:

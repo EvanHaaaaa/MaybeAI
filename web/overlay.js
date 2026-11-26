@@ -36,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let audioAnalyserData = null;
   const audioQueue = [];
   let isPlayingAudioQueue = false;
+  let isLocalAudioPlaying = false;
   let currentAudioSource = null;
   let audioLipSyncRaf = null;
 
@@ -112,18 +113,24 @@ document.addEventListener("DOMContentLoaded", () => {
       if (audioQueue.length > 0 && browserAudioEnabled) {
         playNextAudioChunk();
       } else {
+        isLocalAudioPlaying = false;
         targetMouthOpen = 0.0;
       }
     };
 
     try {
       source.start(0);
+      isLocalAudioPlaying = true;
       if (!audioLipSyncRaf) {
         audioLipSyncRaf = requestAnimationFrame(updateAudioLipSync);
       }
     } catch (e) {
       isPlayingAudioQueue = false;
+      isLocalAudioPlaying = audioQueue.length > 0 && browserAudioEnabled;
       currentAudioSource = null;
+      if (!isLocalAudioPlaying) {
+        targetMouthOpen = 0.0;
+      }
     }
   }
 
@@ -142,6 +149,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function stopBrowserAudioOutput() {
     audioQueue.length = 0;
     isPlayingAudioQueue = false;
+    isLocalAudioPlaying = false;
     if (audioLipSyncRaf) {
       cancelAnimationFrame(audioLipSyncRaf);
       audioLipSyncRaf = null;
@@ -217,7 +225,9 @@ document.addEventListener("DOMContentLoaded", () => {
     const data = msg.data || {};
 
     if (msg.type === "avatar_state") {
-      targetMouthOpen = data.mouth_open || 0.0;
+      if (!isLocalAudioPlaying) {
+        targetMouthOpen = data.mouth_open || 0.0;
+      }
       if (data.vts_params && typeof data.vts_params === "object") {
         latestVtsParams = data.vts_params;
       }

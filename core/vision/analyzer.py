@@ -30,7 +30,7 @@ class VisualAnalyzer:
             return VisualObservation(
                 scene_type=hint_scene or VisualSceneType.DESKTOP_GENERAL.value,
                 summary="Layar monitor aktif (Modul Pillow belum terpasang).",
-                detected_label="Desktop",
+                scene_label="Desktop",
                 confidence=0.5,
                 change_delta=change_delta
             )

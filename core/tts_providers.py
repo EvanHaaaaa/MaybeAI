@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import re
@@ -5,11 +6,12 @@ import tempfile
 import wave
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 import aiohttp
 import edge_tts
+import numpy as np
 
 
 EMOTION_PROSODY_OFFSETS: Dict[str, Tuple[int, int]] = {
@@ -60,6 +62,145 @@ def _rate_to_speed_multiplier(rate: str) -> float:
     return max(0.5, min(2.0, 1.0 + pct / 100.0))
 
 
+def detect_audio_format(audio_bytes: bytes) -> Tuple[str, str]:
+    """Detects audio container format from magic bytes, returning (mime_type, file_extension)."""
+    if not audio_bytes:
+        return "audio/mpeg", ".mp3"
+    if audio_bytes[:4] == b"RIFF" and (len(audio_bytes) < 12 or audio_bytes[8:12] == b"WAVE"):
+        return "audio/wav", ".wav"
+    if audio_bytes[:4] == b"OggS":
+        return "audio/ogg", ".ogg"
+    if audio_bytes[:4] == b"fLaC":
+        return "audio/flac", ".flac"
+    return "audio/mpeg", ".mp3"
+
+
+def is_edge_tts_voice(voice: str) -> bool:
+    """Returns True if voice matches Edge-TTS locale-NameNeural format."""
+    v = str(voice or "").strip()
+    return bool(v and "-" in v and v.endswith("Neural"))
+
+
+def _compute_rms_frames(samples: np.ndarray, sample_rate: int, frame_ms: int = 50) -> List[float]:
+    """Computes normalized [0.0, 1.0] per-frame RMS values from a 1D float32 array."""
+    if samples.size == 0 or sample_rate <= 0:
+        return []
+    frame_samples = max(1, int(sample_rate * frame_ms / 1000.0))
+    n_frames = max(1, int(np.ceil(samples.size / frame_samples)))
+    envelope: List[float] = []
+    for idx in range(n_frames):
+        chunk = samples[idx * frame_samples : (idx + 1) * frame_samples]
+        if chunk.size == 0:
+            continue
+        rms = float(np.sqrt(np.mean(np.square(chunk))))
+        if not np.isfinite(rms) or rms < 0.005:
+            envelope.append(0.0)
+        else:
+            envelope.append(round(min(1.0, rms * 5.0), 4))
+    return envelope
+
+
+def extract_rms_envelope_from_wav(audio_bytes: bytes, frame_ms: int = 50) -> Tuple[List[float], float]:
+    """Extracts a normalized [0.0, 1.0] RMS envelope and duration (sec) from WAV bytes."""
+    if not audio_bytes or not audio_bytes.startswith(b"RIFF"):
+        return [], 0.0
+    try:
+        with wave.open(io.BytesIO(audio_bytes), "rb") as wf:
+            nchannels = wf.getnchannels()
+            sampwidth = wf.getsampwidth()
+            framerate = wf.getframerate()
+            nframes = wf.getnframes()
+            raw = wf.readframes(nframes)
+        if not raw or framerate <= 0 or nchannels <= 0:
+            return [], 0.0
+        duration = float(nframes) / float(framerate)
+        if sampwidth == 1:
+            arr = (np.frombuffer(raw, dtype=np.uint8).astype(np.float32) - 128.0) / 128.0
+        elif sampwidth == 2:
+            usable = len(raw) - (len(raw) % 2)
+            arr = np.frombuffer(raw[:usable], dtype=np.int16).astype(np.float32) / 32768.0
+        elif sampwidth == 4:
+            usable = len(raw) - (len(raw) % 4)
+            arr = np.frombuffer(raw[:usable], dtype=np.int32).astype(np.float32) / 2147483648.0
+        else:
+            return [], duration
+        if nchannels > 1:
+            usable_samples = arr.size - (arr.size % nchannels)
+            arr = arr[:usable_samples].reshape(-1, nchannels).mean(axis=1)
+        return _compute_rms_frames(arr, framerate, frame_ms=frame_ms), duration
+    except Exception:
+        return [], 0.0
+
+
+def extract_rms_envelope_from_sound(sound: Any, frame_ms: int = 50) -> Tuple[List[float], float]:
+    """Extracts a normalized [0.0, 1.0] RMS envelope and duration (sec) from a pygame.mixer.Sound."""
+    if sound is None:
+        return [], 0.0
+    try:
+        import pygame
+
+        duration = float(sound.get_length()) if hasattr(sound, "get_length") else 0.0
+        mixer_init = pygame.mixer.get_init() if hasattr(pygame, "mixer") else None
+        sample_rate = int(mixer_init[0]) if isinstance(mixer_init, tuple) and mixer_init[0] else 44100
+
+        arr: Optional[np.ndarray] = None
+        if hasattr(pygame, "sndarray"):
+            try:
+                arr = pygame.sndarray.array(sound)
+            except Exception:
+                arr = None
+        if arr is None and hasattr(sound, "get_raw"):
+            raw = sound.get_raw()
+            if raw:
+                usable = len(raw) - (len(raw) % 2)
+                arr = np.frombuffer(raw[:usable], dtype=np.int16)
+                channels = int(mixer_init[2]) if isinstance(mixer_init, tuple) and len(mixer_init) > 2 else 1
+                if channels > 1:
+                    usable_samples = arr.size - (arr.size % channels)
+                    arr = arr[:usable_samples].reshape(-1, channels)
+
+        if arr is None or arr.size == 0:
+            return [], duration
+
+        if np.issubdtype(arr.dtype, np.integer):
+            info = np.iinfo(arr.dtype)
+            if info.min == 0:
+                samples = (arr.astype(np.float32) - 128.0) / 128.0
+            else:
+                scale = float(max(abs(info.min), info.max)) or 32768.0
+                samples = arr.astype(np.float32) / scale
+        else:
+            samples = arr.astype(np.float32)
+
+        if samples.ndim > 1:
+            samples = samples.mean(axis=1)
+
+        if duration <= 0.0 and sample_rate > 0:
+            duration = float(samples.size) / float(sample_rate)
+        return _compute_rms_frames(samples, sample_rate, frame_ms=frame_ms), duration
+    except Exception:
+        return [], 0.0
+
+
+class _PersistentSessionMixin:
+    """Provides lazy creation and clean shutdown for a persistent aiohttp.ClientSession."""
+
+    timeout: float = 20.0
+    _session: Optional[aiohttp.ClientSession] = None
+
+    def _get_session(self) -> aiohttp.ClientSession:
+        # Reuses real open aiohttp.ClientSession; creates a fresh one if closed or mocked in tests.
+        if self._session is None or getattr(self._session, "closed", True) is not False:
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=self.timeout))
+        return self._session
+
+    async def close(self) -> None:
+        if self._session is not None:
+            if getattr(self._session, "closed", True) is False and hasattr(self._session, "close"):
+                await self._session.close()
+            self._session = None
+
+
 class BaseTTSProvider(ABC):
     """Abstract base class for neural TTS synthesis providers."""
 
@@ -80,6 +221,10 @@ class BaseTTSProvider(ABC):
     @abstractmethod
     def get_info(self) -> Dict[str, Any]:
         """Returns metadata describing the provider configuration."""
+
+    async def close(self) -> None:
+        """Closes any underlying HTTP resources held by the provider."""
+        return None
 
 
 class EdgeTTSProvider(BaseTTSProvider):
@@ -126,7 +271,7 @@ class EdgeTTSProvider(BaseTTSProvider):
         }
 
 
-class KokoroTTSProvider(BaseTTSProvider):
+class KokoroTTSProvider(_PersistentSessionMixin, BaseTTSProvider):
     """
     Low-latency Kokoro-82M TTS provider.
     Supports remote HTTP inference via `kokoro_url` (OpenAI-compatible `/v1/audio/speech`
@@ -147,6 +292,7 @@ class KokoroTTSProvider(BaseTTSProvider):
         self.lang_code = lang_code
         self.default_voice = default_voice
         self.timeout = float(timeout)
+        self._session: Optional[aiohttp.ClientSession] = None
         self._local_pipeline: Any = None
         self._local_backend: Optional[str] = None
 
@@ -229,18 +375,15 @@ class KokoroTTSProvider(BaseTTSProvider):
                 "response_format": "mp3",
                 "emotion": emotion,
             }
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(endpoint, json=payload) as resp:
-                    if resp.status != 200:
-                        err_text = await resp.text()
-                        raise RuntimeError(f"Kokoro HTTP {resp.status}: {err_text[:200]}")
-                    data = await resp.read()
-                    if not data:
-                        raise RuntimeError("Kokoro HTTP returned empty audio.")
-                    return data
-
-        import asyncio
+            session = self._get_session()
+            async with session.post(endpoint, json=payload) as resp:
+                if resp.status != 200:
+                    err_text = await resp.text()
+                    raise RuntimeError(f"Kokoro HTTP {resp.status}: {err_text[:200]}")
+                data = await resp.read()
+                if not data:
+                    raise RuntimeError("Kokoro HTTP returned empty audio.")
+                return data
 
         return await asyncio.to_thread(self._synthesize_local_sync, text, voice, speed)
 
@@ -253,7 +396,7 @@ class KokoroTTSProvider(BaseTTSProvider):
         }
 
 
-class ElevenLabsTTSProvider(BaseTTSProvider):
+class ElevenLabsTTSProvider(_PersistentSessionMixin, BaseTTSProvider):
     """Streaming REST TTS provider for ElevenLabs."""
 
     name: str = "elevenlabs"
@@ -272,6 +415,7 @@ class ElevenLabsTTSProvider(BaseTTSProvider):
         ).strip()
         self.model_id = model_id
         self.timeout = float(timeout)
+        self._session: Optional[aiohttp.ClientSession] = None
 
     async def synthesize(
         self,
@@ -311,20 +455,19 @@ class ElevenLabsTTSProvider(BaseTTSProvider):
                 "use_speaker_boost": True,
             },
         }
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, headers=headers, json=payload) as resp:
-                if resp.status != 200:
-                    err_text = await resp.text()
-                    raise RuntimeError(f"ElevenLabs HTTP {resp.status}: {err_text[:200]}")
-                chunks = []
-                async for chunk in resp.content.iter_chunked(4096):
-                    if chunk:
-                        chunks.append(chunk)
-                data = b"".join(chunks)
-                if not data:
-                    raise RuntimeError("ElevenLabs returned empty audio stream.")
-                return data
+        session = self._get_session()
+        async with session.post(url, headers=headers, json=payload) as resp:
+            if resp.status != 200:
+                err_text = await resp.text()
+                raise RuntimeError(f"ElevenLabs HTTP {resp.status}: {err_text[:200]}")
+            chunks = []
+            async for chunk in resp.content.iter_chunked(4096):
+                if chunk:
+                    chunks.append(chunk)
+            data = b"".join(chunks)
+            if not data:
+                raise RuntimeError("ElevenLabs returned empty audio stream.")
+            return data
 
     def get_info(self) -> Dict[str, Any]:
         return {
@@ -336,7 +479,7 @@ class ElevenLabsTTSProvider(BaseTTSProvider):
         }
 
 
-class CustomNeuralTTSProvider(BaseTTSProvider):
+class CustomNeuralTTSProvider(_PersistentSessionMixin, BaseTTSProvider):
     """Generic HTTP POST provider for GPT-SoVITS, Fish Speech, and custom neural TTS servers."""
 
     name: str = "custom"
@@ -352,6 +495,7 @@ class CustomNeuralTTSProvider(BaseTTSProvider):
         self.backend = str(backend or "gpt_sovits").strip().lower()
         self.name = self.backend if self.backend in ("gpt_sovits", "fish_speech") else "custom"
         self.timeout = float(timeout)
+        self._session: Optional[aiohttp.ClientSession] = None
 
     async def synthesize(
         self,
@@ -375,16 +519,15 @@ class CustomNeuralTTSProvider(BaseTTSProvider):
             "backend": self.backend,
             "speed": _rate_to_speed_multiplier(rate),
         }
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload) as resp:
-                if resp.status != 200:
-                    err_text = await resp.text()
-                    raise RuntimeError(f"Custom TTS ({self.backend}) HTTP {resp.status}: {err_text[:200]}")
-                data = await resp.read()
-                if not data:
-                    raise RuntimeError(f"Custom TTS ({self.backend}) returned empty audio.")
-                return data
+        session = self._get_session()
+        async with session.post(url, json=payload) as resp:
+            if resp.status != 200:
+                err_text = await resp.text()
+                raise RuntimeError(f"Custom TTS ({self.backend}) HTTP {resp.status}: {err_text[:200]}")
+            data = await resp.read()
+            if not data:
+                raise RuntimeError(f"Custom TTS ({self.backend}) returned empty audio.")
+            return data
 
     def get_info(self) -> Dict[str, Any]:
         return {
@@ -410,7 +553,7 @@ def create_tts_provider(provider_name: str = "edge-tts", **kwargs: Any) -> BaseT
     raise ValueError(f"Unsupported TTS provider: {provider_name}")
 
 
-class RVCVoiceConverter:
+class RVCVoiceConverter(_PersistentSessionMixin):
     """
     Post-processing Retrieval-based Voice Conversion (RVC) client.
     Posts synthesized audio bytes to an RVC inference endpoint and falls back
@@ -428,6 +571,7 @@ class RVCVoiceConverter:
         self.rvc_url = str(rvc_url or "").strip()
         self.pitch_shift = int(pitch_shift)
         self.timeout = float(timeout)
+        self._session: Optional[aiohttp.ClientSession] = None
         self.last_error: Optional[str] = None
 
     def update_config(
@@ -448,26 +592,26 @@ class RVCVoiceConverter:
             return audio_bytes
 
         shift = self.pitch_shift if pitch_shift is None else int(pitch_shift)
+        mime_type, ext = detect_audio_format(audio_bytes)
         form = aiohttp.FormData()
-        form.add_field("audio", audio_bytes, filename="input.mp3", content_type="audio/mpeg")
+        form.add_field("audio", audio_bytes, filename=f"input{ext}", content_type=mime_type)
         form.add_field("pitch_shift", str(shift))
 
-        timeout = aiohttp.ClientTimeout(total=self.timeout)
         try:
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(self.rvc_url, data=form) as resp:
-                    if resp.status != 200:
-                        err_text = await resp.text()
-                        self.last_error = f"RVC HTTP {resp.status}: {err_text[:200]}"
-                        print(f"[RVC Warning] {self.last_error}. Using original audio.")
-                        return audio_bytes
-                    converted = await resp.read()
-                    if not converted:
-                        self.last_error = "RVC returned empty audio."
-                        print(f"[RVC Warning] {self.last_error}. Using original audio.")
-                        return audio_bytes
-                    self.last_error = None
-                    return converted
+            session = self._get_session()
+            async with session.post(self.rvc_url, data=form) as resp:
+                if resp.status != 200:
+                    err_text = await resp.text()
+                    self.last_error = f"RVC HTTP {resp.status}: {err_text[:200]}"
+                    print(f"[RVC Warning] {self.last_error}. Using original audio.")
+                    return audio_bytes
+                converted = await resp.read()
+                if not converted:
+                    self.last_error = "RVC returned empty audio."
+                    print(f"[RVC Warning] {self.last_error}. Using original audio.")
+                    return audio_bytes
+                self.last_error = None
+                return converted
         except Exception as exc:
             self.last_error = str(exc)
             print(f"[RVC Warning] RVC conversion failed ({exc}). Using original audio.")

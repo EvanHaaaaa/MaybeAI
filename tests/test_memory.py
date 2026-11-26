@@ -42,6 +42,24 @@ class TestEmbeddingEngine(unittest.TestCase):
         self.assertTrue(np.allclose(vec, restored))
 
 
+class TestEmbeddingSessionPooling(unittest.IsolatedAsyncioTestCase):
+    async def test_shared_session_reuse_and_aclose(self):
+        engine = EmbeddingEngine(dimension=128, provider="hash")
+        s1 = await engine._get_session()
+        s2 = await engine._get_session()
+        self.assertIs(s1, s2)
+        self.assertFalse(s1.closed)
+
+        await engine.aclose()
+        self.assertTrue(s1.closed)
+        self.assertIsNone(engine._session)
+
+        s3 = await engine._get_session()
+        self.assertIsNot(s3, s1)
+        await engine.close()
+        self.assertTrue(s3.closed)
+
+
 class TestMemoryDatabaseAndSync(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.mkdtemp()

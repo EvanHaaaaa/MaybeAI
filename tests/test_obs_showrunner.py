@@ -4,7 +4,7 @@ import os
 import tempfile
 import unittest
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 try:
     import tests  # noqa: F401  # Ensure tests/__init__.py sets MAYBEAI_LLM_PROVIDER=mock
@@ -189,7 +189,10 @@ class TestDesktopAndAutonomousSceneSwitching(unittest.IsolatedAsyncioTestCase):
             goal_engine.autonomous_select_next_activity.return_value = (goal, "next")
 
             mc = MagicMock()
-            mc.is_connected = False
+            mc.connection_status = "connected"
+            mc.current_mode = "santai"
+            mc.set_mode = AsyncMock()
+            mc.toggle_wander = AsyncMock()
 
             executor = AutonomousMissionExecutor(
                 goal_engine=goal_engine,

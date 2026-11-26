@@ -167,8 +167,15 @@ class TestAutonomousMissionExecutor(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Plan B", agenda_text)
 
     async def test_human_approval_gate_approve_and_reject(self):
+        mc_mock = MagicMock()
+        mc_mock.connection_status = "connected"
+        mc_mock.current_mode = "kompe"
+        mc_mock.set_mode = AsyncMock()
+        mc_mock.toggle_wander = AsyncMock()
+
         executor = AutonomousMissionExecutor(
             goal_engine=self.goal_engine,
+            minecraft=mc_mock,
             human_approval_required=True,
             event_bus=self.event_bus,
         )
@@ -251,8 +258,14 @@ class TestMissionsASGIEndpoints(unittest.IsolatedAsyncioTestCase):
         self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self._orig_missions = run.orchestrator.missions
         iso_goals = GoalEngine(storage_dir=self._tmp.name)
+        mc_mock = MagicMock()
+        mc_mock.connection_status = "connected"
+        mc_mock.current_mode = "kompe"
+        mc_mock.set_mode = AsyncMock()
+        mc_mock.toggle_wander = AsyncMock()
         run.orchestrator.missions = AutonomousMissionExecutor(
             goal_engine=iso_goals,
+            minecraft=mc_mock,
             event_bus=run.orchestrator.event_bus,
             human_approval_required=False,
             tick_interval_sec=30.0,

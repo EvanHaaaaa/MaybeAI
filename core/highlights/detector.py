@@ -91,6 +91,22 @@ class HighlightDetector:
             return False
         return (now - self._last_auto_highlight_at) < self.cooldown_sec
 
+    @staticmethod
+    def _is_replay_success(result: Any) -> bool:
+        if isinstance(result, dict):
+            return bool(result.get("success", False))
+        if isinstance(result, bool):
+            return result
+        return True
+
+    async def _await_replay_result(self, coro: Any, marker: HighlightMarker) -> None:
+        try:
+            result = await coro
+            marker.replay_saved = self._is_replay_success(result)
+        except Exception as exc:
+            marker.replay_saved = False
+            print(f"[HighlightDetector] async on_save_replay error: {exc}")
+
     def _trigger_replay_callback(self, marker: HighlightMarker) -> bool:
         if self.on_save_replay is None:
             return False
@@ -99,11 +115,12 @@ class HighlightDetector:
             if inspect.isawaitable(res):
                 try:
                     loop = asyncio.get_running_loop()
-                    loop.create_task(res)
+                    loop.create_task(self._await_replay_result(res, marker))
                 except RuntimeError:
                     if hasattr(res, "close"):
                         res.close()
-            return True
+                return False
+            return self._is_replay_success(res)
         except Exception as exc:
             print(f"[HighlightDetector] on_save_replay error: {exc}")
             return False

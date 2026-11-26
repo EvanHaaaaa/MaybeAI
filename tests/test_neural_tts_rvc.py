@@ -10,6 +10,7 @@ except ImportError:
     os.environ.setdefault("MAYBEAI_LLM_PROVIDER", "mock")
 
 from core.singer import Singer
+from core.stt import STTEngine
 from core.tts import TTSEngine
 from core.tts_providers import (
     BaseTTSProvider,
@@ -20,6 +21,8 @@ from core.tts_providers import (
     RVCVoiceConverter,
     compute_emotion_prosody,
     create_tts_provider,
+    detect_audio_format,
+    extract_rms_envelope_from_wav,
 )
 
 
@@ -207,6 +210,132 @@ class TestNeuralTTSProvidersAndRVC(unittest.IsolatedAsyncioTestCase):
             singer._rvc.convert.assert_awaited_once_with(b"RAW_VOCAL", pitch_shift=2)
             self.assertEqual(emitted_vocals, [(b"SINGER_RVC_AUDIO", "La la la")])
             self.assertEqual(list(singer.temp_dir.glob("vocal_*.mp3")), [])
+
+    async def test_h1_03_fallback_voice_dynamic_mime_and_singer_provider(self):
+        # 1. detect_audio_format and RVC dynamic WAV upload
+        import io
+        import wave
+        import numpy as np
+
+        buf = io.BytesIO()
+        t = np.linspace(0, 0.2, int(16000 * 0.2), endpoint=False)
+        samples = (np.sin(2 * np.pi * 440 * t) * 16000).astype(np.int16)
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(samples.tobytes())
+        wav_bytes = buf.getvalue()
+
+        self.assertEqual(detect_audio_format(wav_bytes), ("audio/wav", ".wav"))
+        self.assertEqual(detect_audio_format(b"ID3\x03\x00"), ("audio/mpeg", ".mp3"))
+
+        calls = []
+        rvc = RVCVoiceConverter(enabled=True, rvc_url="http://127.0.0.1:7890/convert")
+        with patch("core.tts_providers.aiohttp.ClientSession", return_value=_FakeSession(_FakeResponse(200, b"OUT"), calls)):
+            await rvc.convert(wav_bytes)
+        form_data = calls[-1][1]["data"]
+        field_headers = form_data._fields[0][1]
+        self.assertEqual(field_headers.get("Content-Type"), "audio/wav")
+
+        # 2. TTSEngine fallback uses valid Edge voice instead of Kokoro voice 'af_heart'
+        engine = TTSEngine(
+            provider="kokoro",
+            voice="af_heart",
+            fallback_voice="en-US-AriaNeural",
+            output_mode="browser",
+        )
+        engine._provider.synthesize = AsyncMock(side_effect=RuntimeError("kokoro down"))
+        engine._fallback_provider.synthesize = AsyncMock(return_value=b"EDGE_OK")
+        await engine.speak("Testing fallback voice")
+        self.assertEqual(engine._fallback_provider.synthesize.call_args.kwargs["voice"], "en-US-AriaNeural")
+
+        # 3. Singer routes through create_tts_provider
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            songs_path = Path(tmpdir) / "songs.json"
+            songs_path.write_text(
+                '{"s1": {"title": "T", "lyrics": [{"text": "Sing!", "delay_before": 0.0}]}}',
+                encoding="utf-8",
+            )
+            singer = Singer(
+                songs_config_path=str(songs_path),
+                provider="kokoro",
+                kokoro_url="http://127.0.0.1:8880",
+                voice="af_heart",
+                output_mode="browser",
+            )
+            self.assertIsInstance(singer._provider, KokoroTTSProvider)
+            singer._provider.synthesize = AsyncMock(return_value=wav_bytes)
+            vocals = []
+
+            async def _on_vocal(b, txt):
+                vocals.append((b, txt))
+
+            ok = await singer.sing("s1", on_vocal_audio=_on_vocal)
+            self.assertTrue(ok)
+            self.assertEqual(vocals, [(wav_bytes, "Sing!")])
+
+    async def test_h1_02_real_rms_envelope_and_immediate_stop(self):
+        import io
+        import wave
+        import numpy as np
+
+        buf = io.BytesIO()
+        t = np.linspace(0, 0.15, int(16000 * 0.15), endpoint=False)
+        samples = (np.sin(2 * np.pi * 440 * t) * 20000).astype(np.int16)
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(16000)
+            wf.writeframes(samples.tobytes())
+        wav_bytes = buf.getvalue()
+
+        env, dur = extract_rms_envelope_from_wav(wav_bytes, frame_ms=50)
+        self.assertGreater(len(env), 0)
+        self.assertGreater(dur, 0.1)
+        self.assertTrue(all(0.0 <= v <= 1.0 for v in env))
+        self.assertTrue(any(v > 0.2 for v in env))
+
+        # Verify _play_and_lipsync stops immediately when channel.get_busy() turns False
+        # even for a long-word sentence where est_duration would have been > 1s
+        fake_channel = MagicMock()
+        fake_channel.get_busy.side_effect = [True, False]
+        fake_sound = MagicMock()
+        fake_sound.play.return_value = fake_channel
+        fake_sound.get_length.return_value = 0.15
+
+        fake_mixer = MagicMock()
+        fake_mixer.get_init.return_value = (16000, -16, 1)
+        fake_mixer.Sound.return_value = fake_sound
+
+        import types
+        import sys
+
+        fake_pygame = types.ModuleType("pygame")
+        fake_pygame.mixer = fake_mixer
+
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+            wav_path = Path(tmpdir) / "test.wav"
+            wav_path.write_bytes(wav_bytes)
+            engine = TTSEngine(output_mode="server")
+            mouth_vals = []
+            with patch.dict(sys.modules, {"pygame": fake_pygame}), \
+                 patch("core.tts.asyncio.sleep", new=AsyncMock()):
+                await engine._play_and_lipsync(str(wav_path), "one two three four five six seven", mouth_vals.append)
+            # Only 1 busy tick + final 0.0 close (not 10+ ticks from est_duration)
+            self.assertEqual(len(mouth_vals), 2)
+            self.assertGreater(mouth_vals[0], 0.2)
+            self.assertEqual(mouth_vals[-1], 0.0)
+
+    async def test_h1_01_stt_persistent_session_and_close(self):
+        stt = STTEngine(api_key="sk-test")
+        sess1 = stt._get_session()
+        sess2 = stt._get_session()
+        self.assertIs(sess1, sess2)
+        self.assertFalse(sess1.closed)
+        await stt.close()
+        self.assertTrue(sess1.closed)
+        self.assertIsNone(stt._session)
 
 
 if __name__ == "__main__":

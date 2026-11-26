@@ -147,6 +147,21 @@ class STTEngine:
         self._whisper_model = None
         self._faster_whisper_model = None
         self._last_backend: str = "mock"
+        self._session: Any = None
+
+    def _get_session(self) -> Any:
+        import aiohttp
+
+        if self._session is None or getattr(self._session, "closed", True) is not False:
+            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
+        return self._session
+
+    async def close(self) -> None:
+        """Closes persistent HTTP session if open."""
+        if self._session is not None:
+            if getattr(self._session, "closed", True) is False and hasattr(self._session, "close"):
+                await self._session.close()
+            self._session = None
 
     def update_config(
         self,
@@ -244,20 +259,19 @@ class STTEngine:
             form.add_field("language", language.split("-")[0])
 
         headers = {"Authorization": f"Bearer {api_key}"}
-        timeout = aiohttp.ClientTimeout(total=30)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(
-                "https://api.openai.com/v1/audio/transcriptions",
-                data=form,
-                headers=headers,
-            ) as resp:
-                if resp.status != 200:
-                    err_body = await resp.text()
-                    raise RuntimeError(f"OpenAI Whisper API error ({resp.status}): {err_body[:200]}")
-                payload = await resp.json()
-                self._last_backend = "openai-api"
-                self.last_error = None
-                return str(payload.get("text", "")).strip()
+        session = self._get_session()
+        async with session.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            data=form,
+            headers=headers,
+        ) as resp:
+            if resp.status != 200:
+                err_body = await resp.text()
+                raise RuntimeError(f"OpenAI Whisper API error ({resp.status}): {err_body[:200]}")
+            payload = await resp.json()
+            self._last_backend = "openai-api"
+            self.last_error = None
+            return str(payload.get("text", "")).strip()
 
     async def transcribe_audio_file(self, file_path: str, language: Optional[str] = None) -> str:
         """
@@ -287,8 +301,11 @@ class STTEngine:
 
         # 3. Try OpenAI Whisper API when configured and not in mock mode
         try:
-            with open(file_path, "rb") as f:
-                data = f.read()
+            def _read_file_bytes(path: str) -> bytes:
+                with open(path, "rb") as f:
+                    return f.read()
+
+            data = await asyncio.to_thread(_read_file_bytes, file_path)
             api_text = await self._transcribe_with_openai_api(data, language=language)
             if api_text is not None:
                 return api_text
@@ -327,9 +344,12 @@ class STTEngine:
 
         tmp_path: Optional[str] = None
         try:
-            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-                tmp.write(wav_bytes)
-                tmp_path = tmp.name
+            def _write_temp_wav(data: bytes) -> str:
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                    tmp.write(data)
+                    return tmp.name
+
+            tmp_path = await asyncio.to_thread(_write_temp_wav, wav_bytes)
 
             # Try local backends first
             try:

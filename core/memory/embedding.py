@@ -60,8 +60,37 @@ class EmbeddingEngine:
         self._local_model: Any = None
         self._local_kind: Optional[str] = None  # "sentence_transformers" | "fastembed"
         self.active_backend: str = "hash"
+        self._session: Any = None
 
         self._resolve_backend()
+
+    async def _get_session(self):
+        """Lazily creates and reuses a shared aiohttp ClientSession on the active event loop."""
+        import aiohttp
+
+        loop = asyncio.get_running_loop()
+        if self._session is not None and getattr(self._session, "closed", False) is not True:
+            session_loop = getattr(self._session, "_loop", None)
+            if session_loop is not None and (session_loop.is_closed() or session_loop is not loop):
+                try:
+                    await self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+        if self._session is None or getattr(self._session, "closed", False) is True:
+            timeout = aiohttp.ClientTimeout(total=self.timeout)
+            self._session = aiohttp.ClientSession(timeout=timeout)
+        return self._session
+
+    async def close(self) -> None:
+        """Closes the shared aiohttp ClientSession if it is open."""
+        if self._session is not None and getattr(self._session, "closed", False) is not True:
+            await self._session.close()
+        self._session = None
+
+    async def aclose(self) -> None:
+        """Async alias for close()."""
+        await self.close()
 
     def _is_mock_llm_mode(self) -> bool:
         return os.getenv("MAYBEAI_LLM_PROVIDER", "").lower().strip() == "mock"
@@ -323,18 +352,15 @@ class EmbeddingEngine:
             return self._encode_hash(text)
         url, headers, payload = self._gemini_request_parts(text)
         try:
-            import aiohttp
-
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        values = data.get("embedding", {}).get("values")
-                        if values:
-                            vec = self._l2_normalize(np.array(values, dtype=np.float32))
-                            self.dimension = int(vec.shape[0])
-                            return vec
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    values = data.get("embedding", {}).get("values")
+                    if values:
+                        vec = self._l2_normalize(np.array(values, dtype=np.float32))
+                        self.dimension = int(vec.shape[0])
+                        return vec
         except Exception:
             pass
         return self._encode_hash(text)
@@ -384,18 +410,15 @@ class EmbeddingEngine:
             return self._encode_hash(text)
         url, headers, payload = self._openai_request_parts(text)
         try:
-            import aiohttp
-
-            timeout = aiohttp.ClientTimeout(total=self.timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(url, headers=headers, json=payload) as resp:
-                    if resp.status == 200:
-                        data = await resp.json()
-                        items = data.get("data", [])
-                        if items and "embedding" in items[0]:
-                            vec = self._l2_normalize(np.array(items[0]["embedding"], dtype=np.float32))
-                            self.dimension = int(vec.shape[0])
-                            return vec
+            session = await self._get_session()
+            async with session.post(url, headers=headers, json=payload) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get("data", [])
+                    if items and "embedding" in items[0]:
+                        vec = self._l2_normalize(np.array(items[0]["embedding"], dtype=np.float32))
+                        self.dimension = int(vec.shape[0])
+                        return vec
         except Exception:
             pass
         return self._encode_hash(text)
