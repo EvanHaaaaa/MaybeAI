@@ -120,16 +120,17 @@ class ChessEngine:
         else:
             return 4, 0.0
 
-    def evaluate_board(self) -> int:
+    def evaluate_board(self, board: Optional[chess.Board] = None) -> int:
         """Returns board evaluation from White's perspective in centipawns."""
-        if self.board.is_checkmate():
-            return -99999 if self.board.turn == chess.WHITE else 99999
-        if self.board.is_stalemate() or self.board.is_insufficient_material():
+        target_board = board if board is not None else self.board
+        if target_board.is_checkmate():
+            return -99999 if target_board.turn == chess.WHITE else 99999
+        if target_board.is_stalemate() or target_board.is_insufficient_material():
             return 0
 
         score = 0
         for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
+            piece = target_board.piece_at(square)
             if not piece:
                 continue
 
@@ -158,21 +159,29 @@ class ChessEngine:
 
         return score
 
-    def alpha_beta(self, depth: int, alpha: int, beta: int, maximizing: bool) -> Tuple[int, Optional[chess.Move]]:
-        if depth == 0 or self.board.is_game_over():
-            return self.evaluate_board(), None
+    def alpha_beta(
+        self,
+        depth: int,
+        alpha: int,
+        beta: int,
+        maximizing: bool,
+        board: Optional[chess.Board] = None,
+    ) -> Tuple[int, Optional[chess.Move]]:
+        target_board = board if board is not None else self.board
+        if depth == 0 or target_board.is_game_over():
+            return self.evaluate_board(target_board), None
 
-        legal_moves = list(self.board.legal_moves)
+        legal_moves = list(target_board.legal_moves)
         if not legal_moves:
-            return self.evaluate_board(), None
+            return self.evaluate_board(target_board), None
 
         # Prioritize captures and checks for faster alpha-beta cutoff
         def move_priority(m):
             priority = 0
-            if self.board.is_capture(m):
-                captured = self.board.piece_at(m.to_square)
+            if target_board.is_capture(m):
+                captured = target_board.piece_at(m.to_square)
                 priority += PIECE_VALUES.get(captured.piece_type, 100) if captured else 100
-            if self.board.gives_check(m):
+            if target_board.gives_check(m):
                 priority += 50
             return priority
 
@@ -182,9 +191,9 @@ class ChessEngine:
         if maximizing:
             max_eval = -999999
             for move in legal_moves:
-                self.board.push(move)
-                eval_score, _ = self.alpha_beta(depth - 1, alpha, beta, False)
-                self.board.pop()
+                target_board.push(move)
+                eval_score, _ = self.alpha_beta(depth - 1, alpha, beta, False, board=target_board)
+                target_board.pop()
                 if eval_score > max_eval:
                     max_eval = eval_score
                     best_move = move
@@ -195,9 +204,9 @@ class ChessEngine:
         else:
             min_eval = 999999
             for move in legal_moves:
-                self.board.push(move)
-                eval_score, _ = self.alpha_beta(depth - 1, alpha, beta, True)
-                self.board.pop()
+                target_board.push(move)
+                eval_score, _ = self.alpha_beta(depth - 1, alpha, beta, True, board=target_board)
+                target_board.pop()
                 if eval_score < min_eval:
                     min_eval = eval_score
                     best_move = move
@@ -206,9 +215,10 @@ class ChessEngine:
                     break
             return min_eval, best_move
 
-    def choose_move(self) -> Optional[chess.Move]:
-        """Selects move according to current ELO settings."""
-        legal_moves = list(self.board.legal_moves)
+    def choose_move(self, board: Optional[chess.Board] = None) -> Optional[chess.Move]:
+        """Selects move according to current ELO settings on a cloned board."""
+        search_board = board.copy() if board is not None else self.board.copy()
+        legal_moves = list(search_board.legal_moves)
         if not legal_moves:
             return None
 
@@ -217,11 +227,11 @@ class ChessEngine:
         # Simulate human-like blunder for lower ELOs
         if random.random() < blunder_chance and len(legal_moves) > 1:
             # Pick a random capture or random move
-            captures = [m for m in legal_moves if self.board.is_capture(m)]
+            captures = [m for m in legal_moves if search_board.is_capture(m)]
             return random.choice(captures) if (captures and random.random() < 0.6) else random.choice(legal_moves)
 
-        maximizing = (self.board.turn == chess.WHITE)
-        _, best_move = self.alpha_beta(depth, -999999, 999999, maximizing)
+        maximizing = (search_board.turn == chess.WHITE)
+        _, best_move = self.alpha_beta(depth, -999999, 999999, maximizing, board=search_board)
 
         return best_move if best_move else random.choice(legal_moves)
 

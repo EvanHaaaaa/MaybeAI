@@ -4,6 +4,7 @@ import copy
 import inspect
 import json
 import os
+import re
 import time
 from typing import Dict, Any, Optional, Set, Callable, List
 from core.brain import Brain
@@ -33,6 +34,15 @@ from core.event_bus import (
     COLLAB_STATE,
 )
 
+_PROMPT_INJECTION_PATTERNS = (
+    re.compile(r"\bignore\s+(?:all\s+)?(?:previous|prior|above|system)\s+(?:instructions?|prompts?|rules?)\b", re.IGNORECASE),
+    re.compile(r"\bdisregard\s+(?:all\s+)?(?:previous|prior|above|system)\s+(?:instructions?|prompts?|rules?)\b", re.IGNORECASE),
+    re.compile(r"\boverride\s+(?:system|safety|developer)\s+(?:instructions?|prompt|rules?)\b", re.IGNORECASE),
+    re.compile(r"(?:^|\n)\s*(?:system\s+prompt\s*:|<\|im_start\|>\s*system|###\s*system\b)", re.IGNORECASE),
+    re.compile(r"\b(?:jailbreak|dan\s+mode|developer\s+mode\s+enabled|act\s+as\s+an?\s+unrestricted)\b", re.IGNORECASE),
+)
+
+
 class Orchestrator:
     """
     The Master Conductor coordinating:
@@ -54,6 +64,7 @@ class Orchestrator:
             max_message_length=mod_cfg.get("max_message_length", 250),
             strict_mode=mod_cfg.get("strict_mode", True)
         )
+        self._prompt_injection_filter: bool = bool(mod_cfg.get("prompt_injection_filter", True))
         
         # Load TTS config
         tts_cfg = settings.get("tts", {})
@@ -214,6 +225,7 @@ class Orchestrator:
 
         self.is_running = False
         self._busy_lock = asyncio.Lock()
+        self._busy_owner_task: Optional[asyncio.Task] = None
         self._speech_lock = asyncio.Lock()
         self._bg_tasks: Set[asyncio.Task] = set()
         self._current_emotion: str = "neutral"
@@ -357,13 +369,19 @@ class Orchestrator:
     async def _dispatch_to_web_listeners(self, event_name: str, payload: Dict[str, Any]):
         ws_type = BUS_TO_WS_EVENT.get(event_name, event_name)
         message = {"type": ws_type, "data": payload}
-        for listener in list(self.web_listeners):
+        listeners = list(self.web_listeners)
+        if not listeners:
+            return
+
+        async def _send_one(listener: Callable[[Dict[str, Any]], Any]) -> None:
             try:
                 res = listener(message)
-                if asyncio.iscoroutine(res):
-                    await res
+                if inspect.isawaitable(res):
+                    await asyncio.wait_for(res, timeout=2.0)
             except Exception:
-                pass
+                self.web_listeners.discard(listener)
+
+        await asyncio.gather(*(_send_one(l) for l in listeners), return_exceptions=True)
 
     async def broadcast(self, event_type: str, data: Dict[str, Any]):
         bus_event = WS_TO_BUS_EVENT.get(event_type, event_type)
@@ -584,7 +602,11 @@ class Orchestrator:
         dedication = env.sender_name or env.sender_id or None
         if not self._busy_lock.locked():
             async with self._busy_lock:
-                await self.perform_song(song_id=song_id, dedication_user=dedication)
+                self._busy_owner_task = asyncio.current_task()
+                try:
+                    await self._perform_song_unlocked(song_id=song_id, dedication_user=dedication)
+                finally:
+                    self._busy_owner_task = None
 
     async def _on_collab_emote_sync(self, env: CollabEnvelope) -> None:
         emotion = str(env.emotion or env.payload.get("emotion") or "happy").strip() or "happy"
@@ -630,6 +652,13 @@ class Orchestrator:
             }
 
         tts_stopped = bool(self.tts.stop())
+        singer_stopped = False
+        singer = getattr(self, "singer", None)
+        if singer is not None and hasattr(singer, "stop"):
+            try:
+                singer_stopped = bool(singer.stop())
+            except Exception:
+                singer_stopped = False
 
         task_cancelled = False
         task = self._active_interaction_task
@@ -664,6 +693,7 @@ class Orchestrator:
             "source": source,
             "reason": reason,
             "tts_stopped": tts_stopped,
+            "singer_stopped": singer_stopped,
             "task_cancelled": task_cancelled,
             "barge_in_count": self.barge_in_count,
             "timestamp": time.time(),
@@ -746,9 +776,9 @@ class Orchestrator:
         if vts_cfg.get("enabled") is False and self.vts.connected:
             await self.vts.disconnect()
         elif vts_cfg.get("enabled") is True and not self.vts.connected:
-            asyncio.create_task(self.vts.connect())
+            self._spawn_bg_task(self.vts.connect())
         elif vts_cfg.get("enabled") is True and (vts_cfg.get("host") != self.vts.host or vts_cfg.get("port") != self.vts.port):
-            asyncio.create_task(self.vts.reconnect(host=vts_cfg.get("host"), port=vts_cfg.get("port")))
+            self._spawn_bg_task(self.vts.reconnect(host=vts_cfg.get("host"), port=vts_cfg.get("port")))
 
         # 3. Update Twitch
         twitch_cfg = new_settings.get("twitch", {})
@@ -756,7 +786,7 @@ class Orchestrator:
             self.chat.stop()
         elif twitch_cfg.get("enabled") is True and not self.chat.is_running and twitch_cfg.get("channel"):
             raw_port = twitch_cfg.get("port")
-            asyncio.create_task(
+            self._spawn_bg_task(
                 self.chat.start_twitch_listener(
                     channel=twitch_cfg["channel"],
                     bot_nick=twitch_cfg.get("bot_nick", ""),
@@ -779,6 +809,8 @@ class Orchestrator:
             strict_mode=mod_cfg.get("strict_mode"),
             max_message_length=mod_cfg.get("max_message_length")
         )
+        if "prompt_injection_filter" in mod_cfg:
+            self._prompt_injection_filter = bool(mod_cfg.get("prompt_injection_filter", True))
 
         # 5. Update STT / Full-Duplex Voice
         stt_cfg = new_settings.get("stt", {})
@@ -922,7 +954,7 @@ class Orchestrator:
             print(f"[AI Improv] [{primary_emotion}] {speech_text}")
             async with self._speech_lock:
                 self._current_emotion = primary_emotion
-                await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+                await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
                 self._current_emotion = "neutral"
 
             if self.vts.connected:
@@ -1017,7 +1049,7 @@ class Orchestrator:
             print(f"[Screen Awareness] [{primary_emotion}] {speech_text}")
             async with self._speech_lock:
                 self._current_emotion = primary_emotion
-                await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+                await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
                 self._current_emotion = "neutral"
 
             if self.vts.connected:
@@ -1039,16 +1071,28 @@ class Orchestrator:
         )
         await self.broadcast("vision_updated", self.brain.vision.get_state())
         if obs.eve_commentary and not self._busy_lock.locked():
-            asyncio.create_task(self._speak_visual_commentary(obs))
+            self._spawn_bg_task(self._speak_visual_commentary(obs))
         return obs
+
+    @staticmethod
+    def _is_prompt_injection(text: str) -> bool:
+        if not text:
+            return False
+        return any(pattern.search(text) for pattern in _PROMPT_INJECTION_PATTERNS)
 
     async def _ingest_message(self, msg: ChatMessage):
         """Filters, broadcasts, and ingests message into ChatCurator."""
+        is_creator_flag = bool(msg.is_creator) if hasattr(msg, "is_creator") else (msg.source in ("creator", "mic"))
         is_safe, clean_input = self.moderator.clean_text(msg.text)
+        user_safe, _ = self.moderator.clean_text(msg.user)
+        has_injection = self._prompt_injection_filter and (
+            self._is_prompt_injection(msg.text) or self._is_prompt_injection(msg.user)
+        )
+        if has_injection or ((not is_safe or not user_safe) and self.moderator.strict_mode and not is_creator_flag):
+            print(f"[Moderator] Dropped unsafe/injected input from {msg.user}: {msg.text}")
+            return
         if not is_safe:
             print(f"[Moderator] Filtered unsafe input from {msg.user}: {msg.text}")
-
-        is_creator_flag = bool(msg.is_creator) if hasattr(msg, "is_creator") else (msg.source in ("creator", "mic"))
 
         if msg.source == "mic" and is_creator_flag and (self.is_busy or bool(getattr(self.tts, "is_speaking", False))):
             await self.barge_in(source="creator", reason="mic_barge_in")
@@ -1131,12 +1175,14 @@ class Orchestrator:
 
     async def _run_interaction_with_lock(self, interaction: ChatInteraction):
         async with self._busy_lock:
+            self._busy_owner_task = asyncio.current_task()
             try:
                 await self._execute_interaction(interaction)
             except asyncio.CancelledError:
                 print("[Orchestrator] Active interaction cancelled (barge-in).")
                 raise
             finally:
+                self._busy_owner_task = None
                 if self._active_interaction_task is asyncio.current_task():
                     self._active_interaction_task = None
 
@@ -1203,7 +1249,7 @@ class Orchestrator:
             requested_song = None
             if len(parts) > 1 and parts[1] in self.singer.songs:
                 requested_song = parts[1]
-            await self.perform_song(requested_song, dedication_user=primary.user)
+            await self._perform_song_unlocked(requested_song, dedication_user=primary.user)
             return
 
         # Check for Minecraft command / request
@@ -1443,7 +1489,7 @@ class Orchestrator:
             user_label = f"Eve (to {primary.user} 🎁 {primary.donation_amount})"
             # In-game celebration if Eve is connected in Minecraft!
             if self.minecraft.connection_status == "connected":
-                asyncio.create_task(self.minecraft.celebrate(user=primary.user, amount=primary.donation_amount))
+                self._spawn_bg_task(self.minecraft.celebrate(user=primary.user, amount=primary.donation_amount))
         elif is_group_debate:
             user_label = f"Eve (Commenting on {primary.user} & {interaction.related_messages[0].user})"
         elif primary.source == "minecraft":
@@ -1619,7 +1665,7 @@ class Orchestrator:
             print(f"[AI Speech] [{primary_emotion}] {speech_text}")
             async with self._speech_lock:
                 self._current_emotion = primary_emotion
-                await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+                await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
                 self._current_emotion = "neutral"
 
         neutral_vts_params = await self._apply_vts_mood_rig("neutral")
@@ -1634,6 +1680,18 @@ class Orchestrator:
         await self.broadcast("mood_updated", self.brain.mood.get_state())
 
     async def perform_song(self, song_id: Optional[str] = None, dedication_user: Optional[str] = None):
+        current = asyncio.current_task()
+        if self._busy_lock.locked() and self._busy_owner_task is current and current is not None:
+            await self._perform_song_unlocked(song_id=song_id, dedication_user=dedication_user)
+            return
+        async with self._busy_lock:
+            self._busy_owner_task = current
+            try:
+                await self._perform_song_unlocked(song_id=song_id, dedication_user=dedication_user)
+            finally:
+                self._busy_owner_task = None
+
+    async def _perform_song_unlocked(self, song_id: Optional[str] = None, dedication_user: Optional[str] = None):
         dominant_mood, _ = self.brain.mood.get_dominant_mood()
         director = self.brain.performance
 
@@ -1676,7 +1734,7 @@ class Orchestrator:
 
         async with self._speech_lock:
             self._current_emotion = primary_emotion
-            await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+            await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
         # 3. Synchronized Choreography Performance
@@ -1731,7 +1789,7 @@ class Orchestrator:
             await self.singer.sing(
                 song_id=actual_song_id,
                 on_lyric_update=on_lyric_update,
-                on_mouth_update=lambda val: asyncio.create_task(on_sing_mouth(val)),
+                on_mouth_update=lambda val: self._spawn_bg_task(on_sing_mouth(val)),
                 on_vocal_audio=on_vocal_audio,
             )
             self._current_emotion = "neutral"
@@ -1758,7 +1816,7 @@ class Orchestrator:
         vts_params = await self._apply_vts_mood_rig(primary_emotion)
         async with self._speech_lock:
             self._current_emotion = primary_emotion
-            await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+            await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
         # Return to idle
@@ -1794,7 +1852,7 @@ class Orchestrator:
 
             print(f"[Minecraft Commentary] [{primary_emotion}] {speech_text}")
             self._current_emotion = primary_emotion
-            await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+            await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
             # Also speak into server chat so in-game players see Eve's reaction
@@ -1854,7 +1912,7 @@ class Orchestrator:
 
             print(f"[{user_label}] [{primary_emotion}] {speech_text}")
             self._current_emotion = primary_emotion
-            await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
+            await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
             neutral_vts_params = await self._apply_vts_mood_rig("neutral")

@@ -12,19 +12,33 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const CREATOR_TOKEN_KEY = "maybeai_creator_token";
 
+  function setCreatorToken(token) {
+    const clean = String(token || "").trim();
+    if (!clean) return;
+    try { localStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
+    try { sessionStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
+  }
+
+  function clearCreatorToken() {
+    try { localStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
+    try { sessionStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
+  }
+
   function getCreatorToken() {
     try {
       const urlToken = new URLSearchParams(window.location.search).get("token");
       if (urlToken && urlToken.trim()) {
         const clean = urlToken.trim();
-        try {
-          localStorage.setItem(CREATOR_TOKEN_KEY, clean);
-        } catch (e) {}
+        setCreatorToken(clean);
         return clean;
       }
     } catch (e) {}
     try {
-      return localStorage.getItem(CREATOR_TOKEN_KEY) || "";
+      return (
+        localStorage.getItem(CREATOR_TOKEN_KEY) ||
+        sessionStorage.getItem(CREATOR_TOKEN_KEY) ||
+        ""
+      );
     } catch (e) {
       return "";
     }
@@ -44,9 +58,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function escapeHtml(str) {
     if (str === null || str === undefined) return "";
-    const el = document.createElement("div");
-    el.textContent = String(str);
-    return el.innerHTML;
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   // DOM Elements
@@ -61,6 +78,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const configSearchInput = document.getElementById("configSearchInput");
   const clearSearchBtn = document.getElementById("clearSearchBtn");
   const toastContainer = document.getElementById("toastContainer");
+  const creatorAuthBar = document.getElementById("creatorAuthBar");
+  const creatorAuthMsg = document.getElementById("creatorAuthMsg");
+  const creatorTokenInput = document.getElementById("creatorTokenInput");
+  const btnSaveCreatorToken = document.getElementById("btnSaveCreatorToken");
+  const btnClearCreatorToken = document.getElementById("btnClearCreatorToken");
+  const btnToggleCreatorAuth = document.getElementById("btnToggleCreatorAuth");
+  const connectionText = document.getElementById("connectionText");
+  let listenersInitialized = false;
 
   // Modal Elements
   const confirmModal = document.getElementById("confirmModal");
@@ -71,29 +96,91 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnModalConfirm = document.getElementById("btnModalConfirm");
   let onModalConfirmCallback = null;
 
+  function showCreatorAuthBar(message) {
+    if (creatorAuthMsg && message) {
+      creatorAuthMsg.textContent = message;
+    }
+    if (creatorTokenInput && !creatorTokenInput.value) {
+      creatorTokenInput.value = getCreatorToken();
+    }
+    if (creatorAuthBar) {
+      creatorAuthBar.style.display = "flex";
+    }
+  }
+
+  function hideCreatorAuthBar() {
+    if (creatorAuthBar) {
+      creatorAuthBar.style.display = "none";
+    }
+  }
+
+  async function fetchJsonAuth(url, options = {}) {
+    const res = await authFetch(url, options);
+    if (res.status === 401 || res.status === 403) {
+      let detail = `Creator token required or invalid (HTTP ${res.status}).`;
+      try {
+        const errBody = await res.json();
+        if (errBody && (errBody.error || errBody.detail)) {
+          detail = `${errBody.error || errBody.detail} (HTTP ${res.status})`;
+        }
+      } catch (e) {}
+      if (connectionText) connectionText.textContent = "AUTH REQUIRED";
+      showCreatorAuthBar(detail);
+      const err = new Error(detail);
+      err.isAuthError = true;
+      err.status = res.status;
+      throw err;
+    }
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const errBody = await res.json();
+        if (errBody && (errBody.error || errBody.detail)) {
+          detail = errBody.error || errBody.detail;
+        }
+      } catch (e) {}
+      throw new Error(detail);
+    }
+    return res.json();
+  }
+
   // Initialize
+  setupEventListeners();
   init();
 
   async function init() {
     try {
       const [cfgRes, schemaRes, diagRes] = await Promise.all([
-        authFetch("/api/config").then(r => r.json()),
-        authFetch("/api/config/schema").then(r => r.json()),
-        authFetch("/api/system/diagnostics").then(r => r.json())
+        fetchJsonAuth("/api/config"),
+        fetchJsonAuth("/api/config/schema"),
+        fetchJsonAuth("/api/system/diagnostics")
       ]);
 
-      savedConfig = cfgRes;
-      draftConfig = JSON.parse(JSON.stringify(cfgRes));
-      schema = schemaRes;
-      diagnostics = diagRes;
+      savedConfig = cfgRes && typeof cfgRes === "object" ? cfgRes : {};
+      draftConfig = JSON.parse(JSON.stringify(savedConfig));
+      schema = Array.isArray(schemaRes) ? schemaRes : [];
+      diagnostics = diagRes && typeof diagRes === "object" ? diagRes : {};
 
+      hideCreatorAuthBar();
+      if (connectionText) connectionText.textContent = "SYSTEM ONLINE";
       if (loadingState) loadingState.style.display = "none";
       renderNavigation();
       renderContent();
-      setupEventListeners();
     } catch (err) {
       console.error("[Settings] Initialization failed:", err);
-      showToast(`Failed to load configuration: ${err.message}`, "danger");
+      if (loadingState) loadingState.style.display = "none";
+      if (err && err.isAuthError) {
+        if (settingsContent) {
+          settingsContent.innerHTML = `
+            <div class="category-header">
+              <h2 class="category-title">🔐 Creator Authentication Required</h2>
+              <p class="category-desc">${escapeHtml(err.message)} Enter your Creator Token in the bar above and click <strong>Save &amp; Retry</strong>.</p>
+            </div>
+          `;
+        }
+      } else {
+        showToast(`Failed to load configuration: ${err.message}`, "danger");
+      }
     }
   }
 
@@ -127,7 +214,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Category Settings View ---
   function renderCategorySettingsView(category) {
-    const categoryItems = schema.filter(item => item.category === category);
+    const safeSchema = Array.isArray(schema) ? schema : [];
+    const categoryItems = safeSchema.filter(item => item.category === category);
     const categoryTitles = {
       general: { title: "⚙️ General Settings", desc: "Sistem dasar bot, mode otonom, dan konfigurasi bahasa utama." },
       brain: { title: "🧠 AI & Brain (LLM)", desc: "Penyedia model bahasa (Gemini, OpenAI, Ollama), suhu kreativitas, dan limit token." },
@@ -154,13 +242,13 @@ document.addEventListener("DOMContentLoaded", () => {
       performance: { title: "⚡ Performance & Network", desc: "Batas antrean tugas simultan, heartbeat ping, dan alokasi buffer audio." }
     };
 
-    const headerInfo = categoryTitles[category] || { title: `${category.toUpperCase()} SETTINGS`, desc: "" };
+    const headerInfo = categoryTitles[category] || { title: `${escapeHtml(category.toUpperCase())} SETTINGS`, desc: "" };
 
     let html = `
       <div class="category-header">
         <div class="category-title-row">
           <h2 class="category-title">${headerInfo.title}</h2>
-          <button class="btn btn-secondary btn-sm" id="btnResetCategory" data-cat="${category}" title="Reset kategori ini ke nilai bawaan">
+          <button class="btn btn-secondary btn-sm" id="btnResetCategory" data-cat="${escapeAttr(category)}" title="Reset kategori ini ke nilai bawaan">
             <span>🔄</span> Reset Category
           </button>
         </div>
@@ -177,14 +265,14 @@ document.addEventListener("DOMContentLoaded", () => {
       const tagText = item.restart_required ? "Restart Required 🔄" : "Hot-Reload ⚡";
 
       html += `
-        <div class="setting-card ${isModified ? 'modified' : ''}" data-path="${item.path}">
+        <div class="setting-card ${isModified ? 'modified' : ''}" data-path="${escapeAttr(item.path)}">
           <div class="setting-info">
             <div class="setting-label-row">
-              <span class="setting-label">${item.label}</span>
+              <span class="setting-label">${escapeHtml(item.label)}</span>
               <span class="badge-tag ${tagClass}">${tagText}</span>
               ${isModified ? '<span class="badge-tag" style="background: rgba(139,92,246,0.25); color: #c4b5fd;">Modified</span>' : ''}
             </div>
-            <p class="setting-desc">${item.description}</p>
+            <p class="setting-desc">${escapeHtml(item.description)}</p>
           </div>
           <div class="setting-control">
             ${renderControlHtml(item, currVal)}
@@ -214,7 +302,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Render Control HTML by Type ---
   function renderControlHtml(item, value) {
-    const p = item.path;
+    const p = escapeAttr(item.path);
 
     if (item.type === "toggle") {
       const checked = Boolean(value);
@@ -229,13 +317,13 @@ document.addEventListener("DOMContentLoaded", () => {
       const unit = item.unit || "";
       return `
         <div class="slider-wrapper">
-          <input type="range" data-path="${p}" min="${item.min}" max="${item.max}" step="${item.step || 1}" value="${val}">
-          <span class="slider-value-pill" id="val_${p}">${val}${unit}</span>
+          <input type="range" data-path="${p}" min="${escapeAttr(item.min)}" max="${escapeAttr(item.max)}" step="${escapeAttr(item.step || 1)}" value="${escapeAttr(val)}">
+          <span class="slider-value-pill" id="val_${p}">${escapeHtml(val)}${escapeHtml(unit)}</span>
         </div>
       `;
     } else if (item.type === "select") {
       const optionsHtml = (item.options || []).map(opt => `
-        <option value="${opt.value}" ${opt.value === value ? 'selected' : ''}>${opt.label}</option>
+        <option value="${escapeAttr(opt.value)}" ${opt.value === value ? 'selected' : ''}>${escapeHtml(opt.label)}</option>
       `).join("");
       return `
         <select class="cyber-select" data-path="${p}">
@@ -243,11 +331,11 @@ document.addEventListener("DOMContentLoaded", () => {
         </select>
       `;
     } else if (item.type === "number") {
-      const minAttr = item.min !== undefined ? `min="${item.min}"` : "";
-      const maxAttr = item.max !== undefined ? `max="${item.max}"` : "";
-      const stepAttr = item.step !== undefined ? `step="${item.step}"` : 'step="any"';
+      const minAttr = item.min !== undefined ? `min="${escapeAttr(item.min)}"` : "";
+      const maxAttr = item.max !== undefined ? `max="${escapeAttr(item.max)}"` : "";
+      const stepAttr = item.step !== undefined ? `step="${escapeAttr(item.step)}"` : 'step="any"';
       return `
-        <input type="number" class="cyber-input" data-path="${p}" value="${value !== undefined ? value : item.default}" ${minAttr} ${maxAttr} ${stepAttr}>
+        <input type="number" class="cyber-input" data-path="${p}" value="${escapeAttr(value !== undefined ? value : item.default)}" ${minAttr} ${maxAttr} ${stepAttr}>
       `;
     } else if (item.type === "secret") {
       return `
@@ -258,21 +346,22 @@ document.addEventListener("DOMContentLoaded", () => {
       `;
     } else if (item.type === "list") {
       const items = Array.isArray(value) ? value : [];
-      const itemPlaceholder = p.includes("plugin") ? "word_chain" : "http://192.168.1.50:7860";
-      const emptyLabel = p.includes("plugin") ? "No plugins enabled." : "No entries configured (localhost allowed by default).";
+      const rawPath = String(item.path || "");
+      const itemPlaceholder = rawPath.includes("plugin") ? "word_chain" : "http://192.168.1.50:7860";
+      const emptyLabel = rawPath.includes("plugin") ? "No plugins enabled." : "No entries configured (localhost allowed by default).";
       const rowsHtml = items.map((entry, idx) => `
         <div class="list-item-row" style="display: flex; gap: 8px; align-items: center;">
-          <input type="text" class="cyber-input list-item-input" data-list-path="${p}" data-index="${idx}" value="${escapeAttr(entry)}" placeholder="${itemPlaceholder}">
+          <input type="text" class="cyber-input list-item-input" data-list-path="${p}" data-index="${idx}" value="${escapeAttr(entry)}" placeholder="${escapeAttr(itemPlaceholder)}">
           <button type="button" class="btn btn-danger-outline list-remove-btn" data-list-path="${p}" data-index="${idx}" title="Remove item" style="padding: 6px 10px;">✕</button>
         </div>
       `).join("");
       return `
         <div class="list-editor" data-path="${p}" style="display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 380px;">
           <div class="list-items-container" style="display: flex; flex-direction: column; gap: 6px;">
-            ${rowsHtml || `<small style="color: var(--text-dim);">${emptyLabel}</small>`}
+            ${rowsHtml || `<small style="color: var(--text-dim);">${escapeHtml(emptyLabel)}</small>`}
           </div>
           <div class="list-add-row" style="display: flex; gap: 8px; align-items: center;">
-            <input type="text" class="cyber-input list-add-input" data-list-path="${p}" placeholder="e.g. ${itemPlaceholder}">
+            <input type="text" class="cyber-input list-add-input" data-list-path="${p}" placeholder="e.g. ${escapeAttr(itemPlaceholder)}">
             <button type="button" class="btn btn-secondary list-add-btn" data-list-path="${p}" style="white-space: nowrap;">+ Add</button>
           </div>
         </div>
@@ -286,11 +375,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function escapeAttr(val) {
-    return String(val)
-      .replace(/&/g, "&amp;")
-      .replace(/"/g, "&quot;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+    return escapeHtml(val);
   }
 
   // --- Attach Control Listeners ---
@@ -423,12 +508,13 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- Search Results View ---
   function renderSearchResults() {
     const q = searchQuery.toLowerCase().trim();
-    const matches = schema.filter(item => {
+    const safeSchema = Array.isArray(schema) ? schema : [];
+    const matches = safeSchema.filter(item => {
       return (
-        item.label.toLowerCase().includes(q) ||
-        item.description.toLowerCase().includes(q) ||
-        item.path.toLowerCase().includes(q) ||
-        item.category.toLowerCase().includes(q)
+        String(item.label || "").toLowerCase().includes(q) ||
+        String(item.description || "").toLowerCase().includes(q) ||
+        String(item.path || "").toLowerCase().includes(q) ||
+        String(item.category || "").toLowerCase().includes(q)
       );
     });
 
@@ -455,14 +541,14 @@ document.addEventListener("DOMContentLoaded", () => {
         const tagText = item.restart_required ? "Restart Required 🔄" : "Hot-Reload ⚡";
 
         html += `
-          <div class="setting-card ${isModified ? 'modified' : ''}" data-path="${item.path}">
+          <div class="setting-card ${isModified ? 'modified' : ''}" data-path="${escapeAttr(item.path)}">
             <div class="setting-info">
               <div class="setting-label-row">
-                <span class="setting-label">${item.label}</span>
-                <span class="badge-tag" style="background: rgba(255,255,255,0.08); color: var(--text-muted);">${item.category.toUpperCase()}</span>
+                <span class="setting-label">${escapeHtml(item.label)}</span>
+                <span class="badge-tag" style="background: rgba(255,255,255,0.08); color: var(--text-muted);">${escapeHtml(String(item.category || "").toUpperCase())}</span>
                 <span class="badge-tag ${tagClass}">${tagText}</span>
               </div>
-              <p class="setting-desc">${item.description}</p>
+              <p class="setting-desc">${escapeHtml(item.description)}</p>
             </div>
             <div class="setting-control">
               ${renderControlHtml(item, currVal)}
@@ -497,7 +583,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <div style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;">
         <div style="background: var(--bg-card); border: 1px solid var(--border-color); padding: 12px 18px; border-radius: 10px; flex: 1; min-width: 160px;">
           <small style="color: var(--text-dim); font-size: 0.75rem;">UPTIME SISTEM</small>
-          <h3 style="font-size: 1.3rem; color: var(--accent-cyan); font-family: var(--font-mono);">${diag.uptime_human || '0s'}</h3>
+          <h3 style="font-size: 1.3rem; color: var(--accent-cyan); font-family: var(--font-mono);">${escapeHtml(diag.uptime_human || '0s')}</h3>
         </div>
         <div style="background: var(--bg-card); border: 1px solid var(--border-color); padding: 12px 18px; border-radius: 10px; flex: 1; min-width: 160px;">
           <small style="color: var(--text-dim); font-size: 0.75rem;">STATUS MASTER ENGINE</small>
@@ -505,7 +591,7 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
         <div style="background: var(--bg-card); border: 1px solid var(--border-color); padding: 12px 18px; border-radius: 10px; flex: 1; min-width: 160px;">
           <small style="color: var(--text-dim); font-size: 0.75rem;">ACTIVE WEBSOCKETS</small>
-          <h3 style="font-size: 1.3rem; color: #c4b5fd; font-family: var(--font-mono);">${diag.active_listeners_count || 1} client(s)</h3>
+          <h3 style="font-size: 1.3rem; color: #c4b5fd; font-family: var(--font-mono);">${escapeHtml(diag.active_listeners_count || 1)} client(s)</h3>
         </div>
       </div>
 
@@ -518,12 +604,12 @@ document.addEventListener("DOMContentLoaded", () => {
               <h4>🧠 LLM Brain</h4>
               <small>Autonomous Conversation & Persona</small>
             </div>
-            <span class="status-pill status-online">${modules.llm_brain?.status || 'Active'}</span>
+            <span class="status-pill status-online">${escapeHtml(modules.llm_brain?.status || 'Active')}</span>
           </div>
           <div class="diag-meta-list">
-            <div>Provider: <strong>${modules.llm_brain?.provider || 'gemini'}</strong></div>
-            <div>Model: <strong>${modules.llm_brain?.model || 'default'}</strong></div>
-            <div>Context History: <strong>${modules.llm_brain?.memory_turns || 0} turns</strong></div>
+            <div>Provider: <strong>${escapeHtml(modules.llm_brain?.provider || 'gemini')}</strong></div>
+            <div>Model: <strong>${escapeHtml(modules.llm_brain?.model || 'default')}</strong></div>
+            <div>Context History: <strong>${escapeHtml(modules.llm_brain?.memory_turns || 0)} turns</strong></div>
           </div>
           <div class="diag-actions">
             <button class="btn btn-secondary btn-block btn-diag-test" data-test="llm">
@@ -542,8 +628,8 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="status-pill ${modules.tts?.enabled ? 'status-online' : ''}">${modules.tts?.enabled ? 'Active' : 'Disabled'}</span>
           </div>
           <div class="diag-meta-list">
-            <div>Voice: <strong>${modules.tts?.voice || 'en-US-AnaNeural'}</strong></div>
-            <div>Rate / Pitch: <strong>${modules.tts?.rate || '+5%'} / ${modules.tts?.pitch || '+10Hz'}</strong></div>
+            <div>Voice: <strong>${escapeHtml(modules.tts?.voice || 'en-US-AnaNeural')}</strong></div>
+            <div>Rate / Pitch: <strong>${escapeHtml(modules.tts?.rate || '+5%')} / ${escapeHtml(modules.tts?.pitch || '+10Hz')}</strong></div>
           </div>
           <div class="diag-actions">
             <button class="btn btn-secondary btn-block btn-diag-test" data-test="tts">
@@ -562,7 +648,7 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="status-pill ${modules.vts?.connected ? 'status-online' : ''}">${modules.vts?.connected ? 'Connected' : 'Standalone'}</span>
           </div>
           <div class="diag-meta-list">
-            <div>Target: <strong>${modules.vts?.host || 'localhost'}:${modules.vts?.port || 8001}</strong></div>
+            <div>Target: <strong>${escapeHtml(modules.vts?.host || 'localhost')}:${escapeHtml(modules.vts?.port || 8001)}</strong></div>
             <div>Authenticated: <strong>${modules.vts?.authenticated ? 'YES' : 'NO'}</strong></div>
           </div>
           <div class="diag-actions">
@@ -582,8 +668,8 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="status-pill ${modules.twitch?.is_connected ? 'status-online' : ''}">${modules.twitch?.is_connected ? 'Connected' : 'Standby'}</span>
           </div>
           <div class="diag-meta-list">
-            <div>Channel: <strong>#${modules.twitch?.channel || 'none'}</strong></div>
-            <div>Message Queue: <strong>${modules.twitch?.queue_size || 0} msgs</strong></div>
+            <div>Channel: <strong>#${escapeHtml(modules.twitch?.channel || 'none')}</strong></div>
+            <div>Message Queue: <strong>${escapeHtml(modules.twitch?.queue_size || 0)} msgs</strong></div>
           </div>
           <div class="diag-actions">
             <button class="btn btn-secondary btn-block btn-diag-test" data-test="twitch">
@@ -603,7 +689,7 @@ document.addEventListener("DOMContentLoaded", () => {
           </div>
           <div class="diag-meta-list">
             <div>Strict Mode: <strong>${modules.moderator?.strict_mode ? 'ON' : 'OFF'}</strong></div>
-            <div>Rules Active: <strong>${(modules.moderator?.banned_words_count || 0) + (modules.moderator?.banned_patterns_count || 0)} rules</strong></div>
+            <div>Rules Active: <strong>${Number(modules.moderator?.banned_words_count || 0) + Number(modules.moderator?.banned_patterns_count || 0)} rules</strong></div>
           </div>
           <div class="diag-actions">
             <button class="btn btn-secondary btn-block btn-diag-test" data-test="moderator">
@@ -622,8 +708,8 @@ document.addEventListener("DOMContentLoaded", () => {
             <span class="status-pill status-online">Synced</span>
           </div>
           <div class="diag-meta-list">
-            <div>Episodes: <strong>${modules.memory?.stats?.total_episodes || 0} records</strong></div>
-            <div>Users Tracked: <strong>${modules.memory?.stats?.unique_users_count || 0} people</strong></div>
+            <div>Episodes: <strong>${escapeHtml(modules.memory?.stats?.total_episodes || 0)} records</strong></div>
+            <div>Users Tracked: <strong>${escapeHtml(modules.memory?.stats?.unique_users_count || 0)} people</strong></div>
           </div>
           <div class="diag-actions">
             <button class="btn btn-secondary btn-block btn-diag-test" data-test="memory">
@@ -654,10 +740,12 @@ document.addEventListener("DOMContentLoaded", () => {
         btnRefresh.disabled = true;
         btnRefresh.innerHTML = `<span>⏳</span> Refreshing...`;
         try {
-          diagnostics = await authFetch("/api/system/diagnostics").then(r => r.json());
+          diagnostics = await fetchJsonAuth("/api/system/diagnostics");
           renderDiagnosticsView();
           showToast("Telemetry refreshed successfully!", "success");
         } catch (err) {
+          btnRefresh.disabled = false;
+          btnRefresh.innerHTML = `<span>🔄</span> Refresh Telemetry`;
           showToast(`Refresh failed: ${err.message}`, "danger");
         }
       });
@@ -676,10 +764,10 @@ document.addEventListener("DOMContentLoaded", () => {
         if (statusEl) statusEl.textContent = `Running ${testName.toUpperCase()} diagnostic...`;
 
         try {
-          const res = await authFetch(`/api/config/test/${testName}`, {
+          const res = await fetchJsonAuth(`/api/config/test/${encodeURIComponent(testName)}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" }
-          }).then(r => r.json());
+          });
 
           const timestamp = new Date().toLocaleTimeString();
           if (consoleEl) {
@@ -726,6 +814,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function getModifiedPaths() {
+    if (!Array.isArray(schema)) return [];
     return schema
       .map(item => item.path)
       .filter(path => isFieldModified(path));
@@ -740,11 +829,11 @@ document.addEventListener("DOMContentLoaded", () => {
     btnSaveAllChanges.innerHTML = `<span>⏳</span> Saving & Applying...`;
 
     try {
-      const res = await authFetch("/api/config", {
+      const res = await fetchJsonAuth("/api/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draftConfig)
-      }).then(r => r.json());
+      });
 
       if (res.success) {
         savedConfig = JSON.parse(JSON.stringify(res.config || draftConfig));
@@ -780,11 +869,11 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- Reset Category or All ---
   async function resetCategory(category) {
     try {
-      const res = await authFetch("/api/config/reset", {
+      const res = await fetchJsonAuth("/api/config/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ category })
-      }).then(r => r.json());
+      });
 
       if (res.success) {
         savedConfig = res.config;
@@ -800,11 +889,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function resetAllSettings() {
     try {
-      const res = await authFetch("/api/config/reset", {
+      const res = await fetchJsonAuth("/api/config/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({})
-      }).then(r => r.json());
+      });
 
       if (res.success) {
         savedConfig = res.config;
@@ -833,6 +922,48 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Event Listeners Setup ---
   function setupEventListeners() {
+    if (listenersInitialized) return;
+    listenersInitialized = true;
+
+    if (btnToggleCreatorAuth) {
+      btnToggleCreatorAuth.addEventListener("click", () => {
+        if (creatorAuthBar && creatorAuthBar.style.display === "flex") {
+          hideCreatorAuthBar();
+        } else {
+          showCreatorAuthBar("Enter your Creator Token to authenticate configuration requests.");
+        }
+      });
+    }
+
+    if (btnSaveCreatorToken) {
+      const saveAndRetry = () => {
+        const val = creatorTokenInput ? creatorTokenInput.value.trim() : "";
+        if (!val) {
+          showToast("Please enter a Creator Token.", "warning");
+          return;
+        }
+        setCreatorToken(val);
+        showToast("Creator Token saved. Loading configuration...", "info");
+        init();
+      };
+      btnSaveCreatorToken.addEventListener("click", saveAndRetry);
+      if (creatorTokenInput) {
+        creatorTokenInput.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            saveAndRetry();
+          }
+        });
+      }
+    }
+
+    if (btnClearCreatorToken) {
+      btnClearCreatorToken.addEventListener("click", () => {
+        clearCreatorToken();
+        if (creatorTokenInput) creatorTokenInput.value = "";
+        showCreatorAuthBar("Creator Token cleared. Enter a valid token and click Save & Retry.");
+      });
+    }
     if (btnSaveAllChanges) btnSaveAllChanges.addEventListener("click", saveAllChanges);
     if (btnDiscardChanges) btnDiscardChanges.addEventListener("click", discardChanges);
 

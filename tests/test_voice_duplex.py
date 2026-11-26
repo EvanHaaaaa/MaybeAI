@@ -207,9 +207,9 @@ class TestTTSEngineInterrupt(unittest.IsolatedAsyncioTestCase):
 
             stopped = tts.stop(reason="creator_vad")
             self.assertTrue(stopped)
-            raw_out = await asyncio.wait_for(stream_task, timeout=2.0)
+            with self.assertRaises(asyncio.CancelledError):
+                await asyncio.wait_for(stream_task, timeout=2.0)
 
-        self.assertIn("Kalimat pertama", raw_out)
         self.assertFalse(tts.is_speaking)
         self.assertTrue(tts.was_interrupted)
         self.assertEqual(mouth_values[-1], 0.0)

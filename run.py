@@ -113,20 +113,37 @@ def _is_http_creator_authorized(request: Request) -> tuple[bool, int, str]:
     return True, 200, ""
 
 
+def _has_origin_allowlist() -> bool:
+    allowed = _get_security_settings().get("allowed_origins", [])
+    return isinstance(allowed, list) and any(isinstance(e, str) and e.strip() for e in allowed)
+
+
+def _is_origin_request_allowed(origin: Optional[str]) -> bool:
+    if origin is None:
+        return not _has_origin_allowlist()
+    return _is_allowed_origin(origin)
+
+
 def _is_ws_creator_authorized(websocket: WebSocket) -> bool:
-    client_host = websocket.client.host if websocket.client else None
-    if client_host not in _LOOPBACK_HOSTS:
-        return False
     configured_token = _get_configured_creator_token()
-    if not configured_token:
-        return True
-    provided_token = websocket.query_params.get("token", "")
-    if not provided_token:
-        return False
-    return secrets.compare_digest(
-        provided_token.encode("utf-8"),
-        configured_token.encode("utf-8"),
-    )
+    if configured_token:
+        provided_token = (
+            websocket.headers.get("x-creator-token")
+            or websocket.query_params.get("token", "")
+            or ""
+        ).strip()
+        if not provided_token:
+            auth_header = websocket.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                provided_token = auth_header[7:].strip()
+        if not provided_token:
+            return False
+        return hmac.compare_digest(
+            provided_token.encode("utf-8"),
+            configured_token.encode("utf-8"),
+        )
+    client_host = websocket.client.host if websocket.client else None
+    return client_host in _LOOPBACK_HOSTS
 
 
 def _get_collab_secret() -> str:
@@ -302,6 +319,29 @@ def _get_highlights_status() -> Dict[str, Any]:
     }
 
 
+_CLIPS_BASE_DIR = Path("data/clips")
+
+
+def _resolve_clip_path(raw_path: Optional[str], *, allow_none: bool = False) -> Optional[str]:
+    if raw_path is None or str(raw_path).strip() == "":
+        if allow_none:
+            return None
+        raise ValueError("Missing clip path")
+    p = Path(str(raw_path).strip())
+    base_resolved = _CLIPS_BASE_DIR.resolve()
+    if p.is_absolute():
+        candidate = p.resolve()
+    elif len(p.parts) >= 2 and p.parts[0] == "data" and p.parts[1] == "clips":
+        candidate = p.resolve()
+    else:
+        candidate = (base_resolved / p).resolve()
+    try:
+        candidate.relative_to(base_resolved)
+    except ValueError as exc:
+        raise ValueError(f"Path '{raw_path}' escapes allowed directory 'data/clips'") from exc
+    return str(candidate)
+
+
 async def _handle_highlights_action(payload: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
     action = str(payload.get("action") or "").strip().lower()
     if action == "status":
@@ -331,13 +371,17 @@ async def _handle_highlights_action(payload: Dict[str, Any]) -> tuple[int, Dict[
     if action in ("clip", "create_clip"):
         if clipper is None:
             return 503, {"success": False, "error": "Clip pipeline is not initialized"}
-        input_path = str(payload.get("input_path") or payload.get("replay_path") or "")
-        if not input_path:
+        raw_input_path = payload.get("input_path") or payload.get("replay_path")
+        if not raw_input_path:
             return 400, {"success": False, "error": "Missing 'input_path' parameter"}
-        output_path = payload.get("output_path")
+        try:
+            input_path = _resolve_clip_path(str(raw_input_path))
+            output_path = _resolve_clip_path(payload.get("output_path"), allow_none=True)
+            subtitle_path = _resolve_clip_path(payload.get("subtitle_path"), allow_none=True)
+        except ValueError as exc:
+            return 400, {"success": False, "error": str(exc)}
         start_sec = float(payload.get("start_sec", 0.0) or 0.0)
         duration_sec = float(payload.get("duration_sec", 30.0) or 30.0)
-        subtitle_path = payload.get("subtitle_path")
         if hasattr(clipper, "create_vertical_clip"):
             res = await _maybe_await(clipper.create_vertical_clip(
                 input_path=input_path,
@@ -365,13 +409,38 @@ async def _handle_highlights_action(payload: Dict[str, Any]) -> tuple[int, Dict[
     return 400, {"success": False, "error": f"Unknown highlights action: '{action}'"}
 
 
+_SENSITIVE_GET_EXACT = frozenset({
+    "/api/config",
+    "/api/config/schema",
+    "/api/system/diagnostics",
+    "/api/desktop/state",
+    "/api/goals",
+    "/api/goals/agenda",
+    "/api/plugins",
+    "/api/collab/status",
+    "/api/obs/status",
+    "/api/highlights/status",
+    "/api/missions/status",
+    "/api/voice/status",
+    "/api/eventbus/stats",
+    "/api/platforms/status",
+})
+_SENSITIVE_GET_PREFIXES = (
+    "/api/memory/",
+    "/api/relationships",
+)
+
+
 @app.middleware("http")
 async def verify_api_origin_middleware(request: Request, call_next):
-    is_mutating_api = request.url.path.startswith("/api/") and request.method in ("PUT", "POST", "PATCH", "DELETE")
-    is_sensitive_get = request.url.path == "/api/config" and request.method == "GET"
+    path = request.url.path
+    is_mutating_api = path.startswith("/api/") and request.method in ("PUT", "POST", "PATCH", "DELETE")
+    is_sensitive_get = request.method == "GET" and (
+        path in _SENSITIVE_GET_EXACT or path.startswith(_SENSITIVE_GET_PREFIXES)
+    )
     if is_mutating_api or is_sensitive_get:
         origin = request.headers.get("origin")
-        if origin is not None and not _is_allowed_origin(origin):
+        if not _is_origin_request_allowed(origin):
             return JSONResponse(status_code=403, content={"detail": "Forbidden origin"})
         authorized, status_code, detail = _is_http_creator_authorized(request)
         if not authorized:
@@ -787,13 +856,33 @@ _CREATOR_ONLY_WS_ACTIONS = frozenset({
     "performance_action",
     "vision_action",
     "goal_action",
+    "memory_action",
+    "mood_action",
+    "relationship_action",
+    "multiplayer_action",
+    "minigame_action",
+    "story_action",
+    "trigger_improv",
+    "barge_in",
+    "voice_audio_chunk",
+    "mission_action",
+})
+
+_PRIVATE_WS_EVENTS = frozenset({
+    "stt_partial",
+    "stt_final",
+    "memory_updated",
+    "relationship_updated",
+    "goal_updated",
+    "system_diagnostics",
+    "desktop_updated",
 })
 
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     origin = websocket.headers.get("origin")
-    if origin is not None and not _is_allowed_origin(origin):
+    if not _is_origin_request_allowed(origin):
         await websocket.close(code=1008)
         return
 
@@ -803,12 +892,13 @@ async def websocket_endpoint(websocket: WebSocket):
 
     async def listener(event: dict):
         evt_type = event.get("type") if isinstance(event, dict) else None
-        if evt_type in ("stt_partial", "stt_final") and not ws_creator_authorized:
+        if evt_type in _PRIVATE_WS_EVENTS and not ws_creator_authorized:
             return
         try:
             await websocket.send_json(event)
         except Exception:
-            pass
+            orchestrator.unregister_listener(listener)
+            raise
 
     orchestrator.register_listener(listener)
 
@@ -838,28 +928,10 @@ async def websocket_endpoint(websocket: WebSocket):
         "data": orchestrator.chess.get_status()
     })
 
-    # Send initial episodic memory stats & recent memories
-    await websocket.send_json({
-        "type": "memory_updated",
-        "data": orchestrator.brain.episodic_memory.get_stats()
-    })
-
     # Send initial mood state
     await websocket.send_json({
         "type": "mood_updated",
         "data": orchestrator.brain.mood.get_state()
-    })
-
-    # Send initial goal planning state
-    await websocket.send_json({
-        "type": "goal_updated",
-        "data": orchestrator.brain.goals.get_state()
-    })
-
-    # Send initial relationship states
-    await websocket.send_json({
-        "type": "relationship_updated",
-        "data": orchestrator.brain.relationships.get_state()
     })
 
     # Send initial visual perception / screen awareness state
@@ -872,12 +944,6 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         "type": "multiplayer_updated",
         "data": orchestrator.brain.multiplayer.get_state()
-    })
-
-    # Send initial desktop companion state
-    await websocket.send_json({
-        "type": "desktop_updated",
-        "data": orchestrator.brain.desktop.get_state()
     })
 
     # Send initial interactive mini-game state
@@ -904,11 +970,28 @@ async def websocket_endpoint(websocket: WebSocket):
         "data": orchestrator.brain.personality.get_state()
     })
 
-    # Send initial system diagnostics report
-    await websocket.send_json({
-        "type": "system_diagnostics",
-        "data": config_mgr.get_system_diagnostics(orchestrator)
-    })
+    # Send private state snapshots only to authorized Creator clients
+    if ws_creator_authorized:
+        await websocket.send_json({
+            "type": "memory_updated",
+            "data": orchestrator.brain.episodic_memory.get_stats()
+        })
+        await websocket.send_json({
+            "type": "goal_updated",
+            "data": orchestrator.brain.goals.get_state()
+        })
+        await websocket.send_json({
+            "type": "relationship_updated",
+            "data": orchestrator.brain.relationships.get_state()
+        })
+        await websocket.send_json({
+            "type": "desktop_updated",
+            "data": orchestrator.brain.desktop.get_state()
+        })
+        await websocket.send_json({
+            "type": "system_diagnostics",
+            "data": config_mgr.get_system_diagnostics(orchestrator)
+        })
 
     # Send initial autonomous mission and collab states
     await websocket.send_json({
@@ -1611,7 +1694,7 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.websocket("/ws/collab")
 async def collab_websocket_endpoint(websocket: WebSocket):
     origin = websocket.headers.get("origin")
-    if origin is not None and not _is_allowed_origin(origin):
+    if not _is_origin_request_allowed(origin):
         await websocket.close(code=1008)
         return
 
@@ -1645,11 +1728,6 @@ async def collab_websocket_endpoint(websocket: WebSocket):
     async def send_to_peer(envelope_dict: Dict[str, Any]):
         await websocket.send_json(envelope_dict)
 
-    prev_collab_secret = orchestrator.collab.shared_secret
-    secret_overridden = bool(secret and prev_collab_secret != secret)
-    if secret_overridden:
-        orchestrator.collab.shared_secret = secret
-
     sender_id = orchestrator.collab.register_peer_sender(send_to_peer)
     try:
         while True:
@@ -1666,8 +1744,6 @@ async def collab_websocket_endpoint(websocket: WebSocket):
         pass
     finally:
         orchestrator.collab.unregister_peer_sender(sender_id)
-        if secret_overridden and orchestrator.collab.shared_secret == secret:
-            orchestrator.collab.shared_secret = prev_collab_secret
 
 
 

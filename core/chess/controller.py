@@ -183,24 +183,31 @@ class ChessController:
 
         return san
 
+    def _can_bot_move(self) -> bool:
+        if not self.is_active or self.engine.board.is_game_over():
+            return False
+        current_turn = "white" if self.engine.board.turn == chess.WHITE else "black"
+        return current_turn == self.eve_color
+
     async def make_bot_move(self) -> Optional[str]:
         """Calculates and executes Eve's move synchronously on the current thread."""
-        if not self.is_active or self.engine.board.is_game_over():
+        if not self._can_bot_move():
             return None
 
-        best_move = self.engine.choose_move()
-        if not best_move:
+        best_move = self.engine.choose_move(self.engine.board.copy())
+        if not best_move or not self._can_bot_move() or best_move not in self.engine.board.legal_moves:
             return None
 
         return await self._apply_bot_move(best_move)
 
     async def amake_bot_move(self) -> Optional[str]:
         """Calculates Eve's move in a worker thread via asyncio.to_thread and executes it."""
-        if not self.is_active or self.engine.board.is_game_over():
+        if not self._can_bot_move():
             return None
 
-        best_move = await asyncio.to_thread(self.engine.choose_move)
-        if not best_move:
+        board_copy = self.engine.board.copy()
+        best_move = await asyncio.to_thread(self.engine.choose_move, board_copy)
+        if not best_move or not self._can_bot_move() or best_move not in self.engine.board.legal_moves:
             return None
 
         return await self._apply_bot_move(best_move)

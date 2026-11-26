@@ -143,35 +143,121 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- Creator Token Persistence & Authenticated Fetch ---
   const CREATOR_TOKEN_KEY = "maybeai_creator_token";
+  const creatorAuthBar = document.getElementById("creatorAuthBar");
+  const creatorAuthMsg = document.getElementById("creatorAuthMsg");
+  const creatorTokenInput = document.getElementById("creatorTokenInput");
+  const btnSaveCreatorToken = document.getElementById("btnSaveCreatorToken");
+  const btnClearCreatorToken = document.getElementById("btnClearCreatorToken");
+  const btnCloseCreatorAuth = document.getElementById("btnCloseCreatorAuth");
+  const btnToggleCreatorAuth = document.getElementById("btnToggleCreatorAuth");
+
+  function setCreatorToken(token) {
+    const clean = String(token || "").trim();
+    if (!clean) return;
+    try { localStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
+    try { sessionStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
+  }
+
+  function clearCreatorToken() {
+    try { localStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
+    try { sessionStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
+  }
 
   function getCreatorToken() {
     try {
       const urlToken = new URLSearchParams(window.location.search).get("token");
       if (urlToken && urlToken.trim()) {
         const clean = urlToken.trim();
-        try {
-          localStorage.setItem(CREATOR_TOKEN_KEY, clean);
-        } catch (e) {}
+        setCreatorToken(clean);
         return clean;
       }
     } catch (e) {}
     try {
-      return localStorage.getItem(CREATOR_TOKEN_KEY) || localStorage.maybeai_creator_token || "";
+      return (
+        localStorage.getItem(CREATOR_TOKEN_KEY) ||
+        sessionStorage.getItem(CREATOR_TOKEN_KEY) ||
+        localStorage.maybeai_creator_token ||
+        ""
+      );
     } catch (e) {
       return "";
     }
   }
 
+  function showCreatorAuthBar(message) {
+    if (creatorAuthMsg && message) {
+      creatorAuthMsg.textContent = message;
+    }
+    if (creatorTokenInput && !creatorTokenInput.value) {
+      creatorTokenInput.value = getCreatorToken();
+    }
+    if (creatorAuthBar) {
+      creatorAuthBar.style.display = "flex";
+    }
+  }
+
+  function hideCreatorAuthBar() {
+    if (creatorAuthBar) {
+      creatorAuthBar.style.display = "none";
+    }
+  }
+
   getCreatorToken();
 
-  function authFetch(url, options = {}) {
+  async function authFetch(url, options = {}) {
     const token = getCreatorToken();
     const headers = Object.assign({}, options.headers || {});
     if (token) {
       headers["X-Creator-Token"] = token;
       headers["Authorization"] = `Bearer ${token}`;
     }
-    return fetch(url, Object.assign({}, options, { headers }));
+    const res = await fetch(url, Object.assign({}, options, { headers }));
+    if (res.status === 401 || res.status === 403) {
+      showCreatorAuthBar(`Creator Token required or invalid (HTTP ${res.status}).`);
+    }
+    return res;
+  }
+
+  if (btnToggleCreatorAuth) {
+    btnToggleCreatorAuth.addEventListener("click", () => {
+      if (creatorAuthBar && creatorAuthBar.style.display === "flex") {
+        hideCreatorAuthBar();
+      } else {
+        showCreatorAuthBar("Enter your Creator Token for VIP API & WebSocket access.");
+      }
+    });
+  }
+
+  if (btnSaveCreatorToken) {
+    const saveAndReconnect = () => {
+      const val = creatorTokenInput ? creatorTokenInput.value.trim() : "";
+      if (!val) return;
+      setCreatorToken(val);
+      hideCreatorAuthBar();
+      if (ws) try { ws.close(); } catch (e) {}
+      connectWs();
+    };
+    btnSaveCreatorToken.addEventListener("click", saveAndReconnect);
+    if (creatorTokenInput) {
+      creatorTokenInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          saveAndReconnect();
+        }
+      });
+    }
+  }
+
+  if (btnClearCreatorToken) {
+    btnClearCreatorToken.addEventListener("click", () => {
+      clearCreatorToken();
+      if (creatorTokenInput) creatorTokenInput.value = "";
+      showCreatorAuthBar("Creator Token cleared. Enter a new token if required.");
+    });
+  }
+
+  if (btnCloseCreatorAuth) {
+    btnCloseCreatorAuth.addEventListener("click", hideCreatorAuthBar);
   }
 
   // --- Browser Web Audio API Playback (FIFO Queue + AnalyserNode RMS Lip-Sync) ---
@@ -358,9 +444,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof refreshObsAndHighlightsStatus === "function") refreshObsAndHighlightsStatus();
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       wsStatus.textContent = "Reconnecting...";
       wsStatus.className = "badge";
+      if (event && (event.code === 1008 || event.code === 4001 || event.code === 4003)) {
+        showCreatorAuthBar("WebSocket authentication failed. Please enter a valid Creator Token.");
+      }
       reconnectTimer = setTimeout(connectWs, 2000);
     };
 
@@ -373,6 +462,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function handleWsMessage(event) {
     const msg = JSON.parse(event.data);
+
+    if (msg.type === "error" && msg.data && msg.data.code === "forbidden") {
+      showCreatorAuthBar(`🔒 ${msg.data.error || "Creator token required"}`);
+      return;
+    }
 
     if (msg.type === "chat_received") {
       const isCreator = Boolean(msg.data.is_creator || msg.data.channel === "creator" || msg.data.source === "mic" || msg.data.source === "creator");
@@ -641,9 +735,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function escapeHtml(string) {
     if (string === null || string === undefined) return "";
-    const el = document.createElement("div");
-    el.textContent = String(string);
-    return el.innerHTML;
+    return String(string)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   // --- Chat Submit Forms ---
@@ -1521,7 +1618,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const blackMove = history[i + 1] || "";
           const rowDiv = document.createElement("div");
           rowDiv.className = "chess-move-row";
-          rowDiv.innerHTML = `<span class="move-num">${moveNum}.</span><span class="move-white">${whiteMove}</span><span class="move-black">${blackMove}</span>`;
+          rowDiv.innerHTML = `<span class="move-num">${moveNum}.</span><span class="move-white">${escapeHtml(whiteMove)}</span><span class="move-black">${escapeHtml(blackMove)}</span>`;
           chessMoveList.appendChild(rowDiv);
         }
         chessMoveList.scrollTop = chessMoveList.scrollHeight;
@@ -1801,8 +1898,8 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
         <div class="mem-card-body">"${escapeHtml(mem.content || "")}"</div>
         <div class="mem-card-footer">
-          <span>👤 <strong>${escapeHtml(userStr)}</strong> (${emotionStr})</span>
-          <span>⏱️ ${dateStr}</span>
+          <span>👤 <strong>${escapeHtml(userStr)}</strong> (${escapeHtml(emotionStr)})</span>
+          <span>⏱️ ${escapeHtml(dateStr)}</span>
         </div>
       `;
       container.appendChild(card);
@@ -1841,10 +1938,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     let gamesHtml = "";
     for (const [g, cnt] of Object.entries(games)) {
-      gamesHtml += `<li><strong>${escapeHtml(g)}:</strong> ${cnt}x dimainkan</li>`;
+      gamesHtml += `<li><strong>${escapeHtml(g)}:</strong> ${Number(cnt)}x dimainkan</li>`;
     }
     for (const [k, cnt] of Object.entries(winLoss)) {
-      gamesHtml += `<li><strong>${escapeHtml(k)}:</strong> ${cnt}</li>`;
+      gamesHtml += `<li><strong>${escapeHtml(k)}:</strong> ${Number(cnt)}</li>`;
     }
     if (!gamesHtml) gamesHtml = "<li>Belum pernah main bareng</li>";
 
@@ -2170,7 +2267,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const isActive = activeGoal && activeGoal.id === g.id;
           const pct = Math.round((g.progress || 0) * 100);
           listHtml += `
-            <div class="tier-goal-item ${isActive ? 'is-active-goal' : ''}" data-goal-id="${g.id}">
+            <div class="tier-goal-item ${isActive ? 'is-active-goal' : ''}" data-goal-id="${escapeHtml(g.id)}">
               <div class="tier-goal-header">
                 <span>${escapeHtml(g.title)}</span>
                 <span class="goal-prog-pct" style="font-size: 12px;">${pct}%</span>
@@ -2186,7 +2283,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
         card.innerHTML = `
           <div class="tier-card-header">
-            <span class="tier-card-title">${tierTitles[tierKey] || tierKey}</span>
+            <span class="tier-card-title">${escapeHtml(tierTitles[tierKey] || tierKey)}</span>
             <span class="badge badge-sm">${goalsList.length}</span>
           </div>
           ${listHtml}

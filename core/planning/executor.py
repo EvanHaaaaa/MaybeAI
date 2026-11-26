@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from core.planning.models import Goal, GoalCategory, GoalStatus, GoalTier, Subtask
 from core.planning.engine import GoalEngine
+from core.planning.replanner import MAX_REPLAN_ATTEMPTS
 from core.desktop.obs_client import DEFAULT_SCENE_MAP
 
 
@@ -568,6 +569,50 @@ class AutonomousMissionExecutor:
             except Exception as exc:
                 reason = str(exc) or f"{plan['domain']} execution failed"
                 self.last_error = reason
+                if active_sub.attempts >= MAX_REPLAN_ATTEMPTS:
+                    active_sub.mark_failed(reason)
+                    active_goal.recalculate_progress()
+                    active_goal.status = GoalStatus.FAILED.value
+                    active_goal.reflection = (
+                        f"Subtask '{active_sub.title}' gagal setelah {active_sub.attempts} percobaan: {reason}."
+                    )
+                    fail_speech = (
+                        f"[emotion: sad] Aduh chat, misi '{active_goal.title}' gagal setelah "
+                        f"{MAX_REPLAN_ATTEMPTS} kali percobaan ({reason}). Kita hentikan dulu misi ini ya. [action: sigh]"
+                    )
+                    if self.mood_engine and hasattr(self.mood_engine, "apply_stimulus"):
+                        self.mood_engine.apply_stimulus("goal_strategy_failed")
+                    await self._speak(fail_speech)
+                    self.goal_engine.save()
+
+                    step_payload = {
+                        "status": "failed",
+                        "executed": False,
+                        "replanned": False,
+                        "failed": True,
+                        "plan_id": plan["plan_id"],
+                        "domain": plan["domain"],
+                        "action_name": plan["action_name"],
+                        "goal_id": active_goal.id,
+                        "goal_title": active_goal.title,
+                        "failed_subtask_id": active_sub.id,
+                        "failed_subtask_title": active_sub.title,
+                        "attempts": active_sub.attempts,
+                        "error": reason,
+                        "new_subtask": None,
+                        "replan_speech": fail_speech,
+                        "timestamp": time.time(),
+                    }
+                    self._record_step(step_payload)
+
+                    await self._emit_event("goal.updated", self.goal_engine.get_state())
+                    await self._emit_event("mission.step", step_payload)
+                    await self._emit_event("mission.status", self.get_status())
+                    return {
+                        **step_payload,
+                        "goal": active_goal.to_dict(),
+                    }
+
                 new_sub, replan_speech = self.goal_engine.fail_and_replan_active_subtask(reason)
                 if self.mood_engine and hasattr(self.mood_engine, "apply_stimulus"):
                     self.mood_engine.apply_stimulus("goal_strategy_failed")

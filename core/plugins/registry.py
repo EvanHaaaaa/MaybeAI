@@ -331,6 +331,7 @@ class PluginRegistry:
         plugins_dir: str = "plugins",
         enabled_plugins: Optional[List[str]] = None,
         hook_timeout_sec: float = 5.0,
+        startup_timeout_sec: float = 5.0,
         enabled: bool = True,
         sandbox_mode: str = "subprocess",
         event_bus: Optional[Any] = None,
@@ -344,6 +345,7 @@ class PluginRegistry:
             list(enabled_plugins) if enabled_plugins is not None else ["word_chain"]
         )
         self.hook_timeout_sec: float = max(0.1, float(hook_timeout_sec or 5.0))
+        self.startup_timeout_sec: float = max(0.5, float(startup_timeout_sec or 5.0))
         self.sandbox_mode: str = self._normalize_sandbox_mode(sandbox_mode)
         self.event_bus = event_bus
         self._speak_cb = speak_cb
@@ -394,6 +396,8 @@ class PluginRegistry:
             self.enabled_plugins = [str(p).strip() for p in cfg["enabled_plugins"] if str(p).strip()]
         if "hook_timeout_sec" in cfg:
             self.hook_timeout_sec = max(0.1, float(cfg.get("hook_timeout_sec", 5.0) or 5.0))
+        if "startup_timeout_sec" in cfg:
+            self.startup_timeout_sec = max(0.5, float(cfg.get("startup_timeout_sec", 5.0) or 5.0))
         if "sandbox_mode" in cfg and cfg.get("sandbox_mode") is not None:
             self.sandbox_mode = self._normalize_sandbox_mode(cfg.get("sandbox_mode"))
 
@@ -544,7 +548,7 @@ class PluginRegistry:
             await client.start()
             raw_manifest = await asyncio.wait_for(
                 client.call("manifest", {}),
-                timeout=self.hook_timeout_sec,
+                timeout=self.startup_timeout_sec,
             )
             manifest = PluginManifest(**raw_manifest)
             manifest.validate()
@@ -553,6 +557,15 @@ class PluginRegistry:
         except Exception:
             await client.kill_and_cleanup()
             raise
+
+    async def _evict_dead_subprocess(self, plugin_id: str, meta: Optional[Dict[str, Any]] = None) -> None:
+        """Evict a dead or crashed sandboxed subprocess client from _subprocesses."""
+        client = self._subprocesses.pop(plugin_id, None)
+        if client is not None:
+            await client.kill_and_cleanup()
+        if meta is not None and meta.get("loaded"):
+            meta["loaded"] = False
+            self._rebuild_command_map()
 
     async def _load_plugin_instance(self, plugin_id: str) -> bool:
         meta = self._metadata.get(plugin_id)
@@ -568,6 +581,8 @@ class PluginRegistry:
             source_path = Path(src["source_path"])
             client = self._subprocesses.get(plugin_id)
             if client is None or not client.is_running:
+                if client is not None:
+                    await self._evict_dead_subprocess(plugin_id, meta)
                 client = self._create_sandbox_client(plugin_id=plugin_id, source_path=source_path)
                 self._subprocesses[plugin_id] = client
             try:
@@ -854,6 +869,8 @@ class PluginRegistry:
         if meta.get("sandboxed"):
             client = self._subprocesses.get(plugin_id)
             if client is None or not client.is_running:
+                if client is not None:
+                    await self._evict_dead_subprocess(plugin_id, meta)
                 return False, None
             try:
                 res = await asyncio.wait_for(
@@ -878,15 +895,14 @@ class PluginRegistry:
                 )
                 return True, response
             except asyncio.TimeoutError:
-                await client.kill_and_cleanup()
-                self._subprocesses.pop(plugin_id, None)
-                meta["loaded"] = False
-                self._rebuild_command_map()
+                await self._evict_dead_subprocess(plugin_id, meta)
                 meta["error_count"] = int(meta.get("error_count", 0)) + 1
                 meta["last_error"] = f"Command '{cmd}' timed out after {self.hook_timeout_sec}s"
                 print(f"[PluginRegistry] {meta['last_error']} (plugin={plugin_id})")
                 return True, None
             except Exception as exc:
+                if not client.is_running:
+                    await self._evict_dead_subprocess(plugin_id, meta)
                 meta["error_count"] = int(meta.get("error_count", 0)) + 1
                 err_name = getattr(exc, "error_type", type(exc).__name__)
                 meta["last_error"] = f"{err_name}: {exc}"
@@ -950,6 +966,8 @@ class PluginRegistry:
             if meta.get("sandboxed"):
                 client = self._subprocesses.get(plugin_id)
                 if client is None or not client.is_running:
+                    if client is not None:
+                        await self._evict_dead_subprocess(plugin_id, meta)
                     continue
                 try:
                     res = await asyncio.wait_for(
@@ -962,14 +980,13 @@ class PluginRegistry:
                     if isinstance(res, dict) and isinstance(res.get("state"), dict):
                         self._plugin_states[plugin_id] = dict(res["state"])
                 except asyncio.TimeoutError:
-                    await client.kill_and_cleanup()
-                    self._subprocesses.pop(plugin_id, None)
-                    meta["loaded"] = False
-                    self._rebuild_command_map()
+                    await self._evict_dead_subprocess(plugin_id, meta)
                     meta["error_count"] = int(meta.get("error_count", 0)) + 1
                     meta["last_error"] = f"Event '{event_name}' timed out after {self.hook_timeout_sec}s"
                     print(f"[PluginRegistry] {meta['last_error']} (plugin={plugin_id})")
                 except Exception as exc:
+                    if not client.is_running:
+                        await self._evict_dead_subprocess(plugin_id, meta)
                     meta["error_count"] = int(meta.get("error_count", 0)) + 1
                     err_name = getattr(exc, "error_type", type(exc).__name__)
                     meta["last_error"] = f"{err_name}: {exc}"

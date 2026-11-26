@@ -595,13 +595,18 @@ class TTSEngine:
                     await self._invoke_callback(on_mouth_update, 0.0)
                 except Exception:
                     pass
-            if self._stop_requested:
-                return "".join(raw_parts).strip()
             raise
         finally:
             self._is_speaking = False
             self._active_stream_tasks = []
             self._active_mouth_callback = None
+            if self._tts_channel is not None:
+                try:
+                    self._tts_channel.stop()
+                except Exception:
+                    pass
+                self._tts_channel = None
+            self._tts_sound = None
             # Drain any unconsumed items in the queue and clean up all temp files
             while not audio_queue.empty():
                 try:

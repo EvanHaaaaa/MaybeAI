@@ -99,18 +99,22 @@ class Goal:
     completed_at: Optional[float] = None
 
     def recalculate_progress(self) -> float:
-        """Recalculates overall goal progress based on subtasks."""
-        if not self.subtasks:
+        """Recalculates overall goal progress based on active (non-replanned) subtasks."""
+        active_subtasks = [
+            s for s in self.subtasks
+            if s.status != GoalStatus.REPLANNED.value
+        ]
+        if not active_subtasks:
             self.progress = 1.0 if self.status == GoalStatus.COMPLETED.value else 0.0
             return self.progress
 
-        total_prog = sum(s.progress for s in self.subtasks)
-        self.progress = round(total_prog / len(self.subtasks), 2)
-        if all(s.status == GoalStatus.COMPLETED.value for s in self.subtasks):
+        total_prog = sum(s.progress for s in active_subtasks)
+        self.progress = round(total_prog / len(active_subtasks), 2)
+        if all(s.status == GoalStatus.COMPLETED.value for s in active_subtasks):
             self.status = GoalStatus.COMPLETED.value
             if not self.completed_at:
                 self.completed_at = time.time()
-        elif any(s.status == GoalStatus.IN_PROGRESS.value for s in self.subtasks):
+        elif any(s.status == GoalStatus.IN_PROGRESS.value for s in active_subtasks):
             self.status = GoalStatus.IN_PROGRESS.value
         return self.progress
 

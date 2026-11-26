@@ -89,10 +89,13 @@ class Singer:
     def stop(self):
         """Immediately aborts current song."""
         self._stop_requested = True
-        try:
-            if self._active_channel is not None:
+        if self._active_channel is not None:
+            try:
                 self._active_channel.stop()
-                self._active_channel = None
+            except Exception:
+                pass
+            self._active_channel = None
+        try:
             if pygame.mixer.get_init():
                 pygame.mixer.music.stop()
         except Exception:
@@ -249,7 +252,18 @@ class Singer:
             return False
         finally:
             self.is_singing = False
-            self._active_channel = None
+            if self._active_channel is not None:
+                try:
+                    self._active_channel.stop()
+                except Exception:
+                    pass
+                self._active_channel = None
+            if use_server_audio:
+                try:
+                    if pygame.mixer.get_init():
+                        pygame.mixer.music.stop()
+                except Exception:
+                    pass
             for vf in list(created_vocal_files):
                 self._cleanup_vocal_file(vf)
             if on_mouth_update:

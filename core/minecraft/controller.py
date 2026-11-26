@@ -196,6 +196,9 @@ class MinecraftController:
             )
             await asyncio.sleep(1.5)
 
+        if self.bridge_ws is not None and getattr(self.bridge_ws, "closed", False):
+            self.bridge_ws = None
+
         if self.bridge_ws is None:
             for attempt in range(4):
                 try:
@@ -209,138 +212,160 @@ class MinecraftController:
                         await asyncio.sleep(0.8)
                     else:
                         print(f"[Minecraft] Failed connecting to bridge ws://localhost:25566: {e}")
+                        self.connection_status = "disconnected"
+                        self.is_active = False
+                        self.viewer_url = None
+                        await self.emit_state()
 
     async def _listen_bridge(self):
         """Listens for real-time events from the Mineflayer bot."""
-        while self.bridge_ws:
-            try:
-                msg_raw = await self.bridge_ws.recv()
-                event = json.loads(msg_raw)
-                event_type = event.get("type")
-                data = event.get("data", {})
+        try:
+            while self.bridge_ws:
+                try:
+                    msg_raw = await self.bridge_ws.recv()
+                    event = json.loads(msg_raw)
+                    event_type = event.get("type")
+                    data = event.get("data", {})
 
-                if event_type == "bot_spawned":
-                    self.connection_status = "connected"
-                    self.is_active = True
-                    self.pos = data.get("pos", self.pos)
-                    self.health = data.get("health", 20)
-                    self.food = data.get("food", 20)
-                    print(f"[Minecraft] Eve spawned in server! Pos: {self.pos}")
-                    await self.emit_commentary("[emotion: happy] I'm in! Eve has spawned into the world! Time to explore. [action: wink]")
+                    if event_type == "bot_spawned":
+                        self.connection_status = "connected"
+                        self.is_active = True
+                        self.pos = data.get("pos", self.pos)
+                        self.health = data.get("health", 20)
+                        self.food = data.get("food", 20)
+                        print(f"[Minecraft] Eve spawned in server! Pos: {self.pos}")
+                        await self.emit_commentary("[emotion: happy] I'm in! Eve has spawned into the world! Time to explore. [action: wink]")
+                        await self.emit_state()
+
+                    elif event_type == "player_nearby":
+                        await self.player_joined_proximity(data.get("username", ""), data.get("distance", 5.0))
+
+                    elif event_type == "player_chat":
+                        sender = data.get("username", "")
+                        message = data.get("message", "")
+                        if self.on_in_game_chat_callback and sender and message:
+                            res = self.on_in_game_chat_callback(sender, message)
+                            if asyncio.iscoroutine(res):
+                                await res
+                        else:
+                            await self.player_sent_chat(sender, message)
+
+                    elif event_type == "casual_action":
+                        act = data.get("action", "")
+                        if act == "picked_flower":
+                            fl = data.get("flower", "bunga")
+                            await self.emit_commentary(f"[emotion: happy] Aku nemu bunga {fl}! Cantik banget buat ditaruh di base.")
+                        elif act == "observed_animal":
+                            an = data.get("animal", "hewan")
+                            await self.emit_commentary(f"[emotion: happy] Liat deh chat, ada {an} lucu! Mau aku pelihara nggak ya?")
+                        elif act == "picked_item":
+                            await self.emit_commentary("[emotion: smug] Ooh, ada item gratis jatuh di tanah! Masuk ke kantongku.")
+                        elif act == "gifted_player":
+                            target = data.get("player", "Player")
+                            item_name = data.get("item", "hadiah")
+                            gift_reactions = [
+                                f"[emotion: blush] Aku baru aja ngasih {item_name} ke {target}! Chat, manis banget kan aku hari ini? [action: giggle]",
+                                f"[emotion: happy] Spesial buat {target}, aku kasih {item_name}! Disimpan baik-baik ya! [action: wink]",
+                                f"[emotion: smug] Nih {target}, aku sedekahin {item_name}. Bersyukurlah kepada AI idol-mu!"
+                            ]
+                            import random
+                            await self.emit_commentary(random.choice(gift_reactions))
+                        await self.emit_state()
+
+                    elif event_type == "bot_hurt":
+                        await self.player_attacked_bot(data.get("source", "danger"))
+
+                    elif event_type == "speedrun_action":
+                        action_type = data.get("action", "")
+                        reaction = self.speedrun_agent.on_speedrun_action(action_type, data)
+                        if reaction:
+                            await self.emit_commentary(reaction)
+                        await self.emit_state()
+
+                    elif event_type == "speedrun_phase_completed":
+                        next_p = data.get("nextPhase")
+                        phase, comment = self.speedrun_agent.advance_phase(direct_phase=next_p)
+                        await self.emit_commentary(comment)
+                        await self.emit_state()
+
+                    elif event_type in ["guard_started", "guard_mode_activated"]:
+                        tgt = data.get("target") or "Player"
+                        self.current_mode = "guard"
+                        self.guard_target = tgt
+                        comment = self.guard_agent.on_guard_started(tgt)
+                        await self.emit_commentary(comment)
+                        await self.emit_state()
+
+                    elif event_type == "guard_threat_detected":
+                        mob = data.get("mob", "monster")
+                        tgt = data.get("targetPlayer", self.guard_target)
+                        is_creeper = data.get("isCreeper", False)
+                        comment = self.guard_agent.on_threat_detected(mob, tgt, is_creeper=is_creeper)
+                        await self.emit_commentary(comment)
+                        await self.emit_state()
+
+                    elif event_type == "guard_mob_eliminated":
+                        mob = data.get("mob", "monster")
+                        tgt = data.get("targetPlayer", self.guard_target)
+                        comment = self.guard_agent.on_mob_eliminated(mob, tgt)
+                        await self.emit_commentary(comment)
+                        await self.emit_state()
+
+                    elif event_type == "guard_player_hurt":
+                        attacker = data.get("attacker", "hostile")
+                        tgt = data.get("target", self.guard_target)
+                        comment = self.guard_agent.on_player_hurt(attacker, tgt)
+                        await self.emit_commentary(comment)
+                        await self.emit_state()
+
+                    elif event_type == "mc_telemetry":
+                        self.health = data.get("health", self.health)
+                        self.food = data.get("food", self.food)
+                        self.pos = data.get("pos", self.pos)
+                        if "nearby_players" in data and isinstance(data["nearby_players"], list):
+                            self.nearby_players = data["nearby_players"]
+                        self.latest_telemetry = dict(data)
+                        if self.on_telemetry_callback:
+                            res = self.on_telemetry_callback(self.latest_telemetry)
+                            if asyncio.iscoroutine(res):
+                                await res
+                        await self.emit_state()
+
+                    elif event_type == "viewer_started":
+                        self.viewer_url = data.get("url", "http://localhost:3007")
+                        print(f"[Minecraft] Live 3D POV window available at: {self.viewer_url}")
+                        await self.emit_state()
+
+                    elif event_type in ["bot_kicked", "bot_error", "bot_disconnected"]:
+                        self.connection_status = "disconnected"
+                        self.is_active = False
+                        self.viewer_url = None
+                        reason = data.get("reason") or data.get("message") or "Connection dropped"
+                        print(f"[Minecraft] Bot disconnected from server: {reason}")
+                        await self.emit_commentary(f"[emotion: sad] Disconnected from server: {reason}")
+                        await self.emit_state()
+
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    print(f"[Minecraft Bridge Reader] Error or disconnect: {e}")
+                    break
+        finally:
+            ws = self.bridge_ws
+            self.bridge_ws = None
+            if ws is not None:
+                try:
+                    await ws.close()
+                except Exception:
+                    pass
+            if self.connection_status != "disconnected" or self.is_active or self.viewer_url is not None:
+                self.connection_status = "disconnected"
+                self.is_active = False
+                self.viewer_url = None
+                try:
                     await self.emit_state()
-
-                elif event_type == "player_nearby":
-                    await self.player_joined_proximity(data.get("username", ""), data.get("distance", 5.0))
-
-                elif event_type == "player_chat":
-                    sender = data.get("username", "")
-                    message = data.get("message", "")
-                    if self.on_in_game_chat_callback and sender and message:
-                        res = self.on_in_game_chat_callback(sender, message)
-                        if asyncio.iscoroutine(res):
-                            await res
-                    else:
-                        await self.player_sent_chat(sender, message)
-
-                elif event_type == "casual_action":
-                    act = data.get("action", "")
-                    if act == "picked_flower":
-                        fl = data.get("flower", "bunga")
-                        await self.emit_commentary(f"[emotion: happy] Aku nemu bunga {fl}! Cantik banget buat ditaruh di base.")
-                    elif act == "observed_animal":
-                        an = data.get("animal", "hewan")
-                        await self.emit_commentary(f"[emotion: happy] Liat deh chat, ada {an} lucu! Mau aku pelihara nggak ya?")
-                    elif act == "picked_item":
-                        await self.emit_commentary("[emotion: smug] Ooh, ada item gratis jatuh di tanah! Masuk ke kantongku.")
-                    elif act == "gifted_player":
-                        target = data.get("player", "Player")
-                        item_name = data.get("item", "hadiah")
-                        gift_reactions = [
-                            f"[emotion: blush] Aku baru aja ngasih {item_name} ke {target}! Chat, manis banget kan aku hari ini? [action: giggle]",
-                            f"[emotion: happy] Spesial buat {target}, aku kasih {item_name}! Disimpan baik-baik ya! [action: wink]",
-                            f"[emotion: smug] Nih {target}, aku sedekahin {item_name}. Bersyukurlah kepada AI idol-mu!"
-                        ]
-                        import random
-                        await self.emit_commentary(random.choice(gift_reactions))
-                    await self.emit_state()
-
-                elif event_type == "bot_hurt":
-                    await self.player_attacked_bot(data.get("source", "danger"))
-
-                elif event_type == "speedrun_action":
-                    action_type = data.get("action", "")
-                    reaction = self.speedrun_agent.on_speedrun_action(action_type, data)
-                    if reaction:
-                        await self.emit_commentary(reaction)
-                    await self.emit_state()
-
-                elif event_type == "speedrun_phase_completed":
-                    next_p = data.get("nextPhase")
-                    phase, comment = self.speedrun_agent.advance_phase(direct_phase=next_p)
-                    await self.emit_commentary(comment)
-                    await self.emit_state()
-
-                elif event_type in ["guard_started", "guard_mode_activated"]:
-                    tgt = data.get("target") or "Player"
-                    self.current_mode = "guard"
-                    self.guard_target = tgt
-                    comment = self.guard_agent.on_guard_started(tgt)
-                    await self.emit_commentary(comment)
-                    await self.emit_state()
-
-                elif event_type == "guard_threat_detected":
-                    mob = data.get("mob", "monster")
-                    tgt = data.get("targetPlayer", self.guard_target)
-                    is_creeper = data.get("isCreeper", False)
-                    comment = self.guard_agent.on_threat_detected(mob, tgt, is_creeper=is_creeper)
-                    await self.emit_commentary(comment)
-                    await self.emit_state()
-
-                elif event_type == "guard_mob_eliminated":
-                    mob = data.get("mob", "monster")
-                    tgt = data.get("targetPlayer", self.guard_target)
-                    comment = self.guard_agent.on_mob_eliminated(mob, tgt)
-                    await self.emit_commentary(comment)
-                    await self.emit_state()
-
-                elif event_type == "guard_player_hurt":
-                    attacker = data.get("attacker", "hostile")
-                    tgt = data.get("target", self.guard_target)
-                    comment = self.guard_agent.on_player_hurt(attacker, tgt)
-                    await self.emit_commentary(comment)
-                    await self.emit_state()
-
-                elif event_type == "mc_telemetry":
-                    self.health = data.get("health", self.health)
-                    self.food = data.get("food", self.food)
-                    self.pos = data.get("pos", self.pos)
-                    if "nearby_players" in data and isinstance(data["nearby_players"], list):
-                        self.nearby_players = data["nearby_players"]
-                    self.latest_telemetry = dict(data)
-                    if self.on_telemetry_callback:
-                        res = self.on_telemetry_callback(self.latest_telemetry)
-                        if asyncio.iscoroutine(res):
-                            await res
-                    await self.emit_state()
-
-                elif event_type == "viewer_started":
-                    self.viewer_url = data.get("url", "http://localhost:3007")
-                    print(f"[Minecraft] Live 3D POV window available at: {self.viewer_url}")
-                    await self.emit_state()
-
-                elif event_type in ["bot_kicked", "bot_error", "bot_disconnected"]:
-                    self.connection_status = "disconnected"
-                    self.is_active = False
-                    self.viewer_url = None
-                    reason = data.get("reason") or data.get("message") or "Connection dropped"
-                    print(f"[Minecraft] Bot disconnected from server: {reason}")
-                    await self.emit_commentary(f"[emotion: sad] Disconnected from server: {reason}")
-                    await self.emit_state()
-
-            except Exception as e:
-                print(f"[Minecraft Bridge Reader] Error or disconnect: {e}")
-                break
-        self.bridge_ws = None
+                except Exception:
+                    pass
 
     async def connect_to_server(self, server_id: Optional[str] = None) -> str:
         """Connect bot to designated server."""
@@ -374,8 +399,21 @@ class MinecraftController:
                 "version": version,
                 "mode": self.current_mode
             }
-            await self.bridge_ws.send(json.dumps(cmd))
-            print(f"[Minecraft] Sent connect command to bridge for {host}:{port}")
+            try:
+                await self.bridge_ws.send(json.dumps(cmd))
+                print(f"[Minecraft] Sent connect command to bridge for {host}:{port}")
+            except Exception as e:
+                print(f"[Minecraft] Failed sending connect command: {e}")
+                self.bridge_ws = None
+                self.connection_status = "disconnected"
+                self.is_active = False
+                self.viewer_url = None
+                await self.emit_state()
+        else:
+            self.connection_status = "disconnected"
+            self.is_active = False
+            self.viewer_url = None
+            await self.emit_state()
 
         return speech
 
@@ -383,12 +421,28 @@ class MinecraftController:
         """Disconnect bot from active server."""
         self.connection_status = "disconnected"
         self.is_active = False
+        self.viewer_url = None
 
         if self.bridge_ws:
             try:
                 await self.bridge_ws.send(json.dumps({"action": "disconnect_server"}))
             except Exception:
                 pass
+            try:
+                await self.bridge_ws.close()
+            except Exception:
+                pass
+            self.bridge_ws = None
+
+        if self.bridge_task and not self.bridge_task.done():
+            self.bridge_task.cancel()
+            try:
+                await self.bridge_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
+            self.bridge_task = None
 
         if self.bot_process and self.bot_process.poll() is None:
             try:
@@ -410,6 +464,11 @@ class MinecraftController:
                 await self.bridge_ws.send(json.dumps(payload))
             except Exception as e:
                 print(f"[Minecraft Command Error] {e}")
+                self.bridge_ws = None
+                self.connection_status = "disconnected"
+                self.is_active = False
+                self.viewer_url = None
+                await self.emit_state()
 
     async def send_chat(self, message: str):
         """Send message into Minecraft in-game chat."""

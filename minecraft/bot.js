@@ -4,8 +4,11 @@
  * pathfinding, player following, and bridges events to Python via WebSocket.
  */
 process.on('uncaughtException', (err) => {
-  // Catch non-fatal packet parsing quirks on modern Paper servers
-  console.log('[Mineflayer SafeGuard] Handled packet warning:', err.message);
+  // Log full error details rather than silently swallowing
+  console.error('[Mineflayer UncaughtException]', err && err.stack ? err.stack : err);
+  try {
+    sendToPython('bot_error', { message: err && err.message ? err.message : String(err) });
+  } catch (e) {}
 });
 
 const mineflayer = require('mineflayer');
@@ -55,18 +58,46 @@ let followingTarget = null;
 let isWandering = true;
 let autonomyInterval = null;
 let telemetryInterval = null;
+let proximityInterval = null;
+let danceInterval = null;
 let telemetryDebounceTimer = null;
 let speedrunRunner = null;
 let casualRunner = null;
 let guardRunner = null;
 let guardTarget = null;
 
+function clearAllIntervals() {
+  if (autonomyInterval) { clearInterval(autonomyInterval); autonomyInterval = null; }
+  if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
+  if (proximityInterval) { clearInterval(proximityInterval); proximityInterval = null; }
+  if (danceInterval) { clearInterval(danceInterval); danceInterval = null; }
+  if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
+}
+
+function cleanupBotResources() {
+  if (bot && bot.viewer && bot.viewer.close) {
+    try { bot.viewer.close(); } catch (e) {}
+  }
+  if (speedrunRunner) speedrunRunner.stop();
+  if (casualRunner) casualRunner.stop();
+  if (guardRunner) guardRunner.stop();
+  clearAllIntervals();
+}
+
 // Initialize WebSocket Bridge Server for Python on 25566
 const wsServer = new WebSocket.Server({ port: config.bridge_ws_port });
-wsServer.on('error', (err) => {
-  console.error('[Minecraft Bridge Error]', err.message);
+wsServer.on('listening', () => {
+  console.log(`[Minecraft Bridge] WebSocket bridge listening on ws://localhost:${config.bridge_ws_port}`);
 });
-console.log(`[Minecraft Bridge] WebSocket bridge listening on ws://localhost:${config.bridge_ws_port}`);
+wsServer.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.error(`[Minecraft Bridge Error] Port ${config.bridge_ws_port} is already in use (EADDRINUSE). Exiting gracefully.`);
+    cleanupBotResources();
+    process.exit(1);
+    return;
+  }
+  console.error('[Minecraft Bridge Error]', err && err.message ? err.message : err);
+});
 
 wsServer.on('connection', (ws) => {
   console.log('[Minecraft Bridge] Python Controller connected to bridge!');
@@ -265,8 +296,8 @@ function createBot(host, port, username, version, mode) {
 
   console.log(`[Mineflayer] Connecting to ${targetHost}:${targetPort} as ${targetUser} (v${targetVer}, mode=${currentMode})...`);
 
+  cleanupBotResources();
   if (bot) {
-    if (bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
     try { bot.quit(); } catch (e) {}
     bot = null;
   }
@@ -414,7 +445,8 @@ function createBot(host, port, username, version, mode) {
   });
 
   // Periodic proximity check for nearby players
-  setInterval(() => {
+  if (proximityInterval) clearInterval(proximityInterval);
+  proximityInterval = setInterval(() => {
     if (!bot || !bot.entity) return;
 
     for (const entityName in bot.entities) {
@@ -433,15 +465,7 @@ function createBot(host, port, username, version, mode) {
 
   bot.on('kicked', (reason) => {
     console.log('[Mineflayer] Kicked from server:', reason);
-    if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
-    if (speedrunRunner) speedrunRunner.stop();
-    if (casualRunner) casualRunner.stop();
-    if (guardRunner) guardRunner.stop();
-    if (autonomyInterval) clearInterval(autonomyInterval);
-    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
-    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
-    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
-    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
+    cleanupBotResources();
     const reasonStr = typeof reason === 'object' ? JSON.stringify(reason) : String(reason);
     sendToPython('bot_kicked', { reason: reasonStr });
   });
@@ -453,15 +477,7 @@ function createBot(host, port, username, version, mode) {
 
   bot.on('end', (reason) => {
     console.log('[Mineflayer] Bot session ended:', reason);
-    if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
-    if (speedrunRunner) speedrunRunner.stop();
-    if (casualRunner) casualRunner.stop();
-    if (guardRunner) guardRunner.stop();
-    if (autonomyInterval) clearInterval(autonomyInterval);
-    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
-    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
-    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
-    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
+    cleanupBotResources();
     sendToPython('bot_disconnected', { reason: String(reason) });
   });
 }
@@ -474,13 +490,7 @@ function handlePythonCommand(cmd) {
 
   if (cmd.action === 'disconnect_server') {
     console.log('[Mineflayer] Disconnecting bot from server...');
-    if (bot && bot.viewer && bot.viewer.close) { try { bot.viewer.close(); } catch (e) {} }
-    if (speedrunRunner) speedrunRunner.stop();
-    if (casualRunner) casualRunner.stop();
-    if (guardRunner) guardRunner.stop();
-    if (autonomyInterval) clearInterval(autonomyInterval);
-    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
-    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
+    cleanupBotResources();
     if (bot) {
       try { bot.quit(); } catch (e) {}
       bot = null;
@@ -587,14 +597,16 @@ function handlePythonCommand(cmd) {
       }
     }
   } else if (cmd.action === 'dance') {
+    if (danceInterval) clearInterval(danceInterval);
     let count = 0;
-    const danceTimer = setInterval(() => {
+    danceInterval = setInterval(() => {
       count++;
       bot.setControlState('sneak', count % 2 === 1);
       bot.setControlState('jump', count % 2 === 0);
       try { bot.swingArm(count % 2 === 0 ? 'right' : 'left'); } catch (e) {}
       if (count >= 6) {
-        clearInterval(danceTimer);
+        clearInterval(danceInterval);
+        danceInterval = null;
         bot.setControlState('sneak', false);
         bot.setControlState('jump', false);
       }

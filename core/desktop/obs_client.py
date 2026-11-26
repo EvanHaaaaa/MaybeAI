@@ -164,6 +164,8 @@ class OBSWebSocketClient:
             }
         except Exception as exc:
             self.last_error = str(exc)
+            self.is_connected = False
+            self._client = None
             return {
                 "success": False,
                 "scene": target,
@@ -202,6 +204,8 @@ class OBSWebSocketClient:
             }
         except Exception as exc:
             self.last_error = str(exc)
+            self.is_connected = False
+            self._client = None
             return {
                 "success": False,
                 "is_streaming": self.is_streaming,
@@ -225,6 +229,8 @@ class OBSWebSocketClient:
             return {"success": True, "active": True, "connected": True}
         except Exception as exc:
             self.last_error = str(exc)
+            self.is_connected = False
+            self._client = None
             return {
                 "success": False,
                 "active": self.replay_buffer_active,
@@ -246,6 +252,8 @@ class OBSWebSocketClient:
             return {"success": True, "connected": True}
         except Exception as exc:
             self.last_error = str(exc)
+            self.is_connected = False
+            self._client = None
             return {
                 "success": False,
                 "connected": self.is_connected,
@@ -294,6 +302,8 @@ class OBSWebSocketClient:
             }
         except Exception as exc:
             self.last_error = str(exc)
+            self.is_connected = False
+            self._client = None
             return {
                 "success": False,
                 "scene": target_scene,

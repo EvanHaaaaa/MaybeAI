@@ -8,18 +8,30 @@ from typing import Any, Dict, List, Optional
 
 
 def _escape_ffmpeg_filter_path(path_str: str) -> str:
-    """Escape a filesystem path for ffmpeg's subtitles filter."""
+    """Escape a filesystem path for ffmpeg's subtitles filtergraph."""
     normalized = str(path_str).replace("\\", "/")
-    normalized = normalized.replace(":", r"\:")
-    normalized = normalized.replace("'", r"\'")
+    for ch in (":", "'", ",", "[", "]", ";"):
+        normalized = normalized.replace(ch, f"\\{ch}")
     return normalized
 
 
 class ClipPipeline:
     """Converts horizontal stream recordings into 9:16 vertical Shorts/TikTok clips."""
 
-    def __init__(self, clips_dir: str = "data/clips"):
+    def __init__(self, clips_dir: str = "data/clips", ffmpeg_timeout_sec: float = 120.0):
         self.clips_dir = Path(clips_dir)
+        self.ffmpeg_timeout_sec = max(1.0, float(ffmpeg_timeout_sec or 120.0))
+
+    def _resolve_confined_path(self, raw_path: str) -> Path:
+        """Resolve a path and verify it stays within the configured clips directory."""
+        base_dir = self.clips_dir.resolve()
+        candidate = Path(raw_path)
+        if not candidate.is_absolute():
+            candidate = base_dir / candidate
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(base_dir):
+            raise ValueError(f"Path '{raw_path}' escapes configured clips directory '{base_dir}'")
+        return resolved
 
     def build_vertical_clip_cmd(
         self,
@@ -49,6 +61,7 @@ class ClipPipeline:
 
         return [
             "ffmpeg",
+            "-nostdin",
             "-y",
             "-ss",
             f"{start:.3f}",
@@ -80,26 +93,39 @@ class ClipPipeline:
         start_sec: float = 0.0,
         duration_sec: float = 30.0,
         subtitle_path: Optional[str] = None,
+        timeout_sec: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Execute ffmpeg asynchronously via create_subprocess_exec (no shell=True)
         and return structured result metadata.
         """
-        in_path = Path(input_path)
-        if output_path is None:
-            self.clips_dir.mkdir(parents=True, exist_ok=True)
-            stamp = int(time.time())
-            out_path = self.clips_dir / f"{in_path.stem}_vertical_{stamp}.mp4"
-        else:
-            out_path = Path(output_path)
-            out_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            in_path = self._resolve_confined_path(input_path)
+            if output_path is None:
+                self.clips_dir.mkdir(parents=True, exist_ok=True)
+                stamp = int(time.time())
+                out_path = self.clips_dir.resolve() / f"{in_path.stem}_vertical_{stamp}.mp4"
+            else:
+                out_path = self._resolve_confined_path(output_path)
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+
+            safe_subtitle: Optional[str] = None
+            if subtitle_path is not None:
+                safe_subtitle = str(self._resolve_confined_path(subtitle_path))
+        except ValueError as exc:
+            return {
+                "success": False,
+                "output_path": str(output_path or ""),
+                "command": [],
+                "error": str(exc),
+            }
 
         cmd = self.build_vertical_clip_cmd(
             input_path=str(in_path),
             output_path=str(out_path),
             start_sec=start_sec,
             duration_sec=duration_sec,
-            subtitle_path=subtitle_path,
+            subtitle_path=safe_subtitle,
         )
 
         if not shutil.which("ffmpeg"):
@@ -118,14 +144,20 @@ class ClipPipeline:
                 "error": f"Input file not found: {in_path}",
             }
 
+        effective_timeout = max(1.0, float(timeout_sec if timeout_sec is not None else self.ffmpeg_timeout_sec))
+        proc = None
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            _stdout, stderr = await proc.communicate()
+            _stdout, stderr = await asyncio.wait_for(
+                proc.communicate(),
+                timeout=effective_timeout,
+            )
             if proc.returncode != 0:
+                out_path.unlink(missing_ok=True)
                 err_text = stderr.decode("utf-8", errors="replace").strip()
                 return {
                     "success": False,
@@ -139,7 +171,22 @@ class ClipPipeline:
                 "command": cmd,
                 "error": None,
             }
+        except asyncio.TimeoutError:
+            if proc is not None and proc.returncode is None:
+                try:
+                    proc.kill()
+                    await proc.wait()
+                except Exception:
+                    pass
+            out_path.unlink(missing_ok=True)
+            return {
+                "success": False,
+                "output_path": str(out_path),
+                "command": cmd,
+                "error": f"ffmpeg timed out after {effective_timeout}s",
+            }
         except Exception as exc:
+            out_path.unlink(missing_ok=True)
             return {
                 "success": False,
                 "output_path": str(out_path),

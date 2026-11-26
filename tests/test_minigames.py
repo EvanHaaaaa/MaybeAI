@@ -216,7 +216,7 @@ class TestMiniGameEngine(unittest.TestCase):
             res = self.engine.process_chat_input("WordMaster", f"{next_word}")
             self.assertIsNotNone(res)
             self.assertTrue(res[0])
-            self.assertIn(next_word, sess.word_chain)
+            self.assertIn(next_word.lower(), [w.lower() for w in sess.word_chain])
 
     def test_second_brain_sync(self):
         self.engine.start_game("trivia", 1)

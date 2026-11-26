@@ -3,8 +3,9 @@ import inspect
 import os
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from typing import Any, Awaitable, Callable, Deque, Dict, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -13,6 +14,7 @@ from core.collab.protocol import CollabEnvelope
 
 VALID_FLOOR_STATES: Tuple[str, ...] = (
     "idle",
+    "thinking",
     "speaking",
     "yielding",
     "listening",
@@ -73,6 +75,9 @@ class CollabManager:
         self._on_game_move: Optional[Callable[[CollabEnvelope], Any]] = on_game_move
         self._reply_tasks: Set[asyncio.Task] = set()
         self._lock = asyncio.Lock()
+        self.max_timestamp_skew_sec: float = 60.0
+        self._nonce_cache_maxsize: int = 1024
+        self._seen_nonces: OrderedDict[Tuple[str, str], float] = OrderedDict()
 
         self.update_config(settings or {})
 
@@ -177,10 +182,11 @@ class CollabManager:
             print(f"[CollabManager] EventBus publish error for '{event_name}': {exc}")
 
     def _refresh_cooldown(self) -> None:
-        """Exits time-based cooldown once `turn_cooldown_sec` elapses, unless turn limit is exhausted."""
-        if self.floor_state == "cooldown" and self.turn_count < self.max_collab_turns:
-            if time.monotonic() >= self.cooldown_until:
-                self.floor_state = "idle"
+        """Exits time-based cooldown once `turn_cooldown_sec` elapses and resets `turn_count`."""
+        if self.floor_state == "cooldown" and time.monotonic() >= self.cooldown_until:
+            self.turn_count = 0
+            self.cooldown_until = 0.0
+            self.floor_state = "idle"
 
     async def _set_floor_state(self, new_state: str, reason: str = "") -> None:
         if new_state not in VALID_FLOOR_STATES:
@@ -254,6 +260,8 @@ class CollabManager:
 
     async def connect_peer(self, ws_url: Optional[str] = None, peer_name: Optional[str] = None) -> bool:
         """Connects as an outbound WebSocket client to a peer VTuber's `/ws/collab` endpoint."""
+        if not self.enabled:
+            return False
         target_url = (ws_url or self.peer_ws_url).strip()
         target_peer = (peer_name or self.peer_name).strip() or "NeuroPeer"
         if not target_url:
@@ -313,8 +321,11 @@ class CollabManager:
 
     @staticmethod
     def _is_loopback_url(url: str) -> bool:
-        lower = (url or "").lower()
-        return any(host in lower for host in ("127.0.0.1", "localhost", "::1"))
+        try:
+            hostname = (urlparse((url or "").strip()).hostname or "").lower()
+        except ValueError:
+            return False
+        return hostname in {"127.0.0.1", "localhost", "::1"}
 
     async def disconnect_peer(self) -> None:
         """Closes any active outbound peer WebSocket connection cleanly."""
@@ -374,9 +385,23 @@ class CollabManager:
         topic: str = "",
         payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        """Sends a collaborative speech turn, enforcing floor state, max turns, and cooldown."""
+        """Sends a collaborative speech turn, enforcing enabled flag, floor state, max turns, and cooldown."""
+        if not self.enabled:
+            return {
+                "sent": False,
+                "reason": "collab_disabled",
+                "floor_state": self.floor_state,
+                "turn_count": self.turn_count,
+            }
         async with self._lock:
             self._refresh_cooldown()
+            if self.floor_state in ("speaking", "yielding"):
+                return {
+                    "sent": False,
+                    "reason": f"floor_{self.floor_state}",
+                    "floor_state": self.floor_state,
+                    "turn_count": self.turn_count,
+                }
             if self.turn_count >= self.max_collab_turns:
                 self.cooldown_until = time.monotonic() + self.turn_cooldown_sec
                 await self._set_floor_state("cooldown", reason="max_collab_turns_reached")
@@ -439,33 +464,49 @@ class CollabManager:
 
     async def send_duet_sync(self, song_id: str, lyric_index: int, timestamp: float) -> Dict[str, Any]:
         """Broadcasts synchronized karaoke/duet timing cue to the collab peer."""
-        env = self._build_envelope(
-            event_type="duet_sync",
-            topic=song_id,
-            payload={
-                "song_id": song_id,
-                "lyric_index": int(lyric_index),
-                "timestamp": float(timestamp),
-            },
-        )
-        delivered = await self._send_envelope(env)
-        record = {"direction": "outbound", **env.to_dict()}
-        self.history.append(record)
-        await self._emit("collab.message", record)
-        return {"sent": True, "delivered": delivered, "envelope": env.to_dict()}
+        if not self.enabled:
+            return {"sent": False, "reason": "collab_disabled"}
+        async with self._lock:
+            self._refresh_cooldown()
+            if self.floor_state == "cooldown" and time.monotonic() < self.cooldown_until:
+                return {"sent": False, "reason": "turn_cooldown_active", "floor_state": self.floor_state}
+            if self.floor_state in ("speaking", "yielding"):
+                return {"sent": False, "reason": f"floor_{self.floor_state}", "floor_state": self.floor_state}
+            env = self._build_envelope(
+                event_type="duet_sync",
+                topic=song_id,
+                payload={
+                    "song_id": song_id,
+                    "lyric_index": int(lyric_index),
+                    "timestamp": float(timestamp),
+                },
+            )
+            delivered = await self._send_envelope(env)
+            record = {"direction": "outbound", **env.to_dict()}
+            self.history.append(record)
+            await self._emit("collab.message", record)
+            return {"sent": True, "delivered": delivered, "envelope": env.to_dict()}
 
     async def send_emote_sync(self, emotion: str, action: str = "") -> Dict[str, Any]:
         """Broadcasts synchronized avatar emotion/action cue to the collab peer."""
-        env = self._build_envelope(
-            event_type="emote_sync",
-            emotion=emotion,
-            payload={"emotion": emotion, "action": action},
-        )
-        delivered = await self._send_envelope(env)
-        record = {"direction": "outbound", **env.to_dict()}
-        self.history.append(record)
-        await self._emit("collab.message", record)
-        return {"sent": True, "delivered": delivered, "envelope": env.to_dict()}
+        if not self.enabled:
+            return {"sent": False, "reason": "collab_disabled"}
+        async with self._lock:
+            self._refresh_cooldown()
+            if self.floor_state == "cooldown" and time.monotonic() < self.cooldown_until:
+                return {"sent": False, "reason": "turn_cooldown_active", "floor_state": self.floor_state}
+            if self.floor_state in ("speaking", "yielding"):
+                return {"sent": False, "reason": f"floor_{self.floor_state}", "floor_state": self.floor_state}
+            env = self._build_envelope(
+                event_type="emote_sync",
+                emotion=emotion,
+                payload={"emotion": emotion, "action": action},
+            )
+            delivered = await self._send_envelope(env)
+            record = {"direction": "outbound", **env.to_dict()}
+            self.history.append(record)
+            await self._emit("collab.message", record)
+            return {"sent": True, "delivered": delivered, "envelope": env.to_dict()}
 
     async def handle_incoming_envelope(
         self,
@@ -477,6 +518,9 @@ class CollabManager:
         Validates, authenticates, and processes an inbound CollabEnvelope from a peer.
         Invokes `on_reply_needed(envelope)` only when the floor can safely pass to Eve.
         """
+        if not self.enabled:
+            return {"accepted": False, "error": "Collab is disabled.", "reason": "collab_disabled"}
+
         try:
             env = CollabEnvelope.from_dict(raw_dict)
         except Exception as exc:
@@ -486,12 +530,32 @@ class CollabManager:
         if not env.verify(self.shared_secret, allow_unsigned=allow_unsigned):
             return {"accepted": False, "error": "Invalid or missing collab HMAC signature."}
 
+        now = time.time()
+        if abs(now - env.timestamp) > self.max_timestamp_skew_sec:
+            return {
+                "accepted": False,
+                "error": "Collab envelope timestamp outside ±60s skew window.",
+                "reason": "timestamp_skew_exceeded",
+            }
+
         reply_cb = on_reply_needed if on_reply_needed is not None else self._on_reply_needed
         trigger_reply = False
         reply_reason = "no_reply_needed"
         action_cb: Optional[Callable[[CollabEnvelope], Any]] = None
 
         async with self._lock:
+            nonce_key = (env.sender_id, env.message_id)
+            if nonce_key in self._seen_nonces:
+                self._seen_nonces.move_to_end(nonce_key)
+                return {
+                    "accepted": False,
+                    "error": "Duplicate collab message_id detected (replay rejected).",
+                    "reason": "duplicate_nonce",
+                }
+            self._seen_nonces[nonce_key] = now
+            while len(self._seen_nonces) > self._nonce_cache_maxsize:
+                self._seen_nonces.popitem(last=False)
+
             self._refresh_cooldown()
             record = {"direction": "inbound", **env.to_dict()}
             self.history.append(record)
@@ -525,9 +589,9 @@ class CollabManager:
                 if env.sender_name or env.sender_id:
                     self.connected_peer = env.sender_name or env.sender_id
 
-                # Prevent talking over self or looping past max_collab_turns
-                if self.floor_state == "speaking":
-                    reply_reason = "already_speaking"
+                # Prevent talking over self, concurrent reply storms, or looping past max_collab_turns
+                if self.floor_state in ("thinking", "speaking"):
+                    reply_reason = f"already_{self.floor_state}"
                 elif self.floor_state == "cooldown" and time.monotonic() < self.cooldown_until:
                     reply_reason = "turn_cooldown_active"
                 elif self.turn_count >= self.max_collab_turns:
@@ -542,8 +606,11 @@ class CollabManager:
                         await self._set_floor_state("cooldown", reason="max_collab_turns_reached")
                         reply_reason = "max_collab_turns_reached"
                     else:
-                        await self._set_floor_state("idle", reason="peer_utterance_received")
                         trigger_reply = reply_cb is not None
+                        if trigger_reply:
+                            await self._set_floor_state("thinking", reason="generating_reply")
+                        else:
+                            await self._set_floor_state("idle", reason="peer_utterance_received")
                         reply_reason = "floor_acquired"
 
         if action_cb is not None:
@@ -560,14 +627,21 @@ class CollabManager:
                 self._reply_tasks.add(task)
                 task.add_done_callback(self._reply_tasks.discard)
             else:
+                spawned_async = False
                 try:
                     res = reply_cb(env)
                     if inspect.isawaitable(res):
+                        spawned_async = True
                         task = asyncio.create_task(self._await_reply_result(res))
                         self._reply_tasks.add(task)
                         task.add_done_callback(self._reply_tasks.discard)
                 except Exception as exc:
                     print(f"[CollabManager] Reply callback error: {exc}")
+                finally:
+                    if not spawned_async:
+                        async with self._lock:
+                            if self.floor_state == "thinking":
+                                await self._set_floor_state("idle", reason="reply_complete")
 
         return {
             "accepted": True,
@@ -578,6 +652,11 @@ class CollabManager:
             "turn_count": self.turn_count,
         }
 
+    async def _release_thinking_floor(self) -> None:
+        async with self._lock:
+            if self.floor_state == "thinking":
+                await self._set_floor_state("idle", reason="reply_complete")
+
     async def _await_reply_result(self, awaitable: Awaitable[Any]) -> None:
         try:
             await awaitable
@@ -585,6 +664,8 @@ class CollabManager:
             raise
         except Exception as exc:
             print(f"[CollabManager] Reply callback error: {exc}")
+        finally:
+            await self._release_thinking_floor()
 
     async def _run_reply_callback(
         self,
@@ -599,6 +680,8 @@ class CollabManager:
             raise
         except Exception as exc:
             print(f"[CollabManager] Reply callback error: {exc}")
+        finally:
+            await self._release_thinking_floor()
 
     async def reset_turns(self) -> Dict[str, Any]:
         """Resets the collab turn counter and exits cooldown back to 'idle'."""

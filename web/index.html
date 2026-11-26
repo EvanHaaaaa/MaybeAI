@@ -30,12 +30,27 @@
           <a href="/deck" target="_blank" class="btn btn-outline btn-stream-deck" style="text-decoration:none; margin-right: 6px; font-size: 0.8rem; padding: 6px 12px; border-color: rgba(0, 240, 255, 0.55); color: #67e8f9; background: rgba(0, 240, 255, 0.08);">🎛️ Stream Deck</a>
           <a href="/settings" class="btn btn-outline" style="text-decoration:none; margin-right: 6px; font-size: 0.8rem; padding: 6px 12px; border-color: rgba(139, 92, 246, 0.6); color: #c4b5fd; background: rgba(139, 92, 246, 0.1);">⚙️ Configuration Center</a>
           <button id="btn-toggle-mic-header" class="btn btn-mic-toggle">🎙️ Mic: OFF</button>
+          <button type="button" id="btnToggleCreatorAuth" class="btn btn-outline" style="font-size: 0.8rem; padding: 6px 10px;" title="Set or update Creator Token">🔑 Token</button>
           <span id="llm-status" class="badge badge-accent">LLM: GEMINI</span>
           <span id="vts-status" class="badge">VTS: Standby</span>
           <span id="ws-status" class="badge badge-online">Connected</span>
         </div>
       </div>
     </header>
+
+    <!-- Creator Token Entry Bar (shown on 401/403, WS forbidden, or manual toggle) -->
+    <section id="creatorAuthBar" style="display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 20px; background: rgba(239, 68, 68, 0.14); border-bottom: 1px solid rgba(239, 68, 68, 0.35); flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 0.88rem; color: #fca5a5;">
+        <span>🔐</span>
+        <span id="creatorAuthMsg">Creator Token required for authenticated API &amp; WebSocket control.</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 460px; justify-content: flex-end;">
+        <input type="password" id="creatorTokenInput" placeholder="Enter Creator Token (?token=...)" autocomplete="off" style="padding: 6px 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.2); background: rgba(15, 23, 42, 0.85); color: #f8fafc; min-width: 200px;">
+        <button type="button" id="btnSaveCreatorToken" class="btn btn-primary btn-sm">Save Token</button>
+        <button type="button" id="btnClearCreatorToken" class="btn btn-secondary btn-sm">Clear</button>
+        <button type="button" id="btnCloseCreatorAuth" class="btn btn-outline btn-sm">✕</button>
+      </div>
+    </section>
 
     <!-- Persistent Studio Workspace Navigation -->
     <nav class="workspace-nav" id="workspaceNav" role="tablist" aria-label="Studio Workspaces">

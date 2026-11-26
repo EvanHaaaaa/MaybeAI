@@ -32,12 +32,29 @@
           <span class="status-dot"></span>
           <span id="connectionText">SYSTEM ONLINE</span>
         </div>
+        <button type="button" id="btnToggleCreatorAuth" class="btn btn-secondary btn-sm" title="Set or update Creator Token">
+          <span>🔑</span>
+          <span>Token</span>
+        </button>
         <a href="/" class="btn btn-studio-nav">
           <span>📺</span>
           <span>Live Studio</span>
         </a>
       </div>
     </header>
+
+    <!-- Creator Token Entry Bar (shown on 401/403 or manual toggle) -->
+    <section id="creatorAuthBar" style="display: none; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 24px; background: rgba(239, 68, 68, 0.12); border-bottom: 1px solid rgba(239, 68, 68, 0.35); flex-wrap: wrap;">
+      <div style="display: flex; align-items: center; gap: 10px; font-size: 0.9rem; color: #fca5a5;">
+        <span>🔐</span>
+        <span id="creatorAuthMsg">Creator Token required to access configuration endpoints.</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 460px; justify-content: flex-end;">
+        <input type="password" id="creatorTokenInput" class="cyber-input" placeholder="Enter Creator Token..." autocomplete="off" style="min-width: 200px;">
+        <button type="button" id="btnSaveCreatorToken" class="btn btn-primary btn-sm">Save &amp; Retry</button>
+        <button type="button" id="btnClearCreatorToken" class="btn btn-secondary btn-sm">Clear</button>
+      </div>
+    </section>
 
     <!-- Main Settings Layout -->
     <div class="settings-layout">

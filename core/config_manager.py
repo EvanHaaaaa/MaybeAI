@@ -246,6 +246,8 @@ class ConfigManager:
         return copy.deepcopy(defaults)
 
     SECRET_MASK_FIELDS = (
+        ("llm", "gemini_api_key", "gemini_api_key_configured"),
+        ("llm", "openai_api_key", "openai_api_key_configured"),
         ("twitch", "oauth_token", "oauth_configured"),
         ("youtube", "api_key", "api_key_configured"),
         ("discord", "bot_token", "bot_token_configured"),
@@ -253,6 +255,29 @@ class ConfigManager:
         ("collab", "shared_secret", "shared_secret_configured"),
         ("obs", "password", "password_configured"),
     )
+
+    @staticmethod
+    def _atomic_write_json(target_path: Path, data: Any) -> None:
+        """Atomically write JSON to target_path using mkstemp in the target directory."""
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=f".{target_path.stem}_",
+            suffix=".tmp",
+            dir=str(target_path.parent),
+        )
+        tmp_path = Path(tmp_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, target_path)
+        except Exception:
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise
 
     def get_public_config(self) -> Dict[str, Any]:
         """
@@ -1581,10 +1606,7 @@ class ConfigManager:
 
         # Atomic file write using temporary file and atomic replace
         try:
-            temp_file = self.settings_file.with_suffix(".tmp")
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(merged, f, indent=2, ensure_ascii=False)
-            os.replace(temp_file, self.settings_file)
+            self._atomic_write_json(self.settings_file, merged)
             self.settings = merged
         except Exception as e:
             return False, [f"Failed to write settings.json atomically: {e}"], False
@@ -1592,20 +1614,14 @@ class ConfigManager:
         # Handle character updates if present
         if "character" in payload and isinstance(payload["character"], dict):
             try:
-                char_temp = self.character_file.with_suffix(".tmp")
-                with open(char_temp, "w", encoding="utf-8") as f:
-                    json.dump(payload["character"], f, indent=2, ensure_ascii=False)
-                os.replace(char_temp, self.character_file)
+                self._atomic_write_json(self.character_file, payload["character"])
             except Exception as e:
                 errors.append(f"Character file write error: {e}")
 
         # Handle filter words updates if present
         if "filters" in payload and isinstance(payload["filters"], dict):
             try:
-                filt_temp = self.filter_file.with_suffix(".tmp")
-                with open(filt_temp, "w", encoding="utf-8") as f:
-                    json.dump(payload["filters"], f, indent=2, ensure_ascii=False)
-                os.replace(filt_temp, self.filter_file)
+                self._atomic_write_json(self.filter_file, payload["filters"])
             except Exception as e:
                 errors.append(f"Filter file write error: {e}")
 
@@ -1627,10 +1643,7 @@ class ConfigManager:
             self.settings = json.loads(json.dumps(self.DEFAULT_SETTINGS))
 
         # Atomic save
-        temp_file = self.settings_file.with_suffix(".tmp")
-        with open(temp_file, "w", encoding="utf-8") as f:
-            json.dump(self.settings, f, indent=2, ensure_ascii=False)
-        os.replace(temp_file, self.settings_file)
+        self._atomic_write_json(self.settings_file, self.settings)
 
         return self.get_public_config()
 

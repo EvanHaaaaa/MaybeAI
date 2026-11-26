@@ -3,6 +3,9 @@ from typing import Tuple, Optional
 from core.planning.models import Goal, Subtask, GoalStatus, GoalCategory
 
 
+MAX_REPLAN_ATTEMPTS = 3
+
+
 class StrategyReplanner:
     """
     Handles dynamic strategy adaptation when a subtask or plan encounters failure.
@@ -10,17 +13,34 @@ class StrategyReplanner:
     and produces entertaining streamer commentary explaining the strategic pivot.
     """
 
+    MAX_REPLAN_ATTEMPTS = MAX_REPLAN_ATTEMPTS
+
     @classmethod
     def replan_subtask(
         cls,
         goal: Goal,
         failed_subtask: Subtask,
         failure_reason: str
-    ) -> Tuple[Subtask, str]:
+    ) -> Tuple[Optional[Subtask], str]:
         """
         Adapts the plan by marking the failed subtask, creating a smart alternative subtask,
         and returning (new_subtask, speech_commentary).
+        If `failed_subtask.attempts >= MAX_REPLAN_ATTEMPTS`, marks the subtask and goal FAILED
+        and returns (None, speech_commentary).
         """
+        if failed_subtask.attempts >= MAX_REPLAN_ATTEMPTS:
+            failed_subtask.mark_failed(failure_reason)
+            goal.recalculate_progress()
+            goal.status = GoalStatus.FAILED.value
+            goal.reflection = (
+                f"Subtask '{failed_subtask.title}' gagal setelah {failed_subtask.attempts} percobaan: {failure_reason}."
+            )
+            speech = (
+                f"[emotion: sad] Aduh chat, rencana untuk '{failed_subtask.title}' gagal terus setelah "
+                f"{MAX_REPLAN_ATTEMPTS} kali percobaan ({failure_reason}). Misi '{goal.title}' dihentikan dulu ya. [action: sigh]"
+            )
+            return None, speech
+
         failed_subtask.status = GoalStatus.REPLANNED.value
         failed_subtask.failure_reason = failure_reason
 

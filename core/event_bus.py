@@ -3,7 +3,7 @@ import inspect
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Union
+from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional, Set, Union
 
 # Canonical EventBus event name constants
 CHAT_RECEIVED = "chat.received"
@@ -132,10 +132,20 @@ class EventBus:
 
     WILDCARD = "*"
 
-    def __init__(self, max_history: int = 200):
+    def __init__(
+        self,
+        max_history: int = 200,
+        handler_timeout: Optional[float] = 5.0,
+        max_pending_tasks: int = 256,
+    ):
         self.max_history = max(1, int(max_history))
+        self.handler_timeout: Optional[float] = (
+            max(0.01, float(handler_timeout)) if handler_timeout is not None else None
+        )
+        self.max_pending_tasks = max(1, int(max_pending_tasks))
         self._subscribers: Dict[str, List[EventHandler]] = {}
         self._history: Deque[EventRecord] = deque(maxlen=self.max_history)
+        self._pending_tasks: Set[asyncio.Task] = set()
         self._total_published: int = 0
         self._handler_errors: int = 0
 
@@ -182,24 +192,44 @@ class EventBus:
     async def publish(self, event_name: str, payload: Optional[Dict[str, Any]] = None) -> int:
         """
         Publishes `event_name` with `payload` to all matching subscribers (exact + '*').
-        Awaits each handler with per-handler exception isolation.
+        Dispatches subscribers concurrently with per-handler timeout and exception isolation.
         Returns the number of handlers that completed without raising.
         """
         data: Dict[str, Any] = dict(payload) if payload is not None else {}
         self._record_event(event_name, data)
 
         handlers = self._collect_handlers(event_name)
-        delivered = 0
-        for handler in handlers:
+        if not handlers:
+            return 0
+
+        async def _invoke_handler(handler: EventHandler) -> bool:
             try:
                 res = handler(event_name, data)
                 if inspect.isawaitable(res):
-                    await res
-                delivered += 1
+                    if self.handler_timeout is not None:
+                        await asyncio.wait_for(res, timeout=self.handler_timeout)
+                    else:
+                        await res
+                return True
+            except asyncio.TimeoutError:
+                self._handler_errors += 1
+                print(f"[EventBus] Handler timeout for '{event_name}' after {self.handler_timeout}s")
+                return False
             except Exception as exc:
                 self._handler_errors += 1
                 print(f"[EventBus] Handler error for '{event_name}': {exc}")
-        return delivered
+                return False
+
+        results = await asyncio.gather(*(_invoke_handler(h) for h in handlers), return_exceptions=True)
+        return sum(1 for r in results if r is True)
+
+    def _on_publish_task_done(self, task: asyncio.Task) -> None:
+        self._pending_tasks.discard(task)
+        if not task.cancelled():
+            exc = task.exception()
+            if exc is not None:
+                self._handler_errors += 1
+                print(f"[EventBus] Background publish task error: {exc}")
 
     def publish_nowait(self, event_name: str, payload: Optional[Dict[str, Any]] = None) -> None:
         """
@@ -210,7 +240,16 @@ class EventBus:
         data: Dict[str, Any] = dict(payload) if payload is not None else {}
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self.publish(event_name, data))
+            if len(self._pending_tasks) >= self.max_pending_tasks:
+                for t in list(self._pending_tasks):
+                    if t.done():
+                        self._pending_tasks.discard(t)
+            if len(self._pending_tasks) >= self.max_pending_tasks:
+                print(f"[EventBus] Pending task limit ({self.max_pending_tasks}) reached; dropping '{event_name}'")
+                return
+            task = loop.create_task(self.publish(event_name, data))
+            self._pending_tasks.add(task)
+            task.add_done_callback(self._on_publish_task_done)
             return
         except RuntimeError:
             pass
@@ -252,12 +291,17 @@ class EventBus:
             "handler_errors": self._handler_errors,
             "history_size": len(self._history),
             "max_history": self.max_history,
+            "pending_tasks": len(self._pending_tasks),
             "recent_event_types": recent_event_types,
         }
 
     def clear(self, include_history: bool = True) -> None:
         """Removes all subscribers and optionally clears the event history ring buffer."""
         self._subscribers.clear()
+        for task in list(self._pending_tasks):
+            if not task.done():
+                task.cancel()
+        self._pending_tasks.clear()
         if include_history:
             self._history.clear()
             self._total_published = 0
