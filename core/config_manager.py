@@ -83,7 +83,21 @@ class ConfigManager:
             "pitch": "+10Hz",
             "volume": "+0%",
             "interruptible": True,
-            "lipsync_sensitivity": 1.0
+            "lipsync_sensitivity": 1.0,
+            "rvc_enabled": False,
+            "rvc_url": "",
+            "rvc_pitch_shift": 0,
+            "kokoro_url": "",
+            "custom_tts_url": "",
+            "elevenlabs_voice_id": ""
+        },
+        "avatar": {
+            "renderer": "2d",
+            "vrm_url": ""
+        },
+        "vision": {
+            "vlm_enabled": False,
+            "vlm_interval_sec": 10.0
         },
         "vts": {
             "enabled": True,
@@ -105,6 +119,8 @@ class ConfigManager:
             "channel": "",
             "bot_nick": "",
             "oauth_token": "",
+            "use_tls": True,
+            "port": 6697,
             "message_cooldown_sec": 3.0,
             "mention_only": False
         },
@@ -118,7 +134,13 @@ class ConfigManager:
             "enabled": False,
             "bot_token": "",
             "channel_id": "",
-            "poll_interval_sec": 3.0
+            "poll_interval_sec": 3.0,
+            "use_gateway": False,
+            "reply_enabled": False
+        },
+        "tiktok": {
+            "enabled": False,
+            "username": ""
         },
         "moderator": {
             "strict_mode": True,
@@ -567,6 +589,78 @@ class ConfigManager:
                 "restart_required": False
             },
             {
+                "path": "tts.provider",
+                "category": "voice",
+                "label": "TTS Provider",
+                "description": "Mesin sintesis suara utama (Edge-TTS, Kokoro, ElevenLabs, GPT-SoVITS, Fish Speech).",
+                "type": "select",
+                "options": [
+                    {"label": "Edge-TTS (Default Cloud Neural)", "value": "edge-tts"},
+                    {"label": "Kokoro-82M (Local / HTTP)", "value": "kokoro"},
+                    {"label": "ElevenLabs (Streaming REST)", "value": "elevenlabs"},
+                    {"label": "GPT-SoVITS (Custom Neural HTTP)", "value": "gpt_sovits"},
+                    {"label": "Fish Speech (Custom Neural HTTP)", "value": "fish_speech"}
+                ],
+                "default": "edge-tts",
+                "restart_required": False
+            },
+            {
+                "path": "tts.rvc_enabled",
+                "category": "voice",
+                "label": "RVC Voice Conversion",
+                "description": "Mengaktifkan post-processing RVC untuk suara bicara dan bernyanyi.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "tts.rvc_url",
+                "category": "voice",
+                "label": "RVC Server URL",
+                "description": "Endpoint HTTP server RVC (misal: http://127.0.0.1:7865/convert).",
+                "type": "text",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "tts.rvc_pitch_shift",
+                "category": "voice",
+                "label": "RVC Pitch Shift (Semitones)",
+                "description": "Pergeseran pitch RVC dalam semitone (-24 hingga +24).",
+                "type": "number",
+                "min": -24,
+                "max": 24,
+                "default": 0,
+                "restart_required": False
+            },
+            {
+                "path": "tts.kokoro_url",
+                "category": "voice",
+                "label": "Kokoro TTS URL",
+                "description": "Endpoint HTTP Kokoro-82M lokal (opsional jika menggunakan server HTTP).",
+                "type": "text",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "tts.custom_tts_url",
+                "category": "voice",
+                "label": "Custom Neural TTS URL",
+                "description": "Endpoint HTTP untuk GPT-SoVITS atau Fish Speech.",
+                "type": "text",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "tts.elevenlabs_voice_id",
+                "category": "voice",
+                "label": "ElevenLabs Voice ID",
+                "description": "ID suara ElevenLabs jika provider ElevenLabs dipilih.",
+                "type": "text",
+                "default": "",
+                "restart_required": False
+            },
+            {
                 "path": "tts.output_mode",
                 "category": "voice",
                 "label": "Audio Output Mode",
@@ -651,6 +745,50 @@ class ConfigManager:
                 "default": 8001,
                 "restart_required": False
             },
+            {
+                "path": "avatar.renderer",
+                "category": "avatar",
+                "label": "Web Avatar Renderer",
+                "description": "Pilih renderer avatar di Live Studio & Overlay (2D Canvas atau 3D VRM).",
+                "type": "select",
+                "options": [
+                    {"label": "2D Canvas (Default)", "value": "2d"},
+                    {"label": "3D VRM (Three.js + three-vrm)", "value": "vrm"}
+                ],
+                "default": "2d",
+                "restart_required": False
+            },
+            {
+                "path": "avatar.vrm_url",
+                "category": "avatar",
+                "label": "3D VRM Model URL",
+                "description": "URL atau path file .vrm untuk renderer 3D VRM.",
+                "type": "text",
+                "default": "",
+                "restart_required": False
+            },
+
+            # 7b. Vision & VLM
+            {
+                "path": "vision.vlm_enabled",
+                "category": "vision",
+                "label": "Vision-Language Model (VLM)",
+                "description": "Mengaktifkan persepsi layar berkala menggunakan VLM multimodal.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "vision.vlm_interval_sec",
+                "category": "vision",
+                "label": "VLM Perception Interval (sec)",
+                "description": "Jeda waktu antar analisis layar VLM (dalam detik).",
+                "type": "number",
+                "min": 2.0,
+                "max": 120.0,
+                "default": 10.0,
+                "restart_required": False
+            },
 
             # 8. Karaoke & Performance
             {
@@ -710,6 +848,26 @@ class ConfigManager:
                 "description": "OAuth token bot Twitch (oauth:xxxx). Disembunyikan demi keamanan.",
                 "type": "secret",
                 "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "twitch.use_tls",
+                "category": "twitch",
+                "label": "Twitch IRC TLS (SSL)",
+                "description": "Gunakan koneksi TLS terenkripsi ke Twitch IRC (port default 6697).",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "twitch.port",
+                "category": "twitch",
+                "label": "Twitch IRC Port",
+                "description": "Port TCP Twitch IRC (6697 untuk TLS, 6667 untuk plaintext).",
+                "type": "number",
+                "min": 1,
+                "max": 65535,
+                "default": 6697,
                 "restart_required": False
             },
 
@@ -790,6 +948,44 @@ class ConfigManager:
                 "min": 1.0,
                 "max": 60.0,
                 "default": 3.0,
+                "restart_required": False
+            },
+            {
+                "path": "discord.use_gateway",
+                "category": "discord",
+                "label": "Discord Gateway WebSocket",
+                "description": "Gunakan Discord Gateway WebSocket real-time (dengan fallback REST otomatis).",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "discord.reply_enabled",
+                "category": "discord",
+                "label": "Discord Reply Bridge",
+                "description": "Mengizinkan Eve mengirim balasan langsung ke channel Discord.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+
+            # 9d. TikTok Live
+            {
+                "path": "tiktok.enabled",
+                "category": "tiktok",
+                "label": "TikTok Live Listener",
+                "description": "Mengaktifkan pembacaan komentar, gift, like, dan follow dari TikTok Live.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "tiktok.username",
+                "category": "tiktok",
+                "label": "TikTok Username",
+                "description": "Username kreator TikTok Live (tanpa atau dengan @).",
+                "type": "text",
+                "default": "",
                 "restart_required": False
             },
 

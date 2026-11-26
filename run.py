@@ -263,6 +263,10 @@ async def get_settings_page():
 async def get_overlay_page():
     return FileResponse("web/overlay.html")
 
+@app.get("/deck")
+async def get_deck_page():
+    return FileResponse("web/deck.html")
+
 @app.get("/api/eventbus/stats")
 async def get_eventbus_stats():
     return orchestrator.event_bus.get_stats()
@@ -637,6 +641,9 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
     async def listener(event: dict):
+        evt_type = event.get("type") if isinstance(event, dict) else None
+        if evt_type in ("stt_partial", "stt_final") and not ws_creator_authorized:
+            return
         try:
             await websocket.send_json(event)
         except Exception:

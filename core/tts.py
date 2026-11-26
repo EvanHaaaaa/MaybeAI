@@ -9,6 +9,12 @@ from typing import Optional, Callable, AsyncIterator, List, Tuple, Any, Set
 import edge_tts
 
 from core.actions import ActionParser
+from core.tts_providers import (
+    BaseTTSProvider,
+    EdgeTTSProvider,
+    RVCVoiceConverter,
+    create_tts_provider,
+)
 
 
 class SentenceChunker:
@@ -147,6 +153,14 @@ class TTSEngine:
         interruptible: bool = True,
         output_mode: str = "both",
         on_audio_ready: Optional[Callable[[bytes, str, str], Any]] = None,
+        provider: str = "edge-tts",
+        emotion: str = "neutral",
+        rvc_enabled: bool = False,
+        rvc_url: str = "",
+        rvc_pitch_shift: int = 0,
+        elevenlabs_voice_id: str = "",
+        kokoro_url: str = "",
+        custom_tts_url: str = "",
     ):
         self.voice = voice
         self.rate = rate
@@ -156,7 +170,22 @@ class TTSEngine:
         mode = str(output_mode or "both").strip().lower()
         self.output_mode = mode if mode in self._VALID_OUTPUT_MODES else "both"
         self.on_audio_ready = on_audio_ready
+        self.provider = str(provider or "edge-tts").strip().lower()
+        self.emotion = str(emotion or "neutral").strip().lower()
+        self.rvc_enabled = bool(rvc_enabled)
+        self.rvc_url = str(rvc_url or "").strip()
+        self.rvc_pitch_shift = int(rvc_pitch_shift)
+        self.elevenlabs_voice_id = str(elevenlabs_voice_id or "").strip()
+        self.kokoro_url = str(kokoro_url or "").strip()
+        self.custom_tts_url = str(custom_tts_url or "").strip()
         self.last_error: Optional[str] = None
+        self._fallback_provider: EdgeTTSProvider = EdgeTTSProvider()
+        self._provider: BaseTTSProvider = self._build_provider()
+        self._rvc: RVCVoiceConverter = RVCVoiceConverter(
+            enabled=self.rvc_enabled,
+            rvc_url=self.rvc_url,
+            pitch_shift=self.rvc_pitch_shift,
+        )
         self._mixer_initialized: bool = False
         self._tts_channel: Any = None
         self._tts_sound: Any = None
@@ -180,6 +209,20 @@ class TTSEngine:
     def was_interrupted(self) -> bool:
         return self._was_interrupted
 
+    def _build_provider(self) -> BaseTTSProvider:
+        try:
+            return create_tts_provider(
+                self.provider,
+                kokoro_url=self.kokoro_url,
+                elevenlabs_voice_id=self.elevenlabs_voice_id,
+                custom_tts_url=self.custom_tts_url,
+            )
+        except ValueError as exc:
+            self.last_error = str(exc)
+            print(f"[TTS Warning] {exc}. Falling back to edge-tts.")
+            self.provider = "edge-tts"
+            return EdgeTTSProvider()
+
     def update_config(
         self,
         enabled: Optional[bool] = None,
@@ -188,6 +231,14 @@ class TTSEngine:
         pitch: Optional[str] = None,
         interruptible: Optional[bool] = None,
         output_mode: Optional[str] = None,
+        provider: Optional[str] = None,
+        emotion: Optional[str] = None,
+        rvc_enabled: Optional[bool] = None,
+        rvc_url: Optional[str] = None,
+        rvc_pitch_shift: Optional[int] = None,
+        elevenlabs_voice_id: Optional[str] = None,
+        kokoro_url: Optional[str] = None,
+        custom_tts_url: Optional[str] = None,
     ):
         if enabled is not None:
             self.enabled = bool(enabled)
@@ -204,19 +255,85 @@ class TTSEngine:
             if mode in self._VALID_OUTPUT_MODES:
                 self.output_mode = mode
 
+        rebuild_provider = False
+        if provider is not None:
+            self.provider = str(provider or "edge-tts").strip().lower()
+            rebuild_provider = True
+        if emotion is not None:
+            self.emotion = str(emotion or "neutral").strip().lower()
+        if elevenlabs_voice_id is not None:
+            self.elevenlabs_voice_id = str(elevenlabs_voice_id).strip()
+            rebuild_provider = True
+        if kokoro_url is not None:
+            self.kokoro_url = str(kokoro_url).strip()
+            rebuild_provider = True
+        if custom_tts_url is not None:
+            self.custom_tts_url = str(custom_tts_url).strip()
+            rebuild_provider = True
+        if rebuild_provider:
+            self._provider = self._build_provider()
+
+        if rvc_enabled is not None:
+            self.rvc_enabled = bool(rvc_enabled)
+        if rvc_url is not None:
+            self.rvc_url = str(rvc_url).strip()
+        if rvc_pitch_shift is not None:
+            self.rvc_pitch_shift = int(rvc_pitch_shift)
+        self._rvc.update_config(
+            enabled=self.rvc_enabled,
+            rvc_url=self.rvc_url,
+            pitch_shift=self.rvc_pitch_shift,
+        )
+
     def get_status(self) -> dict:
         return {
             "enabled": self.enabled,
-            "provider": "edge-tts",
+            "provider": self.provider,
             "voice": self.voice,
             "rate": self.rate,
             "pitch": self.pitch,
+            "emotion": self.emotion,
             "interruptible": self.interruptible,
             "output_mode": self.output_mode,
+            "rvc_enabled": self.rvc_enabled,
+            "rvc_url": self.rvc_url,
+            "rvc_pitch_shift": self.rvc_pitch_shift,
+            "elevenlabs_voice_id": self.elevenlabs_voice_id,
+            "kokoro_url": self.kokoro_url,
+            "custom_tts_url": self.custom_tts_url,
             "is_speaking": self._is_speaking,
             "was_interrupted": self._was_interrupted,
-            "last_error": self.last_error
+            "last_error": self.last_error,
         }
+
+    async def _synthesize_audio(self, text: str, emotion: Optional[str] = None) -> bytes:
+        active_emotion = str(emotion or self.emotion or "neutral").strip().lower()
+        try:
+            audio_bytes = await self._provider.synthesize(
+                text=text,
+                voice=self.voice,
+                rate=self.rate,
+                pitch=self.pitch,
+                emotion=active_emotion,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if not isinstance(self._provider, EdgeTTSProvider):
+                print(f"[TTS Provider Warning] {self.provider} failed ({exc}); falling back to edge-tts.")
+                audio_bytes = await self._fallback_provider.synthesize(
+                    text=text,
+                    voice=self.voice,
+                    rate=self.rate,
+                    pitch=self.pitch,
+                    emotion=active_emotion,
+                )
+            else:
+                raise
+
+        if self._rvc.enabled:
+            audio_bytes = await self._rvc.convert(audio_bytes)
+        return audio_bytes
 
     def _make_temp_audio_path(self) -> str:
         ts_ms = int(asyncio.get_running_loop().time() * 1000)
@@ -296,13 +413,8 @@ class TTSEngine:
                 await self._invoke_callback(self.on_audio_ready, audio_bytes, spoken_text, self.voice)
 
         async def _run_speak(out_path: str) -> str:
-            communicate = edge_tts.Communicate(
-                text=text,
-                voice=self.voice,
-                rate=self.rate,
-                pitch=self.pitch
-            )
-            await communicate.save(out_path)
+            audio_bytes = await self._synthesize_audio(text, emotion=self.emotion)
+            Path(out_path).write_bytes(audio_bytes)
             await _emit_browser_audio(out_path, text)
             if self.output_mode in ("server", "both"):
                 await self._play_and_lipsync(out_path, text, on_mouth_update)
@@ -391,14 +503,10 @@ class TTSEngine:
             out_file = self._make_temp_audio_path()
             pending_files.add(out_file)
             self._active_temp_files.add(out_file)
+            sentence_emotion = emotions[-1] if emotions else self.emotion
             try:
-                communicate = edge_tts.Communicate(
-                    text=clean_text,
-                    voice=self.voice,
-                    rate=self.rate,
-                    pitch=self.pitch,
-                )
-                await communicate.save(out_file)
+                audio_bytes = await self._synthesize_audio(clean_text, emotion=sentence_emotion)
+                Path(out_file).write_bytes(audio_bytes)
                 self.last_error = None
             except asyncio.CancelledError:
                 self._cleanup_audio_file(out_file)

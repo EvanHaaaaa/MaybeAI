@@ -54,6 +54,8 @@ let currentMode = config.default_mode || 'santai';
 let followingTarget = null;
 let isWandering = true;
 let autonomyInterval = null;
+let telemetryInterval = null;
+let telemetryDebounceTimer = null;
 let speedrunRunner = null;
 let casualRunner = null;
 let guardRunner = null;
@@ -98,6 +100,80 @@ function sendToPython(eventType, data) {
   if (activeWs && activeWs.readyState === WebSocket.OPEN) {
     activeWs.send(JSON.stringify({ type: eventType, data: data }));
   }
+}
+
+function buildTelemetrySnapshot() {
+  if (!bot || !bot.entity) return null;
+
+  const pos = bot.entity.position
+    ? {
+        x: Math.round(bot.entity.position.x * 100) / 100,
+        y: Math.round(bot.entity.position.y * 100) / 100,
+        z: Math.round(bot.entity.position.z * 100) / 100
+      }
+    : { x: 0, y: 0, z: 0 };
+
+  let biome = 'unknown';
+  try {
+    const block = bot.entity.position && typeof bot.blockAt === 'function'
+      ? bot.blockAt(bot.entity.position)
+      : null;
+    if (block && block.biome && block.biome.name) {
+      biome = block.biome.name;
+    }
+  } catch (e) {}
+
+  const inventory = {};
+  try {
+    const items = bot.inventory && typeof bot.inventory.items === 'function'
+      ? bot.inventory.items()
+      : [];
+    for (const item of items) {
+      if (item && item.name) {
+        inventory[item.name] = (inventory[item.name] || 0) + (item.count || 1);
+      }
+    }
+  } catch (e) {}
+
+  const nearby_players = [];
+  const nearby_hostiles = [];
+  try {
+    for (const entityId in bot.entities) {
+      const entity = bot.entities[entityId];
+      if (!entity || !entity.position || entity === bot.entity) continue;
+      const dist = Math.round(bot.entity.position.distanceTo(entity.position) * 10) / 10;
+      if (entity.type === 'player' && entity.username && entity.username !== bot.username && dist <= 24) {
+        nearby_players.push({ username: entity.username, distance: dist });
+      } else if ((entity.type === 'hostile' || entity.kind === 'Hostile mobs') && dist <= 20) {
+        nearby_hostiles.push({ name: entity.name || entity.displayName || 'hostile', distance: dist });
+      }
+    }
+  } catch (e) {}
+
+  return {
+    health: bot.health !== undefined ? bot.health : 20,
+    food: bot.food !== undefined ? bot.food : 20,
+    pos: pos,
+    biome: biome,
+    inventory: inventory,
+    nearby_players: nearby_players,
+    nearby_hostiles: nearby_hostiles
+  };
+}
+
+function emitTelemetry() {
+  const snapshot = buildTelemetrySnapshot();
+  if (snapshot) {
+    sendToPython('mc_telemetry', snapshot);
+  }
+}
+
+function scheduleTelemetryEmit() {
+  if (telemetryDebounceTimer) return;
+  telemetryDebounceTimer = setTimeout(() => {
+    telemetryDebounceTimer = null;
+    emitTelemetry();
+  }, 200);
 }
 
 function getNearestPlayer() {
@@ -259,6 +335,20 @@ function createBot(host, port, username, version, mode) {
     } catch (err) {
       console.log('[Minecraft Viewer Notice]', err.message);
     }
+
+    // Periodic mc_telemetry snapshots (~3s) and on inventory/item changes
+    if (telemetryInterval) clearInterval(telemetryInterval);
+    telemetryInterval = setInterval(emitTelemetry, 3000);
+    emitTelemetry();
+
+    if (bot.inventory && typeof bot.inventory.on === 'function') {
+      bot.inventory.on('updateSlot', scheduleTelemetryEmit);
+    }
+    bot.on('playerCollect', (collector) => {
+      if (collector === bot.entity) {
+        scheduleTelemetryEmit();
+      }
+    });
   });
 
   // Handle in-game chat commands directly from other players
@@ -348,6 +438,10 @@ function createBot(host, port, username, version, mode) {
     if (casualRunner) casualRunner.stop();
     if (guardRunner) guardRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
+    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
+    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
+    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
+    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
     const reasonStr = typeof reason === 'object' ? JSON.stringify(reason) : String(reason);
     sendToPython('bot_kicked', { reason: reasonStr });
   });
@@ -364,6 +458,10 @@ function createBot(host, port, username, version, mode) {
     if (casualRunner) casualRunner.stop();
     if (guardRunner) guardRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
+    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
+    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
+    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
+    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
     sendToPython('bot_disconnected', { reason: String(reason) });
   });
 }
@@ -381,6 +479,8 @@ function handlePythonCommand(cmd) {
     if (casualRunner) casualRunner.stop();
     if (guardRunner) guardRunner.stop();
     if (autonomyInterval) clearInterval(autonomyInterval);
+    if (telemetryInterval) { clearInterval(telemetryInterval); telemetryInterval = null; }
+    if (telemetryDebounceTimer) { clearTimeout(telemetryDebounceTimer); telemetryDebounceTimer = null; }
     if (bot) {
       try { bot.quit(); } catch (e) {}
       bot = null;

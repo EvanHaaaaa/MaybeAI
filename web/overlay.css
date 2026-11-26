@@ -60,6 +60,20 @@ body {
   filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.45));
 }
 
+.vrm-container {
+  width: min(92vw, 76vh, 480px);
+  height: min(92vw, 76vh, 480px);
+  background: transparent !important;
+  position: relative;
+}
+
+.vrm-container canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  background: transparent !important;
+}
+
 /* Floating Subtitles Overlay */
 .obs-subtitles {
   position: absolute;

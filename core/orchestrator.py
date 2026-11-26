@@ -11,7 +11,7 @@ from core.config_manager import ConfigManager
 from core.tts import TTSEngine
 from core.vts_client import VTSClient
 from core.chat_receiver import ChatReceiver, ChatMessage
-from core.platforms import YouTubeLiveAdapter, DiscordAdapter
+from core.platforms import YouTubeLiveAdapter, DiscordAdapter, TikTokLiveAdapter
 from core.moderator import Moderator
 from core.actions import ActionParser
 from core.singer import Singer
@@ -55,6 +55,9 @@ class Orchestrator:
         # Load TTS config
         tts_cfg = settings.get("tts", {})
         tts_output_mode = tts_cfg.get("output_mode", "both")
+        rvc_enabled = bool(tts_cfg.get("rvc_enabled", False))
+        rvc_url = str(tts_cfg.get("rvc_url", "") or "")
+        rvc_pitch_shift = int(tts_cfg.get("rvc_pitch_shift", 0) or 0)
         self.tts = TTSEngine(
             voice=tts_cfg.get("voice", "en-US-AnaNeural"),
             rate=tts_cfg.get("rate", "+5%"),
@@ -63,6 +66,13 @@ class Orchestrator:
             interruptible=tts_cfg.get("interruptible", True),
             output_mode=tts_output_mode,
             on_audio_ready=self._on_tts_audio_ready,
+            provider=str(tts_cfg.get("provider", "edge-tts") or "edge-tts"),
+            rvc_enabled=rvc_enabled,
+            rvc_url=rvc_url,
+            rvc_pitch_shift=rvc_pitch_shift,
+            elevenlabs_voice_id=str(tts_cfg.get("elevenlabs_voice_id", "") or ""),
+            kokoro_url=str(tts_cfg.get("kokoro_url", "") or ""),
+            custom_tts_url=str(tts_cfg.get("custom_tts_url", "") or ""),
         )
 
         # Load STT / Full-Duplex Voice config
@@ -90,6 +100,9 @@ class Orchestrator:
             songs_config_path=f"{config_dir}/songs.json",
             voice=tts_cfg.get("voice", "en-US-AnaNeural"),
             output_mode=tts_output_mode,
+            rvc_enabled=rvc_enabled,
+            rvc_url=rvc_url,
+            rvc_pitch_shift=rvc_pitch_shift,
         )
 
         # Minecraft Gameplay Controller
@@ -97,7 +110,8 @@ class Orchestrator:
         self.minecraft.set_callbacks(
             on_commentary=self._on_minecraft_commentary,
             on_state_change=self._on_minecraft_state_change,
-            on_in_game_chat=self._on_in_game_chat
+            on_in_game_chat=self._on_in_game_chat,
+            on_telemetry=self._on_minecraft_telemetry,
         )
 
         # Chess Gameplay Controller
@@ -133,6 +147,17 @@ class Orchestrator:
             self_name="EveMaybe",
         )
         self.collab.set_reply_callback(self._on_collab_reply_needed)
+        self.collab.set_action_callbacks(
+            on_duet_sync=self._on_collab_duet_sync,
+            on_emote_sync=self._on_collab_emote_sync,
+            on_game_move=self._on_collab_game_move,
+        )
+
+        # Sync Vision VLM settings
+        vision_cfg = settings.get("vision", {}) if isinstance(settings, dict) else {}
+        if hasattr(self.brain, "vision"):
+            self.brain.vision.vlm_enabled = bool(vision_cfg.get("vlm_enabled", False))
+            self.brain.vision.vlm_interval_sec = float(vision_cfg.get("vlm_interval_sec", 8.0) or 8.0)
 
         # Community Plugin SDK Registry
         plugins_cfg = settings.get("plugins", {}) if isinstance(settings, dict) else {}
@@ -224,8 +249,20 @@ class Orchestrator:
             channel_id=str(dc_cfg.get("channel_id") or "").strip(),
             poll_interval_sec=float(dc_cfg.get("poll_interval_sec", 3.0) or 3.0),
             enabled=bool(dc_cfg.get("enabled", False)),
+            use_gateway=bool(dc_cfg.get("use_gateway", False)),
         )
+        self._discord_adapter = dc_adapter
+        self._discord_reply_enabled = bool(dc_cfg.get("reply_enabled", False))
         self.chat.register_adapter(dc_adapter)
+
+        tt_cfg = settings.get("tiktok", {}) if isinstance(settings, dict) else {}
+        tt_adapter = TikTokLiveAdapter(
+            receiver=self.chat,
+            username=str(tt_cfg.get("username") or "").strip(),
+            webcast_ws_url=str(tt_cfg.get("webcast_ws_url") or "").strip(),
+            enabled=bool(tt_cfg.get("enabled", False)),
+        )
+        self.chat.register_adapter(tt_adapter)
 
     @property
     def is_busy(self) -> bool:
@@ -263,11 +300,14 @@ class Orchestrator:
         # Connect to Twitch if enabled
         twitch_cfg = self.brain.settings.get("twitch", {})
         if twitch_cfg.get("enabled", False) and twitch_cfg.get("channel"):
+            raw_port = twitch_cfg.get("port")
             self._spawn_bg_task(
                 self.chat.start_twitch_listener(
                     channel=twitch_cfg["channel"],
                     bot_nick=twitch_cfg.get("bot_nick", ""),
-                    oauth=twitch_cfg.get("oauth_token", "")
+                    oauth=twitch_cfg.get("oauth_token", ""),
+                    use_tls=bool(twitch_cfg.get("use_tls", True)),
+                    port=int(raw_port) if raw_port else None,
                 )
             )
 
@@ -356,6 +396,20 @@ class Orchestrator:
                 res["barge_in"] = await self.barge_in(source="creator", reason="vad")
 
         transcript = (res.get("transcript") or "").strip()
+        partial_text = str(res.get("partial") or res.get("partial_transcript") or "").strip()
+        if partial_text or (
+            not transcript
+            and res.get("is_speech")
+            and getattr(self.voice_session, "_in_utterance", False)
+        ):
+            await self.broadcast("stt_partial", {
+                "user": user,
+                "text": partial_text or "Listening...",
+                "is_speech": bool(res.get("is_speech")),
+                "rms": float(res.get("rms", 0.0)),
+                "buffered_bytes": int(getattr(self.voice_session, "_buffered_bytes", 0)),
+            })
+
         if transcript:
             await self.broadcast("stt_final", {
                 "user": user,
@@ -434,6 +488,33 @@ class Orchestrator:
             topic=env.topic,
         )
 
+    async def _on_collab_duet_sync(self, env: CollabEnvelope) -> None:
+        song_id = str(env.payload.get("song_id") or env.topic or "").strip() or None
+        dedication = env.sender_name or env.sender_id or None
+        if not self._busy_lock.locked():
+            async with self._busy_lock:
+                await self.perform_song(song_id=song_id, dedication_user=dedication)
+
+    async def _on_collab_emote_sync(self, env: CollabEnvelope) -> None:
+        emotion = str(env.emotion or env.payload.get("emotion") or "happy").strip() or "happy"
+        self._current_emotion = emotion
+        vts_params = await self._apply_vts_mood_rig(emotion)
+        await self.broadcast(
+            "avatar_state",
+            self._build_avatar_state(0.0, emotion, vts_params),
+        )
+
+    async def _on_collab_game_move(self, env: CollabEnvelope) -> None:
+        move_str = str(
+            env.payload.get("move")
+            or env.payload.get("uci")
+            or env.payload.get("san")
+            or env.speech
+            or ""
+        ).strip()
+        if move_str:
+            await self.chess.make_player_move(move_str)
+
     async def barge_in(self, source: str = "creator", reason: str = "vad") -> Dict[str, Any]:
         """
         Preempts Eve's active speech/response when the Creator speaks (full-duplex barge-in).
@@ -499,6 +580,41 @@ class Orchestrator:
         await self.broadcast("voice_barge_in", payload)
         return payload
 
+    def _get_mood_dims(self) -> Optional[Dict[str, float]]:
+        mood = getattr(self.brain, "mood", None)
+        dims = getattr(mood, "dimensions", None) if mood else None
+        return dict(dims) if isinstance(dims, dict) else None
+
+    async def _apply_vts_mood_rig(self, emotion: str, singing: bool = False) -> Optional[Dict[str, float]]:
+        mood_dims = self._get_mood_dims()
+        if hasattr(self.vts, "apply_mood_rig"):
+            try:
+                res = self.vts.apply_mood_rig(emotion, mood_dims=mood_dims, singing=singing)
+                if inspect.isawaitable(res):
+                    res = await res
+                return dict(res) if isinstance(res, dict) else None
+            except Exception:
+                return None
+        if self.vts.connected:
+            await self.vts.trigger_expression(emotion)
+        return None
+
+    @staticmethod
+    def _build_avatar_state(
+        mouth_open: float,
+        emotion: str,
+        vts_params: Optional[Dict[str, float]] = None,
+        **extra: Any,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "mouth_open": mouth_open,
+            "emotion": emotion,
+            **extra,
+        }
+        if vts_params is not None:
+            payload["vts_params"] = vts_params
+        return payload
+
     async def close(self):
         await self.shutdown()
 
@@ -518,13 +634,21 @@ class Orchestrator:
             pitch=tts_cfg.get("pitch"),
             interruptible=tts_cfg.get("interruptible"),
             output_mode=tts_cfg.get("output_mode"),
+            provider=tts_cfg.get("provider"),
+            rvc_enabled=tts_cfg.get("rvc_enabled"),
+            rvc_url=tts_cfg.get("rvc_url"),
+            rvc_pitch_shift=tts_cfg.get("rvc_pitch_shift"),
+            elevenlabs_voice_id=tts_cfg.get("elevenlabs_voice_id"),
+            kokoro_url=tts_cfg.get("kokoro_url"),
+            custom_tts_url=tts_cfg.get("custom_tts_url"),
         )
-        if tts_cfg.get("voice"):
-            self.singer.voice = tts_cfg["voice"]
-        if tts_cfg.get("output_mode"):
-            mode = str(tts_cfg["output_mode"]).strip().lower()
-            if mode in ("server", "browser", "both"):
-                self.singer.output_mode = mode
+        self.singer.update_config(
+            voice=tts_cfg.get("voice"),
+            output_mode=tts_cfg.get("output_mode"),
+            rvc_enabled=tts_cfg.get("rvc_enabled"),
+            rvc_url=tts_cfg.get("rvc_url"),
+            rvc_pitch_shift=tts_cfg.get("rvc_pitch_shift"),
+        )
 
         # 2. Update VTS
         vts_cfg = new_settings.get("vts", {})
@@ -540,11 +664,14 @@ class Orchestrator:
         if twitch_cfg.get("enabled") is False and self.chat.is_running:
             self.chat.stop()
         elif twitch_cfg.get("enabled") is True and not self.chat.is_running and twitch_cfg.get("channel"):
+            raw_port = twitch_cfg.get("port")
             asyncio.create_task(
                 self.chat.start_twitch_listener(
                     channel=twitch_cfg["channel"],
                     bot_nick=twitch_cfg.get("bot_nick", ""),
-                    oauth=twitch_cfg.get("oauth_token", "")
+                    oauth=twitch_cfg.get("oauth_token", ""),
+                    use_tls=bool(twitch_cfg.get("use_tls", True)),
+                    port=int(raw_port) if raw_port else None,
                 )
             )
 
@@ -588,7 +715,14 @@ class Orchestrator:
             elif not missions_enabled and self.missions.is_running:
                 await self.missions.stop_loop()
 
-        # 7. Update AI Collab & Plugins
+        # 7. Update AI Collab, Vision VLM & Plugins
+        vision_cfg = new_settings.get("vision", {}) if isinstance(new_settings, dict) else {}
+        if hasattr(self.brain, "vision"):
+            if "vlm_enabled" in vision_cfg:
+                self.brain.vision.vlm_enabled = bool(vision_cfg.get("vlm_enabled", False))
+            if "vlm_interval_sec" in vision_cfg and vision_cfg.get("vlm_interval_sec") is not None:
+                self.brain.vision.vlm_interval_sec = float(vision_cfg.get("vlm_interval_sec", 8.0) or 8.0)
+
         self.collab.update_config(new_settings)
         self.plugins.update_config(new_settings)
         self.plugins._rebuild_command_map()
@@ -705,10 +839,19 @@ class Orchestrator:
             try:
                 dominant_mood, _ = self.brain.mood.get_dominant_mood()
                 mood_directive = self.brain.mood.get_behavioral_directive()
-                obs = await asyncio.to_thread(
-                    self.brain.vision.perceive,
+                llm_cfg = self.brain.settings.get("llm", {}) if isinstance(self.brain.settings, dict) else {}
+                gemini_key = str(llm_cfg.get("gemini_api_key") or "").strip()
+                if not gemini_key or gemini_key == "********":
+                    gemini_key = os.getenv("GEMINI_API_KEY", "").strip()
+                openai_key = str(llm_cfg.get("openai_api_key") or "").strip()
+                if not openai_key or openai_key == "********":
+                    openai_key = os.getenv("OPENAI_API_KEY", "").strip()
+                obs = await self.brain.vision.aperceive_with_vlm(
                     mood_directive=mood_directive,
-                    dominant_mood=dominant_mood
+                    dominant_mood=dominant_mood,
+                    api_provider=str(llm_cfg.get("provider", "gemini") or "gemini"),
+                    gemini_api_key=gemini_key or None,
+                    openai_api_key=openai_key or None,
                 )
                 await self.broadcast("vision_updated", self.brain.vision.get_state())
 
@@ -1218,6 +1361,7 @@ class Orchestrator:
 
         if use_streaming:
             current_emotion = "neutral"
+            current_vts_params: Optional[Dict[str, float]] = None
             raw_chunks: List[str] = []
 
             async def _stream_chunks():
@@ -1237,16 +1381,15 @@ class Orchestrator:
                     yield chunk
 
             async def on_tag(chunk_emotions: List[str], chunk_actions: List[str]):
-                nonlocal current_emotion
+                nonlocal current_emotion, current_vts_params
                 if chunk_emotions:
                     current_emotion = chunk_emotions[0]
                     self._current_emotion = current_emotion
-                    if self.vts.connected:
-                        await self.vts.trigger_expression(current_emotion)
-                    await self.broadcast("avatar_state", {
-                        "mouth_open": 0.0,
-                        "emotion": current_emotion,
-                    })
+                    current_vts_params = await self._apply_vts_mood_rig(current_emotion)
+                    await self.broadcast(
+                        "avatar_state",
+                        self._build_avatar_state(0.0, current_emotion, current_vts_params),
+                    )
 
             async def on_sentence_start(sentence_text: str):
                 _, clean_sentence = self.moderator.clean_text(sentence_text)
@@ -1267,10 +1410,10 @@ class Orchestrator:
             async def on_stream_mouth_update(val: float):
                 if self.vts.connected:
                     await self.vts.update_mouth(val)
-                await self.broadcast("avatar_state", {
-                    "mouth_open": val,
-                    "emotion": current_emotion,
-                })
+                await self.broadcast(
+                    "avatar_state",
+                    self._build_avatar_state(val, current_emotion, current_vts_params),
+                )
 
             async with self._speech_lock:
                 self._current_emotion = current_emotion
@@ -1302,6 +1445,13 @@ class Orchestrator:
 
             if primary.source == "minecraft" and speech_text:
                 await self.minecraft.send_chat(speech_text)
+            elif (
+                primary.source == "discord"
+                and getattr(self, "_discord_reply_enabled", False)
+                and getattr(self, "_discord_adapter", None) is not None
+                and speech_text
+            ):
+                await self._discord_adapter.send_message(speech_text)
         else:
             gen_kwargs: Dict[str, Any] = {
                 "user_name": primary.user,
@@ -1335,17 +1485,23 @@ class Orchestrator:
 
             if primary.source == "minecraft":
                 await self.minecraft.send_chat(speech_text)
+            elif (
+                primary.source == "discord"
+                and getattr(self, "_discord_reply_enabled", False)
+                and getattr(self, "_discord_adapter", None) is not None
+                and speech_text
+            ):
+                await self._discord_adapter.send_message(speech_text)
 
-            if self.vts.connected:
-                await self.vts.trigger_expression(primary_emotion)
+            vts_params = await self._apply_vts_mood_rig(primary_emotion)
 
             async def on_mouth_update(val: float):
                 if self.vts.connected:
                     await self.vts.update_mouth(val)
-                await self.broadcast("avatar_state", {
-                    "mouth_open": val,
-                    "emotion": primary_emotion
-                })
+                await self.broadcast(
+                    "avatar_state",
+                    self._build_avatar_state(val, primary_emotion, vts_params),
+                )
 
             print(f"[AI Speech] [{primary_emotion}] {speech_text}")
             async with self._speech_lock:
@@ -1353,14 +1509,14 @@ class Orchestrator:
                 await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
                 self._current_emotion = "neutral"
 
+        neutral_vts_params = await self._apply_vts_mood_rig("neutral")
         if self.vts.connected:
-            await self.vts.trigger_expression("neutral")
             await self.vts.update_mouth(0.0)
 
-        await self.broadcast("avatar_state", {
-            "mouth_open": 0.0,
-            "emotion": "neutral"
-        })
+        await self.broadcast(
+            "avatar_state",
+            self._build_avatar_state(0.0, "neutral", neutral_vts_params),
+        )
         await self.broadcast("conversation_state", self.brain.get_conversation_state())
         await self.broadcast("mood_updated", self.brain.mood.get_state())
 
@@ -1395,13 +1551,15 @@ class Orchestrator:
             "emotions": emotions,
             "actions": actions
         })
-        if self.vts.connected:
-            await self.vts.trigger_expression(primary_emotion)
+        vts_params = await self._apply_vts_mood_rig(primary_emotion)
 
         async def on_mouth_update(val: float):
             if self.vts.connected:
                 await self.vts.update_mouth(val)
-            await self.broadcast("avatar_state", {"mouth_open": val, "emotion": primary_emotion})
+            await self.broadcast(
+                "avatar_state",
+                self._build_avatar_state(val, primary_emotion, vts_params),
+            )
 
         async with self._speech_lock:
             self._current_emotion = primary_emotion
@@ -1412,18 +1570,20 @@ class Orchestrator:
         await self.broadcast("song_started", {"song_id": actual_song_id, "title": title})
 
         line_counter = 0
+        sing_emotion = "happy"
+        sing_vts_params = await self._apply_vts_mood_rig(sing_emotion, singing=True)
 
         async def on_lyric_update(line_text: str, default_emotion: str):
-            nonlocal line_counter
+            nonlocal line_counter, sing_emotion, sing_vts_params
             step = director.get_choreography_step_for_line(actual_song_id, line_counter)
             line_counter += 1
 
             emotion = step.emotion or default_emotion
+            sing_emotion = emotion
             self._current_emotion = emotion
             print(f"[Stage Choreography] [{step.section.upper()}] [{emotion}] [{step.movement}] ♪ {line_text} ♪")
 
-            if self.vts.connected:
-                await self.vts.trigger_expression(emotion)
+            sing_vts_params = await self._apply_vts_mood_rig(emotion, singing=True)
 
             await self.broadcast("performance_updated", director.get_state())
             await self.broadcast("lyric_line", {
@@ -1446,7 +1606,10 @@ class Orchestrator:
         async def on_sing_mouth(val: float):
             if self.vts.connected:
                 await self.vts.update_mouth(val)
-            await self.broadcast("avatar_state", {"mouth_open": val, "is_singing": True})
+            await self.broadcast(
+                "avatar_state",
+                self._build_avatar_state(val, sing_emotion, sing_vts_params, is_singing=True),
+            )
 
         async def on_vocal_audio(audio_bytes: bytes, lyric_text: str):
             await self._on_tts_audio_ready(audio_bytes, lyric_text, self.singer.voice)
@@ -1479,23 +1642,21 @@ class Orchestrator:
             "emotions": emotions,
             "actions": actions
         })
-        if self.vts.connected:
-            await self.vts.trigger_expression(primary_emotion)
+        vts_params = await self._apply_vts_mood_rig(primary_emotion)
         async with self._speech_lock:
             self._current_emotion = primary_emotion
             await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
         # Return to idle
+        neutral_vts_params = await self._apply_vts_mood_rig("neutral", singing=False)
         if self.vts.connected:
-            await self.vts.trigger_expression("neutral")
             await self.vts.update_mouth(0.0)
 
-        await self.broadcast("avatar_state", {
-            "mouth_open": 0.0,
-            "emotion": "neutral",
-            "is_singing": False
-        })
+        await self.broadcast(
+            "avatar_state",
+            self._build_avatar_state(0.0, "neutral", neutral_vts_params, is_singing=False),
+        )
 
     async def _on_minecraft_commentary(self, speech_raw: str):
         async with self._speech_lock:
@@ -1536,6 +1697,9 @@ class Orchestrator:
     async def _on_minecraft_state_change(self, state: Dict[str, Any]):
         await self.broadcast("minecraft_state", state)
 
+    async def _on_minecraft_telemetry(self, telemetry: Dict[str, Any]):
+        await self.broadcast("mc_telemetry", telemetry)
+
     async def _on_in_game_chat(self, sender: str, message: str):
         print(f"[Minecraft Chat Ingested] <{sender}>: {message}")
         prof = self.brain.conversation.user_memory.get_or_create(sender)
@@ -1565,24 +1729,29 @@ class Orchestrator:
                 "channel": "creator" if is_creator else "audience"
             })
 
-            if self.vts.connected:
-                await self.vts.trigger_expression(primary_emotion)
+            vts_params = await self._apply_vts_mood_rig(primary_emotion)
 
             async def on_mouth_update(val: float):
                 if self.vts.connected:
                     await self.vts.update_mouth(val)
-                await self.broadcast("avatar_state", {"mouth_open": val, "emotion": primary_emotion})
+                await self.broadcast(
+                    "avatar_state",
+                    self._build_avatar_state(val, primary_emotion, vts_params),
+                )
 
             print(f"[{user_label}] [{primary_emotion}] {speech_text}")
             self._current_emotion = primary_emotion
             await self.tts.speak(speech_text, on_mouth_update=lambda val: asyncio.create_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
+            neutral_vts_params = await self._apply_vts_mood_rig("neutral")
             if self.vts.connected:
-                await self.vts.trigger_expression("neutral")
                 await self.vts.update_mouth(0.0)
 
-            await self.broadcast("avatar_state", {"mouth_open": 0.0, "emotion": "neutral"})
+            await self.broadcast(
+                "avatar_state",
+                self._build_avatar_state(0.0, "neutral", neutral_vts_params),
+            )
 
     async def _on_chess_commentary(self, speech_raw: str):
         await self._speak_response(speech_raw, user_label="Eve (Chess)")

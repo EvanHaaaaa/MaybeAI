@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>MaybeAI — Creator Stream Deck</title>
+  <link rel="stylesheet" href="/static/deck.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="deck-shell">
+    <header class="deck-header">
+      <div class="deck-brand">
+        <span class="pulse-dot"></span>
+        <div>
+          <h1>MaybeAI Deck</h1>
+          <small>Creator Mobile Control Surface</small>
+        </div>
+      </div>
+      <div class="deck-nav-links">
+        <a href="/" class="deck-link-btn">🎤 Studio</a>
+        <a href="/overlay" target="_blank" class="deck-link-btn">📺 Overlay</a>
+      </div>
+    </header>
+
+    <section class="deck-status-strip" aria-label="Live Status">
+      <span id="badge-ws" class="status-pill status-offline">WS: Connecting</span>
+      <span id="badge-mood" class="status-pill status-accent">Mood: Neutral</span>
+      <span id="badge-mission" class="status-pill">Mission: Paused</span>
+      <span id="badge-barge-in" class="status-pill">Barge-In: 0</span>
+    </section>
+
+    <section id="deck-auth-bar" class="deck-auth-bar" style="display: none;">
+      <input type="password" id="deckTokenInput" placeholder="Creator Token (?token=...)" autocomplete="off">
+      <button type="button" id="btnSaveToken" class="btn-token-save">Save Token</button>
+    </section>
+
+    <main class="deck-grid" role="group" aria-label="Stream Deck Controls">
+      <button type="button" id="btn-deck-barge-in" class="deck-btn deck-btn-danger">
+        <span class="deck-icon">⚡</span>
+        <span class="deck-label">Barge-In</span>
+        <span class="deck-sub">Cut Eve &amp; Listen</span>
+      </button>
+
+      <button type="button" id="btn-deck-mic" class="deck-btn deck-btn-cyan">
+        <span class="deck-icon">🎙️</span>
+        <span class="deck-label" id="deck-mic-label">Mic: OFF</span>
+        <span class="deck-sub" id="deck-mic-sub">Tap to Stream PCM</span>
+      </button>
+
+      <button type="button" id="btn-deck-mute" class="deck-btn deck-btn-violet">
+        <span class="deck-icon" id="deck-mute-icon">🔊</span>
+        <span class="deck-label" id="deck-mute-label">Audio: ON</span>
+        <span class="deck-sub">Browser TTS Output</span>
+      </button>
+
+      <button type="button" id="btn-deck-mission-step" class="deck-btn deck-btn-amber">
+        <span class="deck-icon">⏩</span>
+        <span class="deck-label">Mission Step</span>
+        <span class="deck-sub">Execute 1 Subtask</span>
+      </button>
+
+      <button type="button" id="btn-deck-mission-loop" class="deck-btn deck-btn-emerald">
+        <span class="deck-icon" id="deck-loop-icon">▶</span>
+        <span class="deck-label" id="deck-loop-label">Mission Loop</span>
+        <span class="deck-sub" id="deck-loop-sub">Start / Pause Auto</span>
+      </button>
+
+      <button type="button" id="btn-deck-sing" class="deck-btn deck-btn-pink">
+        <span class="deck-icon">🎵</span>
+        <span class="deck-label">Sing Song</span>
+        <span class="deck-sub">AI Idol Stage</span>
+      </button>
+
+      <button type="button" id="btn-deck-improv" class="deck-btn deck-btn-indigo">
+        <span class="deck-icon">🎭</span>
+        <span class="deck-label">Improv</span>
+        <span class="deck-sub">Spontaneous Bit</span>
+      </button>
+
+      <button type="button" id="btn-deck-collab" class="deck-btn deck-btn-teal">
+        <span class="deck-icon">🤝</span>
+        <span class="deck-label">Collab Topic</span>
+        <span class="deck-sub">Send Peer Topic</span>
+      </button>
+
+      <button type="button" id="btn-deck-stop-speech" class="deck-btn deck-btn-crimson">
+        <span class="deck-icon">🛑</span>
+        <span class="deck-label">Stop Speech</span>
+        <span class="deck-sub">Silence TTS / Song</span>
+      </button>
+    </main>
+
+    <section id="deck-collab-drawer" class="deck-collab-drawer" style="display: none;">
+      <input type="text" id="deckCollabTopicInput" placeholder="Enter collab topic (e.g. AI vs Humans)...">
+      <button type="button" id="btnSendCollabTopic" class="btn-token-save">Send</button>
+      <button type="button" id="btnCancelCollabTopic" class="btn-drawer-cancel">✕</button>
+    </section>
+
+    <footer class="deck-feedback-bar">
+      <span id="deckFeedbackText">Ready. Tap any pad to control Eve Maybe.</span>
+    </footer>
+  </div>
+
+  <script src="/static/deck.js"></script>
+</body>
+</html>

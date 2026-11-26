@@ -46,6 +46,7 @@ class MinecraftController:
         self.connection_status = "disconnected"  # "disconnected", "connecting", "connected"
         self.viewer_url: Optional[str] = None
         self.nearby_players: List[Dict[str, Any]] = []
+        self.latest_telemetry: Dict[str, Any] = {}
 
         # Bot Process & WebSocket Bridge
         self.bot_process: Optional[subprocess.Popen] = None
@@ -55,16 +56,19 @@ class MinecraftController:
         self.on_commentary_callback: Optional[Callable[[str], Any]] = None
         self.on_state_change_callback: Optional[Callable[[Dict[str, Any]], Any]] = None
         self.on_in_game_chat_callback: Optional[Callable[[str, str], Any]] = None
+        self.on_telemetry_callback: Optional[Callable[[Dict[str, Any]], Any]] = None
 
     def set_callbacks(
         self, 
         on_commentary: Callable[[str], Any], 
         on_state_change: Optional[Callable[[Dict[str, Any]], Any]] = None,
-        on_in_game_chat: Optional[Callable[[str, str], Any]] = None
+        on_in_game_chat: Optional[Callable[[str, str], Any]] = None,
+        on_telemetry: Optional[Callable[[Dict[str, Any]], Any]] = None,
     ):
         self.on_commentary_callback = on_commentary
         self.on_state_change_callback = on_state_change
         self.on_in_game_chat_callback = on_in_game_chat
+        self.on_telemetry_callback = on_telemetry
 
     def load_servers(self):
         if self.servers_config_path.exists():
@@ -128,8 +132,53 @@ class MinecraftController:
                 "kills": self.guard_agent.kills_count
             },
             "nearby_players": self.nearby_players,
+            "telemetry": self.get_telemetry(),
             "multiplayer": self.multiplayer.get_state()
         }
+
+    def get_telemetry(self) -> Dict[str, Any]:
+        """Returns the latest Mineflayer telemetry snapshot."""
+        if self.latest_telemetry:
+            return dict(self.latest_telemetry)
+        return {
+            "health": self.health,
+            "food": self.food,
+            "pos": self.pos,
+            "biome": "unknown",
+            "inventory": {},
+            "nearby_players": list(self.nearby_players),
+            "nearby_hostiles": [],
+        }
+
+    def get_inventory_count(self, item_terms: Any) -> int:
+        """
+        Sums inventory item counts matching any term in `item_terms`
+        (case-insensitive substring match against item names).
+        """
+        if isinstance(item_terms, str):
+            raw_terms = [item_terms]
+        elif item_terms is None:
+            raw_terms = []
+        else:
+            raw_terms = list(item_terms)
+
+        terms = [str(t).strip().lower() for t in raw_terms if t and str(t).strip()]
+        if not terms:
+            return 0
+
+        inventory = self.latest_telemetry.get("inventory", {})
+        if not isinstance(inventory, dict):
+            return 0
+
+        total = 0
+        for item_name, count in inventory.items():
+            name_lower = str(item_name).lower()
+            if any(term in name_lower for term in terms):
+                try:
+                    total += int(count)
+                except (TypeError, ValueError):
+                    pass
+        return total
 
     async def _ensure_bridge_running(self):
         """Checks and starts the Mineflayer Node.js bot process and WebSocket bridge."""
@@ -259,6 +308,19 @@ class MinecraftController:
                     tgt = data.get("target", self.guard_target)
                     comment = self.guard_agent.on_player_hurt(attacker, tgt)
                     await self.emit_commentary(comment)
+                    await self.emit_state()
+
+                elif event_type == "mc_telemetry":
+                    self.health = data.get("health", self.health)
+                    self.food = data.get("food", self.food)
+                    self.pos = data.get("pos", self.pos)
+                    if "nearby_players" in data and isinstance(data["nearby_players"], list):
+                        self.nearby_players = data["nearby_players"]
+                    self.latest_telemetry = dict(data)
+                    if self.on_telemetry_callback:
+                        res = self.on_telemetry_callback(self.latest_telemetry)
+                        if asyncio.iscoroutine(res):
+                            await res
                     await self.emit_state()
 
                 elif event_type == "viewer_started":

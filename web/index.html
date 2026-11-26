@@ -27,6 +27,7 @@
         </div>
         <div class="status-tags">
           <a href="/overlay" target="_blank" class="btn btn-outline btn-obs-overlay">📺 OBS Overlay</a>
+          <a href="/deck" target="_blank" class="btn btn-outline btn-stream-deck" style="text-decoration:none; margin-right: 6px; font-size: 0.8rem; padding: 6px 12px; border-color: rgba(0, 240, 255, 0.55); color: #67e8f9; background: rgba(0, 240, 255, 0.08);">🎛️ Stream Deck</a>
           <a href="/settings" class="btn btn-outline" style="text-decoration:none; margin-right: 6px; font-size: 0.8rem; padding: 6px 12px; border-color: rgba(139, 92, 246, 0.6); color: #c4b5fd; background: rgba(139, 92, 246, 0.1);">⚙️ Configuration Center</a>
           <button id="btn-toggle-mic-header" class="btn btn-mic-toggle">🎙️ Mic: OFF</button>
           <span id="llm-status" class="badge badge-accent">LLM: GEMINI</span>
@@ -54,10 +55,22 @@
       <section class="card avatar-card">
         <div class="card-header">
           <h2>Virtual Avatar (OBS Browser Source)</h2>
-          <span id="emotion-badge" class="badge badge-accent">Neutral</span>
+          <div class="avatar-header-controls">
+            <div class="renderer-toggle-group" role="group" aria-label="Avatar Renderer">
+              <button type="button" id="btn-renderer-2d" class="renderer-btn active" data-renderer="2d">2D Canvas</button>
+              <button type="button" id="btn-renderer-vrm" class="renderer-btn" data-renderer="vrm">3D VRM</button>
+            </div>
+            <span id="emotion-badge" class="badge badge-accent">Neutral</span>
+          </div>
+        </div>
+        <div id="vrm-url-bar" class="vrm-url-bar" style="display: none;">
+          <input type="text" id="vrmUrlInput" placeholder="URL file .vrm (kosongkan = fallback 2D Canvas)" autocomplete="off">
+          <button type="button" id="btn-load-vrm" class="btn btn-secondary btn-sm">Load VRM</button>
+          <span id="vrm-status-text" class="vrm-status-text">2D Fallback</span>
         </div>
         <div class="avatar-canvas-wrapper">
           <canvas id="avatarCanvas" width="450" height="450"></canvas>
+          <div id="vrmContainer" class="vrm-container" style="display: none;"></div>
           <div class="subtitles" id="subtitles">"Waiting for chat..."</div>
 
           <!-- Real-Time Donation & Superchat Alert Banner (OBS Ready) -->

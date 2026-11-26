@@ -123,6 +123,7 @@ document.addEventListener("DOMContentLoaded", () => {
   let isEveSpeaking = false;
   let eveSpeakingTailTimer = null;
   let bargeInBadgeTimer = null;
+  let latestVtsParams = null;
 
   function markEveSpeaking(speaking) {
     if (speaking) {
@@ -431,8 +432,24 @@ document.addEventListener("DOMContentLoaded", () => {
       stopBrowserAudioOutput();
       flashBargeInBadge("⚡ Barge-In!");
       if (subtitles) subtitles.textContent = "⚡ [Creator Barge-In] Mendengarkan...";
+    } else if (msg.type === "stt_partial") {
+      const partialText = (msg.data && (msg.data.text || msg.data.transcript)) || "";
+      if (partialText && micTranscriptPreview) {
+        micTranscriptPreview.textContent = `"${partialText}"`;
+      }
+      if (partialText) {
+        triggerVoiceBargeIn("creator_vad");
+      }
+    } else if (msg.type === "stt_final") {
+      const finalText = (msg.data && (msg.data.text || msg.data.transcript)) || "";
+      if (finalText && micTranscriptPreview) {
+        micTranscriptPreview.textContent = `Terkirim: "${finalText}"`;
+      }
     } else if (msg.type === "avatar_state") {
       targetMouthOpen = msg.data.mouth_open || 0.0;
+      if (msg.data.vts_params && typeof msg.data.vts_params === "object") {
+        latestVtsParams = msg.data.vts_params;
+      }
       if (targetMouthOpen > 0.05) {
         markEveSpeaking(true);
       } else {
@@ -744,6 +761,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   let recognition = null;
   let isListeningMic = false;
+  let useWorkletMic = false;
+  let workletNode = null;
   let vadAudioContext = null;
   let vadMediaStream = null;
   let vadAnalyser = null;
@@ -752,6 +771,15 @@ document.addEventListener("DOMContentLoaded", () => {
   let vadThreshold = 0.02;
   let vadSpeechFrames = 0;
   let lastBargeInSentAt = 0;
+
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return binary ? btoa(binary) : "";
+  }
 
   function triggerVoiceBargeIn(reason = "creator_vad") {
     const autoEnabled = chkBargeIn ? chkBargeIn.checked : true;
@@ -777,6 +805,45 @@ document.addEventListener("DOMContentLoaded", () => {
     flashBargeInBadge("⚡ Barge-In!");
   }
 
+  function attachVadAnalyser(ctxAudio, sourceNode) {
+    vadAnalyser = ctxAudio.createAnalyser();
+    vadAnalyser.fftSize = 512;
+    sourceNode.connect(vadAnalyser);
+    vadTimeData = new Float32Array(vadAnalyser.fftSize);
+    vadSpeechFrames = 0;
+
+    const sampleVad = () => {
+      if (!isListeningMic || !vadAnalyser || !vadTimeData) return;
+      vadAnalyser.getFloatTimeDomainData(vadTimeData);
+      let sumSq = 0;
+      for (let i = 0; i < vadTimeData.length; i++) {
+        sumSq += vadTimeData[i] * vadTimeData[i];
+      }
+      const rms = Math.sqrt(sumSq / vadTimeData.length);
+      const pct = Math.min(100, Math.round(rms * 500));
+      const isHot = rms >= vadThreshold;
+
+      if (vadEnergyFill) {
+        vadEnergyFill.style.width = `${pct}%`;
+        vadEnergyFill.classList.toggle("vad-speech-hot", isHot);
+      }
+      if (vadRmsLabel) {
+        vadRmsLabel.textContent = `VAD: ${rms.toFixed(3)}`;
+      }
+
+      if (isHot) {
+        vadSpeechFrames += 1;
+        if (vadSpeechFrames >= 2) {
+          triggerVoiceBargeIn("creator_vad");
+        }
+      } else {
+        vadSpeechFrames = 0;
+      }
+      vadRafId = requestAnimationFrame(sampleVad);
+    };
+    vadRafId = requestAnimationFrame(sampleVad);
+  }
+
   async function startVadMonitor() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
     try {
@@ -796,42 +863,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!AudioCtx) return;
       vadAudioContext = new AudioCtx();
       const source = vadAudioContext.createMediaStreamSource(vadMediaStream);
-      vadAnalyser = vadAudioContext.createAnalyser();
-      vadAnalyser.fftSize = 512;
-      source.connect(vadAnalyser);
-      vadTimeData = new Float32Array(vadAnalyser.fftSize);
-      vadSpeechFrames = 0;
-
-      const sampleVad = () => {
-        if (!isListeningMic || !vadAnalyser || !vadTimeData) return;
-        vadAnalyser.getFloatTimeDomainData(vadTimeData);
-        let sumSq = 0;
-        for (let i = 0; i < vadTimeData.length; i++) {
-          sumSq += vadTimeData[i] * vadTimeData[i];
-        }
-        const rms = Math.sqrt(sumSq / vadTimeData.length);
-        const pct = Math.min(100, Math.round(rms * 500));
-        const isHot = rms >= vadThreshold;
-
-        if (vadEnergyFill) {
-          vadEnergyFill.style.width = `${pct}%`;
-          vadEnergyFill.classList.toggle("vad-speech-hot", isHot);
-        }
-        if (vadRmsLabel) {
-          vadRmsLabel.textContent = `VAD: ${rms.toFixed(3)}`;
-        }
-
-        if (isHot) {
-          vadSpeechFrames += 1;
-          if (vadSpeechFrames >= 2) {
-            triggerVoiceBargeIn("creator_vad");
-          }
-        } else {
-          vadSpeechFrames = 0;
-        }
-        vadRafId = requestAnimationFrame(sampleVad);
-      };
-      vadRafId = requestAnimationFrame(sampleVad);
+      attachVadAnalyser(vadAudioContext, source);
     } catch (e) {
       // Gracefully continue with SpeechRecognition only if getUserMedia is unavailable
     }
@@ -841,6 +873,11 @@ document.addEventListener("DOMContentLoaded", () => {
     if (vadRafId) {
       cancelAnimationFrame(vadRafId);
       vadRafId = null;
+    }
+    if (workletNode) {
+      try { workletNode.port.postMessage({ type: "stop" }); } catch (e) {}
+      try { workletNode.disconnect(); } catch (e) {}
+      workletNode = null;
     }
     if (vadMediaStream) {
       try {
@@ -855,6 +892,7 @@ document.addEventListener("DOMContentLoaded", () => {
     vadAnalyser = null;
     vadTimeData = null;
     vadSpeechFrames = 0;
+    useWorkletMic = false;
     if (vadEnergyFill) {
       vadEnergyFill.style.width = "0%";
       vadEnergyFill.classList.remove("vad-speech-hot");
@@ -970,12 +1008,80 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
-  function startMic() {
+  async function startWorkletMic() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const canWorklet = Boolean(
+      navigator.mediaDevices &&
+      navigator.mediaDevices.getUserMedia &&
+      AudioCtx &&
+      AudioCtx.prototype &&
+      "audioWorklet" in AudioCtx.prototype
+    );
+    if (!canWorklet) return false;
+
+    try {
+      const resp = await authFetch("/api/voice/status");
+      if (resp.ok) {
+        const vst = await resp.json();
+        const th = vst && vst.stt && Number(vst.stt.vad_energy_threshold);
+        if (Number.isFinite(th) && th > 0) vadThreshold = th;
+      }
+    } catch (e) {}
+
+    try {
+      vadMediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+      vadAudioContext = new AudioCtx();
+      await vadAudioContext.audioWorklet.addModule("/static/audio-worklet-processor.js");
+
+      const source = vadAudioContext.createMediaStreamSource(vadMediaStream);
+      workletNode = new AudioWorkletNode(vadAudioContext, "maybeai-pcm-processor", {
+        processorOptions: { targetSampleRate: 16000, frameSize: 512 }
+      });
+      workletNode.port.onmessage = (event) => {
+        if (!isListeningMic || !useWorkletMic || !event.data || event.data.type !== "pcm16") return;
+        const b64 = arrayBufferToBase64(event.data.buffer);
+        if (!b64 || !ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(JSON.stringify({
+          type: "voice_audio_chunk",
+          audio_b64: b64,
+          sample_rate: 16000,
+          user: "Creator",
+          language: micLangSelect ? micLangSelect.value : "id-ID"
+        }));
+      };
+
+      const silentGain = vadAudioContext.createGain();
+      silentGain.gain.value = 0;
+      source.connect(workletNode);
+      workletNode.connect(silentGain);
+      silentGain.connect(vadAudioContext.destination);
+
+      useWorkletMic = true;
+      isListeningMic = true;
+      attachVadAnalyser(vadAudioContext, source);
+      updateMicUiState(true);
+      if (micTranscriptPreview) {
+        micTranscriptPreview.textContent = "🎙️ Streaming 16kHz PCM (AudioWorklet)...";
+      }
+      return true;
+    } catch (err) {
+      stopVadMonitor();
+      return false;
+    }
+  }
+
+  async function startMic() {
+    isListeningMic = true;
+    const workletStarted = await startWorkletMic();
+    if (workletStarted) return;
+
     if (!SpeechRecognition) {
-      alert("Browser Anda belum mendukung SpeechRecognition API. Silakan buka MaybeAI menggunakan Google Chrome atau Microsoft Edge untuk menggunakan mic.");
+      isListeningMic = false;
+      alert("Browser Anda belum mendukung AudioWorklet atau SpeechRecognition API.");
       return;
     }
-    isListeningMic = true;
     try {
       recognition.start();
     } catch (e) {
@@ -5117,8 +5223,170 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
+    if (typeof updateVrmFrame === "function") {
+      updateVrmFrame(0.016);
+    }
+
     requestAnimationFrame(render);
   }
+
+  // --- Optional 3D VRM Renderer (ESM CDN + graceful 2D Canvas fallback) ---
+  const RENDERER_STORAGE_KEY = "maybeai_avatar_renderer";
+  const VRM_URL_STORAGE_KEY = "maybeai_vrm_url";
+  const btnRenderer2d = document.getElementById("btn-renderer-2d");
+  const btnRendererVrm = document.getElementById("btn-renderer-vrm");
+  const vrmUrlBar = document.getElementById("vrm-url-bar");
+  const vrmUrlInput = document.getElementById("vrmUrlInput");
+  const btnLoadVrm = document.getElementById("btn-load-vrm");
+  const vrmStatusText = document.getElementById("vrm-status-text");
+  const vrmContainer = document.getElementById("vrmContainer");
+
+  let activeRenderer = "2d";
+  let vrmInstance = null;
+  let vrmThree = null;
+  let vrmRenderer = null;
+  let vrmScene = null;
+  let vrmCamera = null;
+  let vrmLoaded = false;
+
+  function setVrmStatus(text) {
+    if (vrmStatusText) vrmStatusText.textContent = text;
+  }
+
+  function show2dFallback(reasonText = "2D Fallback") {
+    vrmLoaded = false;
+    if (canvas) canvas.style.display = "block";
+    if (vrmContainer) vrmContainer.style.display = "none";
+    setVrmStatus(reasonText);
+  }
+
+  function updateRendererButtons(mode) {
+    activeRenderer = mode === "vrm" ? "vrm" : "2d";
+    if (btnRenderer2d) btnRenderer2d.classList.toggle("active", activeRenderer === "2d");
+    if (btnRendererVrm) btnRendererVrm.classList.toggle("active", activeRenderer === "vrm");
+    if (vrmUrlBar) vrmUrlBar.style.display = activeRenderer === "vrm" ? "flex" : "none";
+    try { localStorage.setItem(RENDERER_STORAGE_KEY, activeRenderer); } catch (e) {}
+  }
+
+  async function initAndLoadVrm(vrmUrl) {
+    const cleanUrl = (vrmUrl || "").trim();
+    if (!cleanUrl || !vrmContainer) {
+      show2dFallback("No .vrm URL (2D Fallback)");
+      return false;
+    }
+    try { localStorage.setItem(VRM_URL_STORAGE_KEY, cleanUrl); } catch (e) {}
+    setVrmStatus("Loading Three.js + VRM...");
+    try {
+      const [THREE, gltfMod, vrmMod] = await Promise.all([
+        import("https://esm.sh/three@0.169.0"),
+        import("https://esm.sh/three@0.169.0/examples/jsm/loaders/GLTFLoader.js"),
+        import("https://esm.sh/@pixiv/three-vrm@3.2.0?deps=three@0.169.0")
+      ]);
+      vrmThree = THREE;
+      if (!vrmRenderer) {
+        vrmRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+        vrmRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        vrmRenderer.setSize(450, 450);
+        vrmContainer.innerHTML = "";
+        vrmContainer.appendChild(vrmRenderer.domElement);
+
+        vrmScene = new THREE.Scene();
+        vrmCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
+        vrmCamera.position.set(0, 1.35, 1.45);
+        const light = new THREE.DirectionalLight(0xffffff, 1.4);
+        light.position.set(1, 2, 2);
+        vrmScene.add(light);
+        vrmScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+      }
+
+      const loader = new gltfMod.GLTFLoader();
+      loader.register((parser) => new vrmMod.VRMLoaderPlugin(parser));
+      const gltf = await loader.loadAsync(cleanUrl);
+      const vrm = gltf.userData && gltf.userData.vrm;
+      if (!vrm) throw new Error("Invalid VRM file");
+
+      if (vrmInstance && vrmScene) {
+        vrmScene.remove(vrmInstance.scene);
+      }
+      vrmInstance = vrm;
+      vrmInstance.scene.rotation.y = Math.PI;
+      vrmScene.add(vrmInstance.scene);
+
+      vrmLoaded = true;
+      if (canvas) canvas.style.display = "none";
+      vrmContainer.style.display = "block";
+      setVrmStatus("3D VRM Active");
+      return true;
+    } catch (err) {
+      show2dFallback("Offline / Load Failed (2D Fallback)");
+      return false;
+    }
+  }
+
+  function updateVrmFrame(delta) {
+    if (activeRenderer !== "vrm" || !vrmLoaded || !vrmInstance || !vrmRenderer || !vrmScene || !vrmCamera) return;
+    const em = vrmInstance.expressionManager;
+    if (em) {
+      em.setValue("aa", Math.max(0, Math.min(1, mouthOpen)));
+      em.setValue("blink", Math.max(0, Math.min(1, eyeBlink)));
+      const emoMap = {
+        happy: "happy",
+        excited: "happy",
+        sad: "sad",
+        angry: "angry",
+        annoyed: "angry",
+        surprised: "surprised",
+        smug: "relaxed",
+        blush: "happy"
+      };
+      ["happy", "sad", "angry", "surprised", "relaxed"].forEach((k) => {
+        em.setValue(k, emoMap[emotion] === k ? 0.85 : 0.0);
+      });
+    }
+    const head = vrmInstance.humanoid && vrmInstance.humanoid.getNormalizedBoneNode("head");
+    if (head) {
+      const vp = latestVtsParams || {};
+      const degToRad = Math.PI / 180;
+      const yaw = Number.isFinite(Number(vp.FaceAngleX)) ? Number(vp.FaceAngleX) * degToRad * 0.5 : Math.sin(time * 0.8) * 0.05;
+      const pitch = Number.isFinite(Number(vp.FaceAngleY)) ? Number(vp.FaceAngleY) * degToRad * 0.4 : 0;
+      const roll = Number.isFinite(Number(vp.FaceAngleZ)) ? Number(vp.FaceAngleZ) * degToRad * 0.4 : headTilt;
+      head.rotation.set(pitch, yaw, roll);
+    }
+    vrmInstance.update(delta);
+    vrmRenderer.render(vrmScene, vrmCamera);
+  }
+
+  if (btnRenderer2d) {
+    btnRenderer2d.addEventListener("click", () => {
+      updateRendererButtons("2d");
+      show2dFallback("2D Canvas Active");
+    });
+  }
+  if (btnRendererVrm) {
+    btnRendererVrm.addEventListener("click", () => {
+      updateRendererButtons("vrm");
+      const savedUrl = (vrmUrlInput && vrmUrlInput.value.trim()) || "";
+      initAndLoadVrm(savedUrl);
+    });
+  }
+  if (btnLoadVrm) {
+    btnLoadVrm.addEventListener("click", () => {
+      updateRendererButtons("vrm");
+      initAndLoadVrm(vrmUrlInput ? vrmUrlInput.value : "");
+    });
+  }
+
+  try {
+    const savedVrmUrl = localStorage.getItem(VRM_URL_STORAGE_KEY) || "";
+    if (vrmUrlInput && savedVrmUrl) vrmUrlInput.value = savedVrmUrl;
+    const savedRenderer = localStorage.getItem(RENDERER_STORAGE_KEY) || "2d";
+    updateRendererButtons(savedRenderer);
+    if (savedRenderer === "vrm" && savedVrmUrl) {
+      initAndLoadVrm(savedVrmUrl);
+    } else if (savedRenderer === "vrm") {
+      show2dFallback("No .vrm URL (2D Fallback)");
+    }
+  } catch (e) {}
 
   const NOTE_CHARS = ["♪", "♫", "♬", "♩"];
   function spawnMusicNote() {

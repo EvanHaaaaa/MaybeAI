@@ -230,6 +230,22 @@ class AutonomousMissionExecutor:
 
         return active_goal, active_sub
 
+    def _build_minecraft_item_terms(self, item_name: str, subtask: Subtask) -> List[str]:
+        terms: List[str] = []
+        raw_candidates = [item_name, subtask.unit or ""]
+        for raw in raw_candidates:
+            cleaned = str(raw).strip().lower()
+            if not cleaned:
+                continue
+            terms.append(cleaned)
+            if cleaned.endswith("s") and len(cleaned) > 3:
+                terms.append(cleaned[:-1])
+        if any(t in ("log", "logs", "wood", "kayu") for t in terms):
+            for wood_term in ("log", "wood", "plank"):
+                if wood_term not in terms:
+                    terms.append(wood_term)
+        return terms
+
     async def _execute_minecraft(self, plan: Dict[str, Any], goal: Goal, subtask: Subtask) -> Dict[str, Any]:
         params = plan["params"]
         action_name = plan["action_name"]
@@ -254,14 +270,58 @@ class AutonomousMissionExecutor:
                     await self._maybe_await(self.minecraft.guard_player(getattr(self.minecraft, "guard_target", None)))
                 eval_res = self.goal_engine.evaluate_event("minecraft_guard_victory", {"connected": True, "delta": delta})
             else:
+                item_name = str(params.get("item", "logs"))
+                item_terms = self._build_minecraft_item_terms(item_name, subtask)
+                has_telemetry_api = (
+                    hasattr(self.minecraft, "get_inventory_count")
+                    and hasattr(self.minecraft, "get_telemetry")
+                )
+                telemetry_snapshot = self.minecraft.get_telemetry() if has_telemetry_api else None
+                before_count = (
+                    self.minecraft.get_inventory_count(item_terms)
+                    if has_telemetry_api and isinstance(telemetry_snapshot, dict)
+                    else None
+                )
+                use_real_telemetry = (
+                    isinstance(before_count, (int, float))
+                    and not isinstance(before_count, bool)
+                )
+
                 if hasattr(self.minecraft, "toggle_wander"):
                     await self._maybe_await(self.minecraft.toggle_wander())
                 elif hasattr(self.minecraft, "jump"):
                     await self._maybe_await(self.minecraft.jump())
-                eval_res = self.goal_engine.evaluate_event(
-                    "minecraft_item_collected",
-                    {"item": params.get("item", "logs"), "count": delta, "connected": True},
-                )
+
+                if use_real_telemetry:
+                    after_count = self.minecraft.get_inventory_count(item_terms)
+                    observed_delta = (
+                        max(0, int(after_count) - int(before_count))
+                        if isinstance(after_count, (int, float)) and not isinstance(after_count, bool)
+                        else 0
+                    )
+                    if observed_delta <= 0:
+                        return {
+                            "success": False,
+                            "connected": True,
+                            "mode": params.get("mode"),
+                            "observed_delta": 0,
+                            "error": f"No real inventory delta observed for {item_name}",
+                            "eval": {"advanced": False},
+                        }
+                    eval_res = self.goal_engine.evaluate_event(
+                        "minecraft_item_collected",
+                        {
+                            "item": item_name,
+                            "count": observed_delta,
+                            "connected": True,
+                            "verified_by_telemetry": True,
+                        },
+                    )
+                else:
+                    eval_res = self.goal_engine.evaluate_event(
+                        "minecraft_item_collected",
+                        {"item": item_name, "count": delta, "connected": True},
+                    )
         else:
             commentary = (
                 f"[emotion: happy] [Minecraft Expedition] Eve lagi jalanin misi '{subtask.title}' "

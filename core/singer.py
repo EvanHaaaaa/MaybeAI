@@ -8,6 +8,8 @@ from typing import Dict, Any, Optional, Callable, List, Set
 import edge_tts
 import pygame
 
+from core.tts_providers import RVCVoiceConverter
+
 class Singer:
     """
     Karaoke & Singing Engine for Eve.
@@ -20,11 +22,22 @@ class Singer:
         songs_config_path: str = "config/songs.json",
         voice: str = "en-US-AnaNeural",
         output_mode: str = "both",
+        rvc_enabled: bool = False,
+        rvc_url: str = "",
+        rvc_pitch_shift: int = 0,
     ):
         self.songs_config_path = Path(songs_config_path)
         self.voice = voice
         mode = str(output_mode or "both").strip().lower()
         self.output_mode = mode if mode in ("server", "browser", "both") else "both"
+        self.rvc_enabled = bool(rvc_enabled)
+        self.rvc_url = str(rvc_url or "").strip()
+        self.rvc_pitch_shift = int(rvc_pitch_shift)
+        self._rvc = RVCVoiceConverter(
+            enabled=self.rvc_enabled,
+            rvc_url=self.rvc_url,
+            pitch_shift=self.rvc_pitch_shift,
+        )
         self.songs: Dict[str, Any] = {}
         self.temp_dir = Path(tempfile.gettempdir()) / "maybeai_karaoke"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
@@ -32,6 +45,32 @@ class Singer:
         self._stop_requested = False
         self._active_channel: Any = None
         self.load_songs()
+
+    def update_config(
+        self,
+        voice: Optional[str] = None,
+        output_mode: Optional[str] = None,
+        rvc_enabled: Optional[bool] = None,
+        rvc_url: Optional[str] = None,
+        rvc_pitch_shift: Optional[int] = None,
+    ) -> None:
+        if voice:
+            self.voice = voice.strip()
+        if output_mode is not None:
+            mode = str(output_mode).strip().lower()
+            if mode in ("server", "browser", "both"):
+                self.output_mode = mode
+        if rvc_enabled is not None:
+            self.rvc_enabled = bool(rvc_enabled)
+        if rvc_url is not None:
+            self.rvc_url = str(rvc_url).strip()
+        if rvc_pitch_shift is not None:
+            self.rvc_pitch_shift = int(rvc_pitch_shift)
+        self._rvc.update_config(
+            enabled=self.rvc_enabled,
+            rvc_url=self.rvc_url,
+            pitch_shift=self.rvc_pitch_shift,
+        )
 
     def load_songs(self):
         if self.songs_config_path.exists():
@@ -139,6 +178,14 @@ class Singer:
                     rate=rate
                 )
                 await comm.save(vocal_file)
+
+                if self._rvc.enabled and self.rvc_url:
+                    raw_vocal_bytes = Path(vocal_file).read_bytes()
+                    converted_vocal_bytes = await self._rvc.convert(
+                        raw_vocal_bytes, pitch_shift=self.rvc_pitch_shift
+                    )
+                    if converted_vocal_bytes and converted_vocal_bytes != raw_vocal_bytes:
+                        Path(vocal_file).write_bytes(converted_vocal_bytes)
 
                 if on_vocal_audio and self.output_mode in ("browser", "both"):
                     try:

@@ -4,7 +4,7 @@ import os
 import time
 import uuid
 from collections import deque
-from typing import Any, Awaitable, Callable, Deque, Dict, Optional, Tuple
+from typing import Any, Awaitable, Callable, Deque, Dict, Optional, Set, Tuple
 
 import aiohttp
 
@@ -37,6 +37,9 @@ class CollabManager:
         self_id: str = "eve-maybe",
         self_name: str = "EveMaybe",
         allow_unauthenticated_loopback: bool = True,
+        on_duet_sync: Optional[Callable[[CollabEnvelope], Any]] = None,
+        on_emote_sync: Optional[Callable[[CollabEnvelope], Any]] = None,
+        on_game_move: Optional[Callable[[CollabEnvelope], Any]] = None,
     ):
         self.event_bus = event_bus
         self.self_id = self_id
@@ -65,6 +68,10 @@ class CollabManager:
         self._inbound_send_cb: Optional[Callable[[Dict[str, Any]], Awaitable[Any]]] = None
         self._inbound_senders: Dict[str, Callable[[Dict[str, Any]], Awaitable[Any]]] = {}
         self._on_reply_needed: Optional[Callable[[CollabEnvelope], Any]] = None
+        self._on_duet_sync: Optional[Callable[[CollabEnvelope], Any]] = on_duet_sync
+        self._on_emote_sync: Optional[Callable[[CollabEnvelope], Any]] = on_emote_sync
+        self._on_game_move: Optional[Callable[[CollabEnvelope], Any]] = on_game_move
+        self._reply_tasks: Set[asyncio.Task] = set()
         self._lock = asyncio.Lock()
 
         self.update_config(settings or {})
@@ -106,6 +113,20 @@ class CollabManager:
 
     def set_reply_callback(self, callback: Optional[Callable[[CollabEnvelope], Any]]) -> None:
         self._on_reply_needed = callback
+
+    def set_action_callbacks(
+        self,
+        on_duet_sync: Optional[Callable[[CollabEnvelope], Any]] = None,
+        on_emote_sync: Optional[Callable[[CollabEnvelope], Any]] = None,
+        on_game_move: Optional[Callable[[CollabEnvelope], Any]] = None,
+    ) -> None:
+        """Registers optional async/sync callbacks for inbound duet_sync, emote_sync, and game_move."""
+        if on_duet_sync is not None:
+            self._on_duet_sync = on_duet_sync
+        if on_emote_sync is not None:
+            self._on_emote_sync = on_emote_sync
+        if on_game_move is not None:
+            self._on_game_move = on_game_move
 
     def register_peer_sender(
         self,
@@ -468,6 +489,7 @@ class CollabManager:
         reply_cb = on_reply_needed if on_reply_needed is not None else self._on_reply_needed
         trigger_reply = False
         reply_reason = "no_reply_needed"
+        action_cb: Optional[Callable[[CollabEnvelope], Any]] = None
 
         async with self._lock:
             self._refresh_cooldown()
@@ -483,6 +505,15 @@ class CollabManager:
                 self.peer_connected = False
                 self.connected_peer = None
                 await self._set_floor_state("idle", reason="peer_bye")
+            elif env.event_type == "duet_sync":
+                action_cb = self._on_duet_sync
+                reply_reason = "duet_sync_received"
+            elif env.event_type == "emote_sync":
+                action_cb = self._on_emote_sync
+                reply_reason = "emote_sync_received"
+            elif env.event_type == "game_move":
+                action_cb = self._on_game_move
+                reply_reason = "game_move_received"
             elif env.event_type == "turn_yield":
                 if self.turn_count >= self.max_collab_turns:
                     self.cooldown_until = time.monotonic() + self.turn_cooldown_sec
@@ -515,13 +546,28 @@ class CollabManager:
                         trigger_reply = reply_cb is not None
                         reply_reason = "floor_acquired"
 
-        if trigger_reply and reply_cb is not None:
+        if action_cb is not None:
             try:
-                res = reply_cb(env)
+                res = action_cb(env)
                 if inspect.isawaitable(res):
                     await res
             except Exception as exc:
-                print(f"[CollabManager] Reply callback error: {exc}")
+                print(f"[CollabManager] Action callback error ({env.event_type}): {exc}")
+
+        if trigger_reply and reply_cb is not None:
+            if asyncio.iscoroutinefunction(reply_cb):
+                task = asyncio.create_task(self._run_reply_callback(reply_cb, env))
+                self._reply_tasks.add(task)
+                task.add_done_callback(self._reply_tasks.discard)
+            else:
+                try:
+                    res = reply_cb(env)
+                    if inspect.isawaitable(res):
+                        task = asyncio.create_task(self._await_reply_result(res))
+                        self._reply_tasks.add(task)
+                        task.add_done_callback(self._reply_tasks.discard)
+                except Exception as exc:
+                    print(f"[CollabManager] Reply callback error: {exc}")
 
         return {
             "accepted": True,
@@ -532,6 +578,28 @@ class CollabManager:
             "turn_count": self.turn_count,
         }
 
+    async def _await_reply_result(self, awaitable: Awaitable[Any]) -> None:
+        try:
+            await awaitable
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[CollabManager] Reply callback error: {exc}")
+
+    async def _run_reply_callback(
+        self,
+        reply_cb: Callable[[CollabEnvelope], Any],
+        env: CollabEnvelope,
+    ) -> None:
+        try:
+            res = reply_cb(env)
+            if inspect.isawaitable(res):
+                await res
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            print(f"[CollabManager] Reply callback error: {exc}")
+
     async def reset_turns(self) -> Dict[str, Any]:
         """Resets the collab turn counter and exits cooldown back to 'idle'."""
         async with self._lock:
@@ -541,6 +609,12 @@ class CollabManager:
         return self.get_status()
 
     async def shutdown(self) -> None:
+        for task in list(self._reply_tasks):
+            if not task.done():
+                task.cancel()
+        if self._reply_tasks:
+            await asyncio.gather(*list(self._reply_tasks), return_exceptions=True)
+        self._reply_tasks.clear()
         await self.disconnect_peer()
         self._inbound_senders.clear()
         self._inbound_send_cb = None

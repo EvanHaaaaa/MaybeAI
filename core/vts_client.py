@@ -20,6 +20,17 @@ class VTSClient:
         self.is_running = False
         self.last_error: Optional[str] = None
         self.last_connected_time: Optional[float] = None
+        self._rig_state: Dict[str, float] = {
+            "FaceAngleX": 0.0,
+            "FaceAngleY": 0.0,
+            "FaceAngleZ": 0.0,
+            "EyeOpenLeft": 1.0,
+            "EyeOpenRight": 1.0,
+            "BrowLeftY": 0.0,
+            "BrowRightY": 0.0,
+            "MouthForm": 0.0,
+            "MouthOpen": 0.0,
+        }
 
     async def disconnect(self):
         self.connected = False
@@ -118,6 +129,7 @@ class VTSClient:
         """
         Injects a parameter like 'MouthOpen', 'FaceAngleX', 'EyeBlink' into VTS.
         """
+        self._rig_state[parameter_id] = float(value)
         if not self.connected or not self.ws:
             return
 
@@ -142,6 +154,148 @@ class VTSClient:
             await self.ws.send(json.dumps(payload))
         except Exception:
             self.connected = False
+
+    async def set_parameters(self, params: Dict[str, float], weight: float = 1.0):
+        """
+        Injects multiple Live2D parameters in a single batch InjectParameterDataRequest.
+        """
+        if not params:
+            return
+
+        for param_id, value in params.items():
+            self._rig_state[str(param_id)] = float(value)
+
+        if not self.connected or not self.ws:
+            return
+
+        parameter_values = [
+            {
+                "id": str(param_id),
+                "value": float(value),
+                "weight": float(weight),
+            }
+            for param_id, value in params.items()
+        ]
+        payload = {
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "params_batch",
+            "messageType": "InjectParameterDataRequest",
+            "data": {
+                "faceFound": True,
+                "mode": "set",
+                "parameterValues": parameter_values,
+            },
+        }
+        try:
+            await self.ws.send(json.dumps(payload))
+        except Exception:
+            self.connected = False
+
+    def get_rig_state(self) -> Dict[str, float]:
+        """Returns a snapshot of the last applied Live2D rig parameters."""
+        return dict(self._rig_state)
+
+    async def apply_mood_rig(
+        self,
+        emotion: str,
+        mood_dims: Optional[Dict[str, float]] = None,
+        singing: bool = False,
+    ) -> Dict[str, float]:
+        """
+        Computes and applies multi-parameter Live2D rig targets from emotion,
+        mood dimensions, and singing state.
+        """
+        emo = (emotion or "neutral").lower().strip()
+        presets: Dict[str, Dict[str, float]] = {
+            "happy": {
+                "FaceAngleX": 3.0, "FaceAngleY": 5.0, "FaceAngleZ": 6.0,
+                "EyeOpenLeft": 1.05, "EyeOpenRight": 1.05,
+                "BrowLeftY": 0.45, "BrowRightY": 0.45, "MouthForm": 0.85,
+            },
+            "excited": {
+                "FaceAngleX": 0.0, "FaceAngleY": 8.0, "FaceAngleZ": 8.0,
+                "EyeOpenLeft": 1.15, "EyeOpenRight": 1.15,
+                "BrowLeftY": 0.7, "BrowRightY": 0.7, "MouthForm": 1.0,
+            },
+            "smug": {
+                "FaceAngleX": -5.0, "FaceAngleY": 3.0, "FaceAngleZ": -8.0,
+                "EyeOpenLeft": 0.72, "EyeOpenRight": 0.82,
+                "BrowLeftY": 0.25, "BrowRightY": -0.15, "MouthForm": 0.65,
+            },
+            "angry": {
+                "FaceAngleX": 0.0, "FaceAngleY": -8.0, "FaceAngleZ": -3.0,
+                "EyeOpenLeft": 0.9, "EyeOpenRight": 0.9,
+                "BrowLeftY": -0.75, "BrowRightY": -0.75, "MouthForm": -0.7,
+            },
+            "annoyed": {
+                "FaceAngleX": -4.0, "FaceAngleY": -5.0, "FaceAngleZ": -4.0,
+                "EyeOpenLeft": 0.75, "EyeOpenRight": 0.75,
+                "BrowLeftY": -0.45, "BrowRightY": -0.45, "MouthForm": -0.45,
+            },
+            "sad": {
+                "FaceAngleX": 0.0, "FaceAngleY": -10.0, "FaceAngleZ": 5.0,
+                "EyeOpenLeft": 0.6, "EyeOpenRight": 0.6,
+                "BrowLeftY": -0.4, "BrowRightY": -0.4, "MouthForm": -0.65,
+            },
+            "blush": {
+                "FaceAngleX": 6.0, "FaceAngleY": 4.0, "FaceAngleZ": 9.0,
+                "EyeOpenLeft": 0.82, "EyeOpenRight": 0.82,
+                "BrowLeftY": 0.2, "BrowRightY": 0.2, "MouthForm": 0.5,
+            },
+            "confused": {
+                "FaceAngleX": 4.0, "FaceAngleY": 2.0, "FaceAngleZ": 14.0,
+                "EyeOpenLeft": 1.0, "EyeOpenRight": 0.78,
+                "BrowLeftY": 0.45, "BrowRightY": -0.2, "MouthForm": -0.1,
+            },
+            "thinking": {
+                "FaceAngleX": 6.0, "FaceAngleY": 4.0, "FaceAngleZ": 10.0,
+                "EyeOpenLeft": 0.85, "EyeOpenRight": 0.85,
+                "BrowLeftY": 0.2, "BrowRightY": -0.1, "MouthForm": 0.0,
+            },
+            "neutral": {
+                "FaceAngleX": 0.0, "FaceAngleY": 0.0, "FaceAngleZ": 0.0,
+                "EyeOpenLeft": 1.0, "EyeOpenRight": 1.0,
+                "BrowLeftY": 0.0, "BrowRightY": 0.0, "MouthForm": 0.1,
+            },
+        }
+        rig = dict(presets.get(emo, presets["neutral"]))
+
+        if mood_dims:
+            energy = float(mood_dims.get("energy", mood_dims.get("arousal", 0.5)))
+            positivity = float(mood_dims.get("positivity", mood_dims.get("valence", 0.5)))
+            playfulness = float(mood_dims.get("playfulness", 0.5))
+            rig["FaceAngleY"] += (energy - 0.5) * 8.0
+            rig["FaceAngleZ"] += (playfulness - 0.5) * 8.0
+            rig["EyeOpenLeft"] += (energy - 0.5) * 0.2
+            rig["EyeOpenRight"] += (energy - 0.5) * 0.2
+            rig["BrowLeftY"] += (positivity - 0.5) * 0.3
+            rig["BrowRightY"] += (positivity - 0.5) * 0.3
+            rig["MouthForm"] += (positivity - 0.5) * 0.5
+
+        if singing:
+            rig["FaceAngleY"] += 4.0
+            rig["FaceAngleZ"] += 5.0
+            rig["EyeOpenLeft"] = max(rig["EyeOpenLeft"], 1.05)
+            rig["EyeOpenRight"] = max(rig["EyeOpenRight"], 1.05)
+            rig["BrowLeftY"] += 0.2
+            rig["BrowRightY"] += 0.2
+            rig["MouthForm"] = max(rig["MouthForm"], 0.45)
+
+        def _clamp(val: float, lo: float, hi: float) -> float:
+            return round(max(lo, min(hi, float(val))), 3)
+
+        rig["FaceAngleX"] = _clamp(rig["FaceAngleX"], -30.0, 30.0)
+        rig["FaceAngleY"] = _clamp(rig["FaceAngleY"], -30.0, 30.0)
+        rig["FaceAngleZ"] = _clamp(rig["FaceAngleZ"], -30.0, 30.0)
+        rig["EyeOpenLeft"] = _clamp(rig["EyeOpenLeft"], 0.0, 1.2)
+        rig["EyeOpenRight"] = _clamp(rig["EyeOpenRight"], 0.0, 1.2)
+        rig["BrowLeftY"] = _clamp(rig["BrowLeftY"], -1.0, 1.0)
+        rig["BrowRightY"] = _clamp(rig["BrowRightY"], -1.0, 1.0)
+        rig["MouthForm"] = _clamp(rig["MouthForm"], -1.0, 1.0)
+
+        await self.set_parameters(rig)
+        return rig
 
     async def update_mouth(self, mouth_open: float):
         """

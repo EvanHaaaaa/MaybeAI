@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python 3.12" />
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688.svg" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Tests-283%20Passed%20(100%25)-success.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-300%20Passed%20(100%25)-success.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/UI-Cyberpunk%20Futuristic-8b5cf6.svg" alt="UI" />
   <img src="https://img.shields.io/badge/Live2D-VTube%20Studio%20API-ff69b4.svg" alt="VTS" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
@@ -122,17 +122,18 @@ flowchart TD
 - **Dynamic Emotion & Action Tags:** Brain secara cerdas membubuhkan tag ekspresi (seperti `[emotion: neutral]`, `[emotion: happy]`, `[emotion: smug]`, `[emotion: angry]`, `[emotion: blush]`, `[emotion: surprised]`, `[emotion: confused]`) dan tag aksi (`[action: giggle]`, `[action: sigh]`, `[action: wink]`) yang diparsing oleh `ActionParser` (`core/actions.py`) untuk menggerakkan ekspresi avatar secara presisi.
 - **Token & Temperature Hot-Reload:** Parameter kreativitas (*temperature*) dan panjang respons (*max_tokens*) dapat diubah langsung dari Configuration Center tanpa me-restart aplikasi.
 
-### 2. Pipelined Streaming Edge-TTS & Dynamic Lip-Sync
+### 2. Neural TTS, RVC Singing & Dynamic Lip-Sync
+- **Multi-Provider Neural TTS (`core/tts_providers.py`, `core/tts.py`):** Mendukung **Edge-TTS** (dengan modulasi prosodi berbasis emosi untuk `happy`, `excited`, `smug`, `angry`, `annoyed`, `sad`, `blush`, `whisper`), **Kokoro-82M** (lokal via `kokoro`/`kokoro_onnx` atau HTTP `kokoro_url`), **ElevenLabs** (streaming REST), dan **Custom Neural TTS** (`gpt_sovits` / `fish_speech` via `custom_tts_url`), lengkap dengan *fallback* otomatis ke Edge-TTS.
+- **RVC Voice Conversion (`RVCVoiceConverter`, `core/singer.py`):** Post-processing suara bicara maupun vokal karaoke melalui server RVC (`rvc_enabled`, `rvc_url`, `rvc_pitch_shift`) dengan *fallback* bersih ke audio asli jika server offline.
 - **Pipelined Sentence-Chunked Streaming (`SentenceChunker` + `TTSEngine.speak_stream()`):** Memecah aliran teks LLM per kalimat (`.`, `!`, `?`, `\n`, `~`) sambil menjaga tag `[emotion:]`/`[action:]`, singkatan, dan angka desimal tetap utuh. Kalimat $N+1$ disintesis secara konkuren saat kalimat $N$ sedang diputar, dengan pembersihan file sementara `speech_*.mp3` yang terjamin.
-- **Sintesis Suara Natural:** Memanfaatkan teknologi Edge-TTS berkecepatan tinggi dengan berbagai pilihan suara jernih (`en-US-AnaNeural`, `id-ID-GadisNeural`, `ja-JP-NanamiNeural`, dll).
 - **Real-Time Lip-Sync Calculation:** Menghitung amplitudo vokal dan pergerakan fonem mulut secara proporsional (`mouth_open` 0.0 – 1.0) untuk menganimasikan bibir avatar sinkron dengan audio.
-- **Graceful Mouth Flapping Fallback:** Apabila TTS dinonaktifkan oleh pengguna, avatar tetap menggerakkan bibirnya secara halus saat membalas teks, mencegah avatar terlihat kaku atau *freeze*.
-- **Live Voice Modulation:** Pengaturan kecepatan bicara (*rate*), tinggi nada (*pitch*), dan volume suara dapat disesuaikan per milidetik.
 
-### 3. Dual Avatar Rendering, Dedicated OBS Overlay & Tabbed Studio UI
-- **Dedicated Transparent OBS Overlay (`/overlay`):** Halaman khusus tanpa kontrol studio di `http://localhost:7860/overlay` (`web/overlay.html`, `overlay.css`, `overlay.js`) dengan latar belakang transparan, Virtual Avatar Canvas (`#avatarCanvas`), subtitle melayang (*glassmorphic*), dan banner notifikasi Donasi/SuperChat real-time—siap pakai sebagai *Browser Source* OBS Studio.
-- **Modular 4-Tab Studio Workspace (`/`):** Dashboard utama (`http://localhost:7860`) tertata dalam 4 tab workspace (*sticky nav* dengan persistensi `localStorage`): **🎤 Live Stage**, **🎮 Gaming**, **🎲 RPG & Mini-Games**, dan **🧠 Brain & Memory**, dilengkapi tombol pintas **📺 OBS Overlay**.
-- **VTube Studio (VTS) WebSocket API Integration:** Menghubungkan Eve ke model Live2D profesional di VTube Studio (`ws://localhost:8001`). Jika VTS belum berjalan, sistem otomatis masuk ke mode *Standby/Virtual* tanpa menyebabkan error, dan menyediakan tombol *probe reconnect* sekali klik.
+### 3. Dual/3D Avatar Rendering, Dedicated OBS Overlay & Stream Deck (`/deck`)
+- **Dedicated Transparent OBS Overlay (`/overlay`):** Halaman khusus tanpa kontrol studio di `http://localhost:7860/overlay` (`web/overlay.html`, `overlay.css`, `overlay.js`) dengan latar belakang transparan, Canvas 2D / **3D VRM** (`?renderer=vrm&vrm_url=...`), subtitle melayang (*glassmorphic*), dan banner notifikasi Donasi/SuperChat real-time—siap pakai sebagai *Browser Source* OBS Studio.
+- **3D VRM Avatar & Multi-Param VTS Rigging (`web/vrm-avatar.js`, `core/vts_client.py`):** Mendukung toggle `2D Canvas | 3D VRM` di Studio maupun Overlay, serta `VTSClient.apply_mood_rig()` / `set_parameters()` yang menggerakkan `FaceAngleX/Y/Z`, `EyeOpenLeft/Right`, `BrowLeftY/RightY`, dan `MouthForm` secara batch di VTube Studio.
+- **Mobile/Tablet Creator Stream Deck (`/deck`):** Antarmuka kontrol sentuh di `http://localhost:7860/deck` (`web/deck.html`, `web/deck.js`) dengan 9 pad satu sentuhan (Barge-In, Mic AudioWorklet, Mute, Mission Step/Loop, Sing, Improv, Collab Topic, Stop Speech) dan otentikasi token.
+- **AudioWorklet 16 kHz STT (`web/audio-worklet-processor.js`):** Menangkap audio mikrofon melalui `MaybeAIPCMProcessor` (16 kHz mono Int16 PCM) dengan emisi event `stt_partial` & `stt_final` secara real-time.
+- **Modular 4-Tab Studio Workspace (`/`):** Dashboard utama (`http://localhost:7860`) tertata dalam 4 tab workspace (*sticky nav* dengan persistensi `localStorage`): **🎤 Live Stage**, **🎮 Gaming**, **🎲 RPG & Mini-Games**, dan **🧠 Brain & Memory**, dilengkapi tombol pintas **📺 OBS Overlay** dan **🎛️ Deck**.
 
 ### 4. Centralized Cyberpunk Configuration Center
 - **Dedicated GUI URL:** Halaman khusus di `http://localhost:7860/settings` dengan tema estetika Cyberpunk / Futuristic AI (aksen neon, glow cards, toggle switch, slider nilai interaktif).
@@ -259,11 +260,12 @@ MaybeAI/
 │   ├── actions.py                 # Parser tag [emotion: x] dan [action: x]
 │   ├── brain.py                   # Otak LLM Streaming (Gemini, OpenAI, Ollama, Mock)
 │   ├── event_bus.py               # Typed Async Pub/Sub EventBus & Event History
-│   ├── tts.py                     # Pipelined Streaming Edge-TTS (SentenceChunker) & Lip-Sync
-│   ├── vts_client.py              # Client WebSocket VTube Studio API
-│   ├── chat_receiver.py           # Ingestion Twitch IRC, Web Chat, & Multi-Platform Registry
+│   ├── tts.py                     # Pipelined Streaming TTS & Lip-Sync Engine
+│   ├── tts_providers.py           # Neural TTS Providers (Edge, Kokoro, ElevenLabs, Custom) & RVC
+│   ├── vts_client.py              # Client WebSocket VTube Studio API (Multi-Param Rigging)
+│   ├── chat_receiver.py           # Ingestion Twitch IRC (TLS/IRCv3), Web Chat, & Multi-Platform Registry
 │   ├── collab/                    # AI-to-AI Collab Protocol (CollabEnvelope HMAC & CollabManager)
-│   ├── platforms/                 # Adapter Live Chat (YouTube Live + SuperChat, Discord)
+│   ├── platforms/                 # Adapter Live Chat (YouTube Live, Discord Gateway, TikTok Live)
 │   ├── plugins/                   # Community Plugin SDK, PluginRegistry, & WordChainPlugin (!wc)
 │   ├── moderator.py               # Filter keamanan, spam, & prompt injection
 │   ├── singer.py                  # Player BGM Karaoke & sinkronisasi lirik
@@ -310,12 +312,17 @@ MaybeAI/
 │   ├── overlay.js                 # Renderer avatar & subtitle real-time untuk OBS Overlay
 │   ├── settings.html              # Antarmuka Cyberpunk Configuration Center
 │   ├── settings.css               # Styling khusus Configuration Center
-│   └── settings.js                # Form engine, secret protection, & test runner
+│   ├── settings.js                # Form engine, secret protection, & test runner
+│   ├── deck.html                  # Mobile/Tablet Creator Stream Deck (/deck)
+│   ├── deck.css                   # Styling Creator Stream Deck
+│   ├── deck.js                    # Logika Stream Deck & AudioWorklet mic
+│   ├── audio-worklet-processor.js # AudioWorklet 16 kHz PCM16 processor
+│   └── vrm-avatar.js              # Renderer 3D VRM Avatar (Three.js + @pixiv/three-vrm)
 ├── tests/
 │   ├── __init__.py                # Menetapkan MAYBEAI_LLM_PROVIDER=mock saat test berjalan
 │   ├── test_guard_runner.js       # Uji unit guard mode Minecraft (Node.js)
-│   └── test_*.py                  # 29 modul pengujian unit & integrasi Python (283 tests)
-├── pyproject.toml                 # Metadata proyek & extras opsional ([stt-local], [embeddings-local], [dev])
+│   └── test_*.py                  # 33 modul pengujian unit & integrasi Python (300 tests)
+├── pyproject.toml                 # Metadata proyek & extras opsional ([stt-local], [embeddings-local], [tts-local], [tiktok], [dev])
 ├── run.py                         # FastAPI Web Server & Application Launcher
 ├── requirements.txt               # Daftar dependensi Python
 ├── start.bat                      # One-click Windows launcher (.venv, pip install, .env, run.py)
@@ -444,11 +451,11 @@ MaybeAI menerapkan kontrol akses ketat untuk melindungi endpoint kontrol dan eks
   - Jika tidak ada token yang dikonfigurasi, klien loopback tetap mendapatkan akses Creator secara default agar dashboard lokal langsung berfungsi.
 - **Override Provider LLM (`MAYBEAI_LLM_PROVIDER`):**
   - Menetapkan `MAYBEAI_LLM_PROVIDER` (misal `mock`, `gemini`, `openai`, `ollama`) akan menimpa `llm.provider` dari `config/settings.json` secara langsung (sangat berguna untuk pengujian otomatis maupun isolasi offline).
-- **Kategori Baru di `/settings` (`stt`, `security`, `collab`, `plugins`):**
-  - **`stt` (Speech-to-Text):** Mengatur `stt.enabled`, `stt.model`, `stt.device`, `stt.vad_enabled`, `stt.vad_energy_threshold`, dan `stt.barge_in_enabled`.
-  - **`security` (Security & Access):** Mengatur `security.creator_token` (disamarkan sebagai `********`) dan daftar `security.allowed_origins`.
-  - **`collab` (AI Collab Protocol):** Mengatur `collab.enabled`, `collab.peer_name`, `collab.peer_ws_url`, `collab.shared_secret` (disamarkan sebagai `********`, override env `MAYBEAI_COLLAB_SECRET`), `collab.max_collab_turns`, dan `collab.turn_cooldown_sec`.
-  - **`plugins` (Plugins & SDK):** Mengatur `plugins.enabled`, `plugins.plugins_dir`, `plugins.enabled_plugins`, dan `plugins.hook_timeout_sec`.
+- **Kategori Baru & Pengaturan Fase 2 di `/settings` (`tts`, `twitch`, `discord`, `tiktok`, `vision`, `avatar`, `stt`, `security`, `collab`, `plugins`):**
+  - **`tts`:** `provider` (`edge-tts` | `kokoro` | `elevenlabs` | `gpt_sovits` | `fish_speech`), `rvc_enabled`, `rvc_url`, `rvc_pitch_shift`, `kokoro_url`, `custom_tts_url`, `elevenlabs_voice_id`.
+  - **`twitch` / `discord` / `tiktok`:** `twitch.use_tls`, `twitch.port` (IRCv3 tags `bits`/`sub`/`raid`), `discord.use_gateway`, `discord.reply_enabled`, serta kategori **`tiktok`** (`enabled`, `username`).
+  - **`vision` & `avatar`:** `vision.vlm_enabled`, `vision.vlm_interval_sec` (`aperceive_with_vlm()`), serta kategori **`avatar`** (`renderer`: `canvas` | `vrm`, `vrm_url`).
+  - **`stt`, `security`, `collab`, `plugins`:** Mengatur AudioWorklet/EnergyVAD/barge-in, token akses creator (`********`), kolaborasi AI peer-to-peer (`duet_sync`, `emote_sync`, `game_move`), dan lifecycle plugin SDK.
 - **Otentikasi `/ws/collab` & Aksi Creator-Only `/ws`:**
   - Endpoint peer `/ws/collab` memverifikasi `MAYBEAI_COLLAB_SECRET` / `collab.shared_secret` menggunakan `hmac.compare_digest` (atau mewajibkan alamat loopback bila secret belum diset), serta memvalidasi tanda tangan HMAC-SHA256 pada `CollabEnvelope`.
   - Event `/ws` sensitif (`barge_in`, `voice_audio_chunk`, `mission_action`, serta mutasi `collab_action` & `plugin_action`) ditolak dengan `{"type": "error", "data": {"code": "forbidden"}}` jika pengirim bukan Creator terotorisasi.
@@ -500,8 +507,9 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
 
 ### REST Endpoints
 - **Web UI:**
-  - `GET /`: Halaman utama Tabbed Web Studio Dashboard & Virtual Avatar.
-  - `GET /overlay`: Halaman Dedicated Transparent OBS Browser Source Overlay (Avatar, Subtitles, Donation Alerts).
+  - `GET /`: Halaman utama Tabbed Web Studio Dashboard & Virtual Avatar (2D Canvas / 3D VRM).
+  - `GET /overlay`: Halaman Dedicated Transparent OBS Browser Source Overlay (Avatar, Subtitles, Donation Alerts, `?renderer=vrm&vrm_url=...`).
+  - `GET /deck`: Halaman Mobile/Tablet Creator Stream Deck dengan 9 pad kontrol cepat & AudioWorklet mic.
   - `GET /settings`: Halaman Cyberpunk Configuration Center.
 - **Configuration, EventBus, Platforms & Diagnostics:**
   - `GET /api/eventbus/stats`: Statistik subscriber, total event terpublikasi, error handler, dan riwayat EventBus.
@@ -606,12 +614,12 @@ node tests/test_guard_runner.js
 
 ### Hasil Verifikasi:
 ```text
-Ran 283 tests
+Ran 300 tests
 OK
 ```
-- **Total Test Cases:** 283 Python unit/integration tests + `test_guard_runner.js` (Node.js)
+- **Total Test Cases:** 300 Python unit/integration tests + `test_guard_runner.js` (Node.js)
 - **Success Rate:** **100% PASS (0 Failures, 0 Errors)**
-- **Modul Teruji:** `test_autonomous_missions`, `test_brain`, `test_chat_receiver`, `test_chess`, `test_collab_and_plugins`, `test_configuration`, `test_desktop_companion`, `test_event_bus`, `test_fase1_hardening`, `test_goals`, `test_guard_mode`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_relationships`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_voice_duplex`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
+- **Modul Teruji:** `test_audioworklet_deck`, `test_autonomous_missions`, `test_avatar_vts_and_telemetry`, `test_brain`, `test_chat_receiver`, `test_chess`, `test_collab_and_plugins`, `test_configuration`, `test_desktop_companion`, `test_event_bus`, `test_fase1_hardening`, `test_goals`, `test_guard_mode`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_neural_tts_rvc`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_platforms_v2`, `test_relationships`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_voice_duplex`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
 
 ---
 

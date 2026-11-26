@@ -1,5 +1,6 @@
 import asyncio
 import re
+import ssl
 from typing import Optional, Callable, Dict, Any, List
 
 from core.platforms.base import BasePlatformAdapter
@@ -127,21 +128,119 @@ class ChatReceiver:
     async def get_next_message(self) -> ChatMessage:
         return await self.queue.get()
 
-    async def start_twitch_listener(self, channel: str, bot_nick: str = "justinfan12345", oauth: str = ""):
+    @staticmethod
+    def _unescape_irc_tag(value: str) -> str:
+        return (
+            value.replace("\\s", " ")
+            .replace("\\:", ";")
+            .replace("\\\\", "\\")
+            .replace("\\r", "\r")
+            .replace("\\n", "\n")
+        )
+
+    @classmethod
+    def parse_twitch_irc_line(cls, line: str) -> Optional[Dict[str, Any]]:
         """
-        Connects to Twitch IRC anonymously or with OAuth and pushes messages to the queue.
+        Parses a raw Twitch IRC/IRCv3 line into a normalized message dict, or None if not a chat/event line.
+        Supports IRCv3 tags (`display-name`, `bits`, `msg-id` for sub/resub/subgift/raid).
+        """
+        if not line:
+            return None
+
+        tags: Dict[str, str] = {}
+        rest = line.strip()
+        if rest.startswith("@"):
+            parts = rest[1:].split(" ", 1)
+            if len(parts) < 2:
+                return None
+            raw_tags, rest = parts[0], parts[1].lstrip()
+            for item in raw_tags.split(";"):
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    tags[k] = cls._unescape_irc_tag(v)
+                elif item:
+                    tags[item] = ""
+
+        # Parse PRIVMSG
+        priv_match = re.search(r":([^!\s]+)![^\s]*\s+PRIVMSG\s+#[^\s]+\s+:(.*)", rest)
+        if priv_match:
+            raw_user = priv_match.group(1)
+            text = priv_match.group(2).strip()
+            if not text:
+                return None
+            user = tags.get("display-name") or raw_user
+            bits_raw = tags.get("bits", "").strip()
+            is_donation = False
+            donation_amount = ""
+            donation_currency = ""
+            if bits_raw.isdigit() and int(bits_raw) > 0:
+                is_donation = True
+                donation_amount = bits_raw
+                donation_currency = "bits"
+            return {
+                "user": user,
+                "text": text,
+                "source": "twitch",
+                "is_donation": is_donation,
+                "donation_amount": donation_amount,
+                "donation_currency": donation_currency,
+            }
+
+        # Parse USERNOTICE (sub, resub, subgift, raid)
+        un_match = re.search(r"(?:^|\s)USERNOTICE\s+#[^\s]+(?:\s+:(.*))?$", rest)
+        if un_match:
+            msg_id = tags.get("msg-id", "").strip().lower()
+            if msg_id in ("sub", "resub", "subgift", "raid"):
+                user = tags.get("display-name") or tags.get("login") or "TwitchViewer"
+                trailing = (un_match.group(1) or "").strip()
+                system_msg = tags.get("system-msg", "").strip()
+                text = trailing or system_msg or f"[{msg_id}] {user}"
+                is_donation = msg_id == "subgift"
+                donation_amount = "1" if is_donation else ""
+                donation_currency = "subgift" if is_donation else ""
+                return {
+                    "user": user,
+                    "text": text,
+                    "source": "twitch",
+                    "is_donation": is_donation,
+                    "donation_amount": donation_amount,
+                    "donation_currency": donation_currency,
+                }
+
+        return None
+
+    async def start_twitch_listener(
+        self,
+        channel: str,
+        bot_nick: str = "justinfan12345",
+        oauth: str = "",
+        use_tls: bool = True,
+        port: Optional[int] = None,
+    ):
+        """
+        Connects to Twitch IRC (TLS on 6697 by default, or plaintext on 6667)
+        anonymously or with OAuth, requests IRCv3 tags/commands, and pushes messages to the queue.
         """
         if not channel:
             return
 
         self.twitch_channel = channel.lower().lstrip("#")
         self.is_running = True
-        print(f"[Twitch] Connecting to IRC for channel: #{self.twitch_channel}...")
+        target_port = int(port) if port is not None else (6697 if use_tls else 6667)
+        ssl_ctx = ssl.create_default_context() if use_tls else None
+        print(f"[Twitch] Connecting to IRC ({'TLS' if use_tls else 'plain'}:{target_port}) for channel: #{self.twitch_channel}...")
 
         while self.is_running:
             try:
-                reader, writer = await asyncio.open_connection("irc.chat.twitch.tv", 6667)
+                reader, writer = await asyncio.open_connection(
+                    "irc.chat.twitch.tv",
+                    target_port,
+                    ssl=ssl_ctx,
+                )
                 self._reader, self._writer = reader, writer
+
+                # Request IRCv3 tags & commands before auth
+                writer.write(b"CAP REQ :twitch.tv/tags twitch.tv/commands\r\n")
 
                 # Anonymously join or auth
                 pass_str = oauth if oauth else "SCHMOOPIIE"
@@ -168,12 +267,9 @@ class ChatReceiver:
                         await writer.drain()
                         continue
 
-                    # Parse PRIVMSG
-                    match = re.search(r":(\w+)!.*PRIVMSG #\w+ :(.*)", line)
-                    if match:
-                        user = match.group(1)
-                        text = match.group(2)
-                        await self.put_message(user=user, text=text, source="twitch")
+                    parsed = self.parse_twitch_irc_line(line)
+                    if parsed:
+                        await self.put_message(**parsed)
 
             except Exception as e:
                 self.is_connected = False

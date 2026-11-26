@@ -2,6 +2,33 @@
 
 All notable changes to **MaybeAI (Eve Maybe)** are documented in this file.
 
+## [2026-11-26] — Fase 2: Neural TTS & RVC, AudioWorklet Stream Deck, 3D VRM / Multi-Param VTS, Real Telemetry & Platform Expansion
+
+### Pillar 1 — Expressive Neural TTS & RVC Singing
+- **Pluggable Neural TTS Providers (`core/tts_providers.py`, `core/tts.py`):** Added `BaseTTSProvider`, `EdgeTTSProvider` (with emotion-conditioned prosody offsets for `happy`, `excited`, `smug`, `angry`, `annoyed`, `sad`, `blush`, `whisper`), `KokoroTTSProvider` (`kokoro` / `kokoro_onnx` / HTTP `kokoro_url`), `ElevenLabsTTSProvider` (streaming REST API), `CustomNeuralTTSProvider` (`gpt_sovits` / `fish_speech`), `create_tts_provider()`, and `RVCVoiceConverter` with automatic fallback to `EdgeTTSProvider` / original audio.
+- **RVC Karaoke Vocals (`core/singer.py`, `core/orchestrator.py`):** Routed `Singer` vocals through `RVCVoiceConverter` before `pygame.mixer.Sound` playback and browser `on_vocal_audio` streaming, and wired hot-reload config for `provider`, `rvc_enabled`, `rvc_url`, `rvc_pitch_shift`, `kokoro_url`, `custom_tts_url`, and `elevenlabs_voice_id`.
+
+### Pillar 2 — Low-Latency AudioWorklet STT & Mobile Stream Deck (`/deck`)
+- **AudioWorklet 16 kHz PCM16 Pipeline (`web/audio-worklet-processor.js`, `web/app.js`):** Added `MaybeAIPCMProcessor` downsampling browser `AudioContext` frames to 16 kHz mono Int16 PCM and streaming chunks over `/ws` `voice_audio_chunk` with `ScriptProcessorNode` fallback.
+- **Creator Stream Deck (`web/deck.html`, `web/deck.css`, `web/deck.js`, `run.py`):** Added `GET /deck` mobile/tablet control surface with 9 one-tap pads (Barge-In, Mic Toggle, Audio Mute, Mission Step/Loop, Sing, Improv, Collab Topic, Stop Speech), live status badges, and token auth (`?token=` / `X-Creator-Token`).
+- **Streaming `stt_partial` & `stt_final` (`core/orchestrator.py`, `run.py`):** Emitted `STT_PARTIAL` and `STT_FINAL` on `EventBus` in `process_voice_chunk()` and forwarded both to authorized creator `/ws` clients.
+
+### Pillar 3 — 3D VRM Avatar, Multi-Param VTS Rigging, Real Mineflayer Telemetry & VLM Vision
+- **Multi-Param VTS Rigging (`core/vts_client.py`, `core/orchestrator.py`):** Added `VTSClient.set_parameters()`, `apply_mood_rig()` (`FaceAngleX/Y/Z`, `EyeOpenLeft/Right`, `BrowLeftY/RightY`, `MouthForm`), and `get_rig_state()`, forwarding `vts_params` in `avatar_state` broadcasts.
+- **3D VRM Web Renderer (`web/vrm-avatar.js`, `web/index.html`, `web/overlay.html`, `web/overlay.js`):** Added Three.js + `@pixiv/three-vrm` 3D avatar rendering (`2D Canvas | 3D VRM` toggle and `/overlay?renderer=vrm&vrm_url=...`) with graceful 2D Canvas fallback.
+- **Real Mineflayer Telemetry & Inventory Gating (`minecraft/bot.js`, `core/minecraft/controller.py`, `core/planning/executor.py`):** Added periodic `mc_telemetry` snapshots (`health`, `food`, `pos`, `biome`, `inventory`, `nearby_players`, `nearby_hostiles`), `get_telemetry()`, `get_inventory_count()`, `mc_telemetry` WebSocket broadcasts, and real inventory-delta verification in `AutonomousMissionExecutor._execute_minecraft()`.
+- **Periodic VLM Screen Enrichment (`core/vision/vlm.py`, `core/vision/engine.py`, `core/orchestrator.py`):** Added `VisionEngine.aperceive_with_vlm()` with configurable `vlm_enabled` / `vlm_interval_sec` and Gemini/OpenAI VLM enrichment.
+
+### Pillar 4 — Platform Expansion, Collab Actions & Settings
+- **Twitch TLS & IRCv3 Tags (`core/chat_receiver.py`):** Added TLS (`6697` default), `CAP REQ :twitch.tv/tags twitch.tv/commands`, and `parse_twitch_irc_line()` for `display-name`, `bits`, `sub`, `resub`, `subgift`, and `raid`.
+- **Discord Backlog Seeding, Gateway & Replies (`core/platforms/discord_adapter.py`):** Added `skip_initial_backlog` startup seeding, optional Discord Gateway WebSocket loop (`use_gateway`), and outbound `send_message()` replies (`reply_enabled`).
+- **TikTok Live Adapter (`core/platforms/tiktok.py`, `core/platforms/__init__.py`):** Added `TikTokLiveAdapter` supporting `TikTokLive` / `webcast_ws_url` / `handle_tiktok_event()` (`comment`, `gift`, `like`, `follow`).
+- **Collab Action Callbacks & Non-Blocking Replies (`core/collab/manager.py`, `core/orchestrator.py`):** Wired `on_duet_sync`, `on_emote_sync`, and `on_game_move` callbacks and non-blocking `asyncio.create_task()` reply dispatch tracked in `shutdown()`.
+- **Settings & Docs (`config/settings.json`, `core/config_manager.py`, `web/settings.html`, `web/settings.js`, `pyproject.toml`, `.env.example`, `README.md`):** Added `tiktok` and `avatar` categories plus new `tts`, `twitch`, `discord`, and `vision` fields; added `[tts-local]` and `[tiktok]` extras in `pyproject.toml` and `ELEVENLABS_*`/`KOKORO_*` vars in `.env.example`.
+- **Verified Suite:** `300` Python unit/integration tests passing (`0` failures, `0` errors) + `tests/test_guard_runner.js` passing.
+
+---
+
 ## [2026-11-26] — Fase 1 Hardening: Security Parity, Browser Audio Unification & Packaging
 
 ### Security & Auth Parity

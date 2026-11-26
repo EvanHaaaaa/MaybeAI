@@ -96,17 +96,24 @@ class MultimodalVisionModel:
         user_prompt: str,
         api_provider: str = "gemini",
         gemini_api_key: Optional[str] = None,
-        openai_api_key: Optional[str] = None
+        openai_api_key: Optional[str] = None,
+        timeout_sec: float = 12.0,
     ) -> Optional[str]:
         """
         Multimodal VLM invocation (Gemini 2.5 / OpenAI GPT-4o) when API keys are available.
         """
+        if not image_base64:
+            return None
+
         # Clean base64 header if present
         raw_b64 = image_base64
         if "base64," in raw_b64:
-            raw_b64 = raw_b64.split("base64,")[1]
+            raw_b64 = raw_b64.split("base64,", 1)[1]
 
-        if api_provider == "gemini" and gemini_api_key:
+        provider = (api_provider or "gemini").lower().strip()
+        timeout = aiohttp.ClientTimeout(total=max(1.0, float(timeout_sec)))
+
+        if provider == "gemini" and gemini_api_key:
             url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
             headers = {
                 "x-goog-api-key": gemini_api_key,
@@ -128,18 +135,19 @@ class MultimodalVisionModel:
                 "generationConfig": {"temperature": 0.85, "maxOutputTokens": 300}
             }
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.post(url, headers=headers, json=payload) as resp:
                         if resp.status == 200:
                             data = await resp.json()
                             candidates = data.get("candidates", [])
                             if candidates and "content" in candidates[0]:
                                 parts = candidates[0]["content"].get("parts", [])
-                                return "".join(p.get("text", "") for p in parts if "text" in p).strip()
+                                text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
+                                return text or None
             except Exception as e:
                 print(f"[VLM Warning] Gemini VLM request error: {e}")
 
-        elif api_provider == "openai" and openai_api_key:
+        elif provider == "openai" and openai_api_key:
             url = "https://api.openai.com/v1/chat/completions"
             headers = {
                 "Authorization": f"Bearer {openai_api_key}",
@@ -157,11 +165,14 @@ class MultimodalVisionModel:
                 "max_tokens": 300
             }
             try:
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=12)) as session:
+                async with aiohttp.ClientSession(timeout=timeout) as session:
                     async with session.post(url, headers=headers, json=payload) as resp:
                         if resp.status == 200:
                             data = await resp.json()
-                            return data["choices"][0]["message"]["content"].strip()
+                            choices = data.get("choices", [])
+                            if choices:
+                                content = choices[0].get("message", {}).get("content", "")
+                                return content.strip() or None
             except Exception as e:
                 print(f"[VLM Warning] OpenAI VLM request error: {e}")
 

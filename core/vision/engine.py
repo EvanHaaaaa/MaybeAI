@@ -1,3 +1,4 @@
+import asyncio
 import time
 import threading
 from typing import Optional, Dict, Any, List, Callable
@@ -33,7 +34,10 @@ class VisionEngine:
         
         self.last_capture_time: float = 0.0
         self.last_commentary_time: float = 0.0
+        self.last_vlm_time: float = 0.0
         self.is_auto_active: bool = self.config.auto_perception
+        self.vlm_enabled: bool = bool(getattr(self.config, "vlm_enabled", False))
+        self.vlm_interval_sec: float = float(getattr(self.config, "vlm_interval_sec", 8.0))
         self._lock = threading.Lock()
 
         # Optional event broadcast callback
@@ -156,6 +160,62 @@ class VisionEngine:
 
         return obs
 
+    async def aperceive_with_vlm(
+        self,
+        simulated_scene: Optional[str] = None,
+        force_commentary: bool = False,
+        mood_directive: str = "",
+        dominant_mood: str = "CHILL_NEUTRAL",
+        api_provider: str = "gemini",
+        gemini_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+    ) -> VisualObservation:
+        """
+        Runs `perceive()` off the event loop via `asyncio.to_thread()` and,
+        when VLM enrichment is enabled and the interval has elapsed, enriches
+        `obs.summary` using `MultimodalVisionModel.analyze_with_vlm_api()`.
+        """
+        obs = await asyncio.to_thread(
+            self.perceive,
+            simulated_scene=simulated_scene,
+            force_commentary=force_commentary,
+            mood_directive=mood_directive,
+            dominant_mood=dominant_mood,
+        )
+
+        provider = (api_provider or "gemini").lower().strip()
+        has_key = (
+            (provider == "gemini" and bool(gemini_api_key))
+            or (provider == "openai" and bool(openai_api_key))
+        )
+        now = time.time()
+
+        if (
+            self.vlm_enabled
+            and provider != "mock"
+            and has_key
+            and (now - self.last_vlm_time) >= self.vlm_interval_sec
+            and obs.thumbnail_base64
+        ):
+            self.last_vlm_time = now
+            prompt = (
+                f"Describe concisely in 1-2 sentences what is visible on screen "
+                f"(current heuristic scene: {obs.scene_label})."
+            )
+            vlm_summary = await MultimodalVisionModel.analyze_with_vlm_api(
+                image_base64=obs.thumbnail_base64,
+                user_prompt=prompt,
+                api_provider=provider,
+                gemini_api_key=gemini_api_key,
+                openai_api_key=openai_api_key,
+            )
+            if vlm_summary:
+                obs.summary = vlm_summary
+                obs.details["vlm_enriched"] = True
+                obs.details["vlm_provider"] = provider
+
+        return obs
+
     def set_auto_perception(self, enabled: bool):
         self.is_auto_active = enabled
         self.config.auto_perception = enabled
@@ -164,6 +224,8 @@ class VisionEngine:
         """Returns serializable state for Web UI and REST/WS APIs."""
         return {
             "is_auto_active": self.is_auto_active,
+            "vlm_enabled": self.vlm_enabled,
+            "vlm_interval_sec": self.vlm_interval_sec,
             "capture_interval_sec": self.config.capture_interval_sec,
             "last_capture_time": self.last_capture_time,
             "last_commentary_time": self.last_commentary_time,

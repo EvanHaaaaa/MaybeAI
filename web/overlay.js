@@ -3,6 +3,7 @@
 document.addEventListener("DOMContentLoaded", () => {
   const canvas = document.getElementById("avatarCanvas");
   const ctx = canvas ? canvas.getContext("2d") : null;
+  const vrmContainer = document.getElementById("vrmContainer");
   const subtitlesEl = document.getElementById("subtitles");
 
   const donationAlertBanner = document.getElementById("donation-alert-banner");
@@ -20,6 +21,14 @@ document.addEventListener("DOMContentLoaded", () => {
     document.body.classList.add("hide-subs");
   }
   const browserAudioEnabled = !isTruthyParam(initialParams.get("muted"));
+  const requestedRenderer = (initialParams.get("renderer") || "2d").toLowerCase();
+  const requestedVrmUrl = (initialParams.get("vrm_url") || "").trim();
+  let latestVtsParams = null;
+  let vrmInstance = null;
+  let vrmRenderer = null;
+  let vrmScene = null;
+  let vrmCamera = null;
+  let vrmLoaded = false;
 
   // Web Audio API FIFO Queue + AnalyserNode RMS Lip-Sync (unmuted by default for OBS)
   let audioCtx = null;
@@ -209,6 +218,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
     if (msg.type === "avatar_state") {
       targetMouthOpen = data.mouth_open || 0.0;
+      if (data.vts_params && typeof data.vts_params === "object") {
+        latestVtsParams = data.vts_params;
+      }
       if (data.emotion) {
         setEmotion(data.emotion);
       }
@@ -587,9 +599,84 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     }
 
+    if (vrmLoaded && vrmInstance && vrmRenderer && vrmScene && vrmCamera) {
+      const em = vrmInstance.expressionManager;
+      if (em) {
+        em.setValue("aa", Math.max(0, Math.min(1, mouthOpen)));
+        em.setValue("blink", Math.max(0, Math.min(1, eyeBlink)));
+        const emoMap = {
+          happy: "happy",
+          excited: "happy",
+          sad: "sad",
+          angry: "angry",
+          annoyed: "angry",
+          surprised: "surprised",
+          smug: "relaxed",
+          blush: "happy"
+        };
+        ["happy", "sad", "angry", "surprised", "relaxed"].forEach((k) => {
+          em.setValue(k, emoMap[emotion] === k ? 0.85 : 0.0);
+        });
+      }
+      const head = vrmInstance.humanoid && vrmInstance.humanoid.getNormalizedBoneNode("head");
+      if (head) {
+        const vp = latestVtsParams || {};
+        const degToRad = Math.PI / 180;
+        const yaw = Number.isFinite(Number(vp.FaceAngleX)) ? Number(vp.FaceAngleX) * degToRad * 0.5 : Math.sin(time * 0.8) * 0.05;
+        const pitch = Number.isFinite(Number(vp.FaceAngleY)) ? Number(vp.FaceAngleY) * degToRad * 0.4 : 0;
+        const roll = Number.isFinite(Number(vp.FaceAngleZ)) ? Number(vp.FaceAngleZ) * degToRad * 0.4 : headTilt;
+        head.rotation.set(pitch, yaw, roll);
+      }
+      vrmInstance.update(0.016);
+      vrmRenderer.render(vrmScene, vrmCamera);
+    }
+
     requestAnimationFrame(render);
   }
 
+  async function initOverlayVrm() {
+    if (requestedRenderer !== "vrm" || !requestedVrmUrl || !vrmContainer) return;
+    try {
+      const [THREE, gltfMod, vrmMod] = await Promise.all([
+        import("https://esm.sh/three@0.169.0"),
+        import("https://esm.sh/three@0.169.0/examples/jsm/loaders/GLTFLoader.js"),
+        import("https://esm.sh/@pixiv/three-vrm@3.2.0?deps=three@0.169.0")
+      ]);
+      vrmRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+      vrmRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      vrmRenderer.setSize(480, 480);
+      vrmContainer.innerHTML = "";
+      vrmContainer.appendChild(vrmRenderer.domElement);
+
+      vrmScene = new THREE.Scene();
+      vrmCamera = new THREE.PerspectiveCamera(30, 1, 0.1, 20);
+      vrmCamera.position.set(0, 1.35, 1.45);
+      const light = new THREE.DirectionalLight(0xffffff, 1.4);
+      light.position.set(1, 2, 2);
+      vrmScene.add(light);
+      vrmScene.add(new THREE.AmbientLight(0xffffff, 0.7));
+
+      const loader = new gltfMod.GLTFLoader();
+      loader.register((parser) => new vrmMod.VRMLoaderPlugin(parser));
+      const gltf = await loader.loadAsync(requestedVrmUrl);
+      const vrm = gltf.userData && gltf.userData.vrm;
+      if (!vrm) throw new Error("Invalid VRM");
+      vrmInstance = vrm;
+      vrmInstance.scene.rotation.y = Math.PI;
+      vrmScene.add(vrmInstance.scene);
+
+      vrmLoaded = true;
+      if (canvas) canvas.style.display = "none";
+      vrmContainer.style.display = "block";
+    } catch (e) {
+      // Graceful fallback to 2D Canvas
+      vrmLoaded = false;
+      if (canvas) canvas.style.display = "block";
+      if (vrmContainer) vrmContainer.style.display = "none";
+    }
+  }
+
+  initOverlayVrm();
   connectWs();
   render();
 });
