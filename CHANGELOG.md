@@ -2,6 +2,27 @@
 
 All notable changes to **MaybeAI (Eve Maybe)** are documented in this file.
 
+## [2026-11-26] — Fase 3: Sandboxed Plugin CLI, OBS Showrunner, Highlight Auto-Marker, Vertical Clips, VOD Summarizer & Docker Headless
+
+### Pillar 1 — Out-of-Process Sandboxed Plugin SDK & `maybeai plugin` CLI
+- **Capability Permissions & Subprocess Isolation (`core/plugins/sdk.py`, `core/plugins/sandbox_worker.py`, `core/plugins/registry.py`):** Added `permissions` (`ALLOWED_PLUGIN_PERMISSIONS`, `DEFAULT_PLUGIN_PERMISSIONS = ("chat:read", "event:sub")`) to `PluginManifest`, standalone stdio JSON-RPC 2.0 worker (`python -m core.plugins.sandbox_worker`), `sandbox_mode="subprocess"|"inprocess"` in `PluginRegistry` with **stripped `os.environ`** (hiding `GEMINI_API_KEY`, `OPENAI_API_KEY`, `MAYBEAI_CREATOR_TOKEN`, `MAYBEAI_COLLAB_SECRET`), host-side permission enforcement (`tts:speak`, `event:pub`, `event:sub`), and hard `proc.kill()` on synchronous infinite-loop timeouts.
+- **Plugin Developer CLI (`core/plugins/cli.py`, `pyproject.toml`):** Added `maybeai plugin init|test|pack` CLI (`[project.scripts]` `maybeai = "core.plugins.cli:main"`).
+
+### Pillar 2 — Autonomous Multi-Scene OBS Showrunner (`obsws-python`)
+- **OBS WebSocket v5 Client (`core/desktop/obs_client.py`, `pyproject.toml`):** Added `OBSWebSocketClient` & `DEFAULT_SCENE_MAP` with lazy `obsws_python.ReqClient` import (`[obs]` optional extra `obsws-python>=1.6.1`), graceful offline fallback, `asyncio.to_thread` wrapping, `switch_scene`, `toggle_streaming`, `start_replay_buffer`, `save_replay_buffer`, and `set_source_visibility`.
+- **Autonomous Scene Switching (`core/desktop/controller.py`, `core/planning/executor.py`, `core/performance/director.py`, `core/orchestrator.py`):** Wired `self.obs` into `DesktopController`, `AutonomousMissionExecutor` (`social` -> `Just Chatting`, `minecraft` -> `Minecraft`, `chess` -> `Chess`, `performance` -> `Karaoke Stage`), `PerformanceDirector`, and `CollabManager` (`Collab Split-Screen` on peer connect), broadcasting `obs_scene_changed`.
+
+### Pillar 3 — Highlight Auto-Marker, Vertical Clip Pipeline, VOD Summarizer & Docker Headless
+- **Highlight Auto-Marker (`core/highlights/detector.py`):** Added `HighlightDetector` subscribing to `chat.received`, `donation.received`, `voice.barge_in`, `goal.completed`, `mood.updated`, and `performance.updated` with cooldown deduplication, `mark_manual()`, and OBS replay-buffer callback.
+- **Vertical Clip Pipeline & VOD Summarizer (`core/highlights/clipper.py`, `core/highlights/vod_summarizer.py`, `core/orchestrator.py`):** Added `ClipPipeline` (`1080x1920` 9:16 `ffmpeg` argv builder via `asyncio.create_subprocess_exec`, never `shell=True`) and `VODSummarizer` writing Markdown reports to `data/second_brain/streams/YYYY-MM-DD.md` (with `_2.md` suffixing) and emitting `vod.summary_ready` on shutdown.
+- **Headless Docker Profile (`Dockerfile`, `docker-compose.yml`, `.dockerignore`):** Added Python 3.12-slim container with `ffmpeg`, non-root `maybeai` user, `MAYBEAI_HEADLESS=1`, and `HEALTHCHECK` against `/api/health`.
+
+### Pillar 4 — Config, Studio/Deck UI, Routes, Tests & Docs
+- **Settings, Studio & Deck (`config/settings.json`, `core/config_manager.py`, `web/settings.*`, `web/index.html`, `web/app.js`, `web/deck.*`, `run.py`):** Added `plugins.sandbox_mode`, `obs` (`password` masked as `"********"`), and `highlights` categories (21 categories total), `#obsHighlightsCard` in Studio, `#deck-scene-pill` + `#btn-deck-mark-highlight` in `/deck`, `GET /api/health`, `GET /api/obs/status`, `POST /api/obs/action`, `GET /api/highlights/status`, and `POST /api/highlights/action`.
+- **Verified Suite:** `315` Python unit/integration tests passing (`0` failures, `0` errors) + `tests/test_guard_runner.js` passing.
+
+---
+
 ## [2026-11-26] — Fase 2: Neural TTS & RVC, AudioWorklet Stream Deck, 3D VRM / Multi-Param VTS, Real Telemetry & Platform Expansion
 
 ### Pillar 1 — Expressive Neural TTS & RVC Singing

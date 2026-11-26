@@ -23,11 +23,14 @@ from core.plugins.registry import PluginRegistry
 from core.minecraft.controller import MinecraftController
 from core.chess.controller import ChessController
 from core.conversation.chat_curator import ChatInteraction
+from core.desktop.obs_client import OBSWebSocketClient
+from core.highlights import HighlightDetector, ClipPipeline, VODSummarizer
 from core.event_bus import (
     EventBus,
     WS_TO_BUS_EVENT,
     BUS_TO_WS_EVENT,
     INTERACTION_STARTED,
+    COLLAB_STATE,
 )
 
 class Orchestrator:
@@ -95,6 +98,24 @@ class Orchestrator:
             plugin_name=vts_cfg.get("plugin_name", "MaybeAI-VTuber")
         )
 
+        # OBS Showrunner Client
+        obs_cfg = settings.get("obs", {}) if isinstance(settings, dict) else {}
+        obs_password = str(obs_cfg.get("password") or "").strip()
+        if not obs_password or obs_password == "********":
+            obs_password = os.getenv("OBS_WS_PASSWORD", "").strip()
+        obs_host = str(obs_cfg.get("host") or os.getenv("OBS_WS_HOST", "localhost") or "localhost").strip()
+        obs_port = int(obs_cfg.get("port") or os.getenv("OBS_WS_PORT", 4455) or 4455)
+        self.obs = OBSWebSocketClient(
+            host=obs_host,
+            port=obs_port,
+            password=obs_password,
+            enabled=bool(obs_cfg.get("enabled", False)),
+        )
+        if hasattr(self.brain, "desktop") and hasattr(self.brain.desktop, "set_obs_client"):
+            self.brain.desktop.set_obs_client(self.obs)
+        if hasattr(self.brain, "performance"):
+            self.brain.performance.scene_switcher = self._switch_obs_scene
+
         # Singer (Karaoke Engine)
         self.singer = Singer(
             songs_config_path=f"{config_dir}/songs.json",
@@ -138,6 +159,7 @@ class Orchestrator:
             human_approval_required=bool(auto_cfg.get("human_approval_required", False)),
             tick_interval_sec=float(auto_cfg.get("mission_tick_interval_sec", 25.0) or 25.0),
             enabled=bool(auto_cfg.get("closed_loop_missions", True) and auto_cfg.get("enabled", True)),
+            scene_switcher=self._switch_obs_scene,
         )
 
         # AI VTuber Collab Manager
@@ -166,6 +188,7 @@ class Orchestrator:
             enabled_plugins=plugins_cfg.get("enabled_plugins", ["word_chain"]),
             hook_timeout_sec=float(plugins_cfg.get("hook_timeout_sec", 5.0) or 5.0),
             enabled=bool(plugins_cfg.get("enabled", True)),
+            sandbox_mode=str(plugins_cfg.get("sandbox_mode", "subprocess") or "subprocess"),
             event_bus=self.event_bus,
             speak_cb=self._speak_plugin_response,
             broadcast_cb=self.broadcast,
@@ -174,6 +197,21 @@ class Orchestrator:
         self._plugins_discovered: bool = False
         self.plugins.attach_to_event_bus(self.event_bus)
 
+        # Highlight Auto-Marker, Vertical Clip Pipeline & VOD Summarizer
+        highlights_cfg = settings.get("highlights", {}) if isinstance(settings, dict) else {}
+        self.highlights = HighlightDetector(
+            event_bus=self.event_bus,
+            on_save_replay=self._on_highlight_save_replay,
+            chat_burst_threshold=int(highlights_cfg.get("chat_burst_threshold", 8) or 8),
+            cooldown_sec=float(highlights_cfg.get("cooldown_sec", 30.0) or 30.0),
+            enabled=bool(highlights_cfg.get("enabled", True)),
+        )
+        self.clipper = ClipPipeline(clips_dir="data/clips")
+        self.vod_summarizer = VODSummarizer(
+            streams_dir="data/second_brain/streams",
+            event_bus=self.event_bus,
+        )
+
         self.is_running = False
         self._busy_lock = asyncio.Lock()
         self._speech_lock = asyncio.Lock()
@@ -181,8 +219,50 @@ class Orchestrator:
         self._current_emotion: str = "neutral"
         self._active_interaction_task: Optional[asyncio.Task] = None
         self.barge_in_count: int = 0
+        self._collab_peer_connected: bool = False
         self.web_listeners: Set[Callable[[Dict[str, Any]], None]] = set()
         self.event_bus.subscribe("*", self._dispatch_to_web_listeners)
+        self.event_bus.subscribe(COLLAB_STATE, self._on_collab_state_changed)
+
+    async def _switch_obs_scene(self, scene_name: str, reason: str = "") -> Dict[str, Any]:
+        """Switches OBS scene via OBSWebSocketClient and broadcasts obs_scene_changed."""
+        obs_cfg = self.brain.settings.get("obs", {}) if isinstance(self.brain.settings, dict) else {}
+        auto_switch = bool(obs_cfg.get("auto_scene_switch", True))
+        if not auto_switch and reason != "manual":
+            return {"success": False, "skipped": True, "scene": scene_name, "reason": reason}
+        res = await self.obs.switch_scene(scene_name, reason=reason)
+        if res.get("success"):
+            await self.broadcast("obs_scene_changed", {
+                "scene": res.get("scene", scene_name),
+                "reason": reason,
+                "status": self.obs.get_status(),
+            })
+        return res
+
+    async def switch_obs_scene(self, scene_name: str, reason: str = "manual") -> Dict[str, Any]:
+        """Public wrapper for manual or API-triggered OBS scene switches."""
+        return await self._switch_obs_scene(scene_name, reason=reason)
+
+    async def _connect_obs_and_replay(self) -> None:
+        ok = await self.obs.connect()
+        if ok:
+            obs_cfg = self.brain.settings.get("obs", {}) if isinstance(self.brain.settings, dict) else {}
+            if obs_cfg.get("replay_buffer_enabled", True):
+                await self.obs.start_replay_buffer()
+
+    async def _on_collab_state_changed(self, _event_name: str, payload: Dict[str, Any]) -> None:
+        peer_connected = bool(payload.get("peer_connected", False))
+        if peer_connected and not self._collab_peer_connected:
+            self._collab_peer_connected = True
+            await self._switch_obs_scene("Collab Split-Screen", reason="collab_peer_connected")
+        elif not peer_connected:
+            self._collab_peer_connected = False
+
+    async def _on_highlight_save_replay(self, _marker: Any) -> Dict[str, Any]:
+        obs_cfg = self.brain.settings.get("obs", {}) if isinstance(self.brain.settings, dict) else {}
+        if self.obs.is_connected and bool(obs_cfg.get("replay_buffer_enabled", True)):
+            return await self.obs.save_replay_buffer()
+        return {"success": False, "skipped": True}
 
     def _spawn_bg_task(self, coro) -> asyncio.Task:
         task = asyncio.create_task(coro)
@@ -297,6 +377,10 @@ class Orchestrator:
         if self.brain.settings.get("vts", {}).get("enabled", True):
             self._spawn_bg_task(self.vts.connect())
 
+        # Connect to OBS Studio in background if enabled
+        if self.obs.enabled:
+            self._spawn_bg_task(self._connect_obs_and_replay())
+
         # Connect to Twitch if enabled
         twitch_cfg = self.brain.settings.get("twitch", {})
         if twitch_cfg.get("enabled", False) and twitch_cfg.get("channel"):
@@ -360,8 +444,15 @@ class Orchestrator:
         await self.missions.stop_loop()
         await self.collab.shutdown()
         await self.plugins.shutdown()
+        highlights_cfg = self.brain.settings.get("highlights", {}) if isinstance(self.brain.settings, dict) else {}
+        if getattr(self, "vod_summarizer", None) is not None and bool(highlights_cfg.get("vod_summary_enabled", True)):
+            try:
+                self.vod_summarizer.generate_summary(event_bus=self.event_bus)
+            except Exception as exc:
+                print(f"[Orchestrator] VOD summary generation error: {exc}")
         self.chat.stop()
         await self.chat.stop_adapters()
+        await self.obs.disconnect()
         await self.vts.disconnect()
         await self.brain.close()
 
@@ -726,6 +817,28 @@ class Orchestrator:
         self.collab.update_config(new_settings)
         self.plugins.update_config(new_settings)
         self.plugins._rebuild_command_map()
+
+        # 8. Update OBS Showrunner & Highlights
+        obs_cfg = new_settings.get("obs", {}) if isinstance(new_settings, dict) else {}
+        raw_obs_pw = obs_cfg.get("password")
+        obs_pw = None if (raw_obs_pw is None or str(raw_obs_pw) == "********") else str(raw_obs_pw)
+        self.obs.update_config(
+            host=obs_cfg.get("host"),
+            port=obs_cfg.get("port"),
+            password=obs_pw,
+            enabled=obs_cfg.get("enabled"),
+        )
+        if self.obs.enabled and not self.obs.is_connected and self.is_running:
+            self._spawn_bg_task(self._connect_obs_and_replay())
+        elif not self.obs.enabled and self.obs.is_connected:
+            await self.obs.disconnect()
+
+        highlights_cfg = new_settings.get("highlights", {}) if isinstance(new_settings, dict) else {}
+        self.highlights.update_config(
+            enabled=highlights_cfg.get("enabled"),
+            chat_burst_threshold=highlights_cfg.get("chat_burst_threshold"),
+            cooldown_sec=highlights_cfg.get("cooldown_sec"),
+        )
 
         # Broadcast live event to all connected WebSocket clients (with secrets masked)
         await self.broadcast("configuration_updated", {

@@ -429,6 +429,41 @@
       </section>
     </div>
 
+    <!-- Fase 3: OBS Showrunner & Highlights Card -->
+    <section class="card obs-highlights-card" id="obsHighlightsCard" style="margin-bottom: 16px;">
+      <div class="card-header">
+        <div class="collab-title">
+          <span class="collab-icon">🎬</span>
+          <div>
+            <h2>OBS Showrunner &amp; Highlights</h2>
+            <small class="collab-subtitle">Autonomous Scene Switching, Replay Buffer &amp; Highlight Markers</small>
+          </div>
+        </div>
+        <div class="collab-status-bar">
+          <span id="obs-scene-badge" class="badge badge-accent">Scene: Just Chatting</span>
+          <span id="obs-conn-badge" class="badge">OBS: Standby</span>
+        </div>
+      </div>
+      <div class="collab-body" style="display: flex; flex-direction: column; gap: 10px;">
+        <div class="collab-conn-row" style="flex-wrap: wrap;">
+          <select id="obsSceneSelect" class="select-server" aria-label="OBS Scene">
+            <option value="Just Chatting">Just Chatting</option>
+            <option value="Minecraft">Minecraft</option>
+            <option value="Karaoke Stage">Karaoke Stage</option>
+            <option value="Chess">Chess</option>
+            <option value="Collab Split-Screen">Collab Split-Screen</option>
+            <option value="BRB">BRB</option>
+          </select>
+          <button type="button" id="btn-obs-switch-scene" class="btn btn-primary btn-sm">🎬 Switch Scene</button>
+          <button type="button" id="btn-obs-save-replay" class="btn btn-secondary btn-sm">💾 Save Replay</button>
+          <button type="button" id="btn-mark-highlight" class="btn btn-accent btn-sm">📸 Mark Highlight</button>
+        </div>
+        <div id="highlights-list" class="collab-messages-feed" style="max-height: 120px; overflow-y: auto;">
+          <div class="collab-feed-empty">Belum ada highlight tercatat.</div>
+        </div>
+      </div>
+    </section>
+
     <!-- Quick Actions Panel -->
     <footer class="controls-footer">
       <div class="quick-prompts">

@@ -1,0 +1,44 @@
+# Virtual environments & caches
+.venv/
+venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Version control & secrets
+.git/
+.gitignore
+.env
+
+# Node / Minecraft runtime artifacts
+node_modules/
+minecraft/node/
+minecraft/node_modules/
+npm-debug.log*
+
+# Local logs, temp, and media outputs
+temp/
+logs/
+*.mp3
+*.mp4
+!assets/songs/*.wav
+!assets/songs/*.mp3
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE & OS metadata
+.vscode/
+.idea/
+*.swp
+*.swo
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store

@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python 3.12" />
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688.svg" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Tests-300%20Passed%20(100%25)-success.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-315%20Passed%20(100%25)-success.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/UI-Cyberpunk%20Futuristic-8b5cf6.svg" alt="UI" />
   <img src="https://img.shields.io/badge/Live2D-VTube%20Studio%20API-ff69b4.svg" alt="VTS" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
@@ -44,7 +44,9 @@
   - [18. Full-Duplex Voice, Energy VAD & Barge-In](#18-full-duplex-voice-energy-vad--barge-in)
   - [19. Multi-Platform Live Chat & EventBus](#19-multi-platform-live-chat-twitch-youtube-live-discord-web--event-driven-core-eventbus)
   - [20. AI-to-AI Collab Protocol (/ws/collab)](#20-ai-to-ai-collab-protocol-wscollab)
-  - [21. Community Plugin SDK & Sambung Kata](#21-community-plugin-sdk--sambung-kata)
+  - [21. Community Plugin SDK, Subprocess Sandbox & `maybeai plugin` CLI](#21-community-plugin-sdk-subprocess-sandbox--maybeai-plugin-cli)
+  - [22. Autonomous Multi-Scene OBS Showrunner, Highlights, Vertical Clips & VOD Summarizer](#22-autonomous-multi-scene-obs-showrunner-highlights-vertical-clips--vod-summarizer)
+  - [23. Docker Headless Deployment](#23-docker-headless-deployment)
 - [Struktur Direktori Proyek](#-struktur-direktori-proyek)
 - [Panduan Instalasi & Menjalankan](#-panduan-instalasi--menjalankan)
 - [Panduan Configuration Center (/settings)](#-panduan-configuration-center-settings)
@@ -236,10 +238,18 @@ flowchart TD
 - **Turn-Taking Floor & Anti-Loop (`core/collab/manager.py`):** `CollabManager` mengelola *floor state machine* (`idle`, `speaking`, `yielding`, `listening`, `cooldown`), membatasi percakapan beruntun via `max_collab_turns` (default `6`) dan `turn_cooldown_sec` (default `2.5s`) untuk mencegah infinite loop antar-AI, serta menyediakan sinkronisasi duet karaoke (`send_duet_sync`) dan ekspresi (`send_emote_sync`).
 - **Studio Controls & Peer WebSocket (`run.py`, `web/index.html`):** Mendukung koneksi outbound ke peer maupun inbound pada `/ws/collab` dengan panel **AI Collab** (`#collabCard`) di tab **🎤 Live Stage**.
 
-### 21. Community Plugin SDK & Sambung Kata
-- **Sandboxed Plugin SDK (`core/plugins/sdk.py`, `core/plugins/registry.py`):** Menyediakan `PluginManifest`, `PluginContext` (akses aman ke `EventBus`, `speak`, `broadcast`, dan state per-plugin tanpa membocorkan internal `Orchestrator`/`ConfigManager`), kelas dasar `MaybeAIPlugin`, serta dekorator `@plugin_command` dan `@plugin_event`.
-- **Lifecycle, Timeout & Isolasi Error:** `PluginRegistry` menemukan plugin bawaan (`core/plugins/`) dan eksternal (`plugins/*.py`), mendukung `enable` / `disable` / `reload` runtime tanpa restart, menegakkan `creator_only_commands`, dan membungkus setiap eksekusi hook dengan `asyncio.wait_for(..., timeout=hook_timeout_sec)` serta isolasi exception.
+### 21. Community Plugin SDK, Subprocess Sandbox & `maybeai plugin` CLI
+- **Out-of-Process Subprocess Sandbox (`core/plugins/sdk.py`, `core/plugins/sandbox_worker.py`, `core/plugins/registry.py`):** Plugin eksternal di `plugins/*.py` dijalankan secara default (`sandbox_mode="subprocess"`) sebagai proses terpisah melalui JSON-RPC 2.0 stdio (`python -m core.plugins.sandbox_worker`) dengan **stripped `os.environ`** (rahasia host seperti `GEMINI_API_KEY` dan `MAYBEAI_CREATOR_TOKEN` tidak pernah diwariskan ke worker), penegakan izin kapabilitas (`chat:read`, `tts:speak`, `event:sub`, `event:pub`), serta `proc.kill()` paksa bila hook melewati `hook_timeout_sec`.
+- **Plugin Developer CLI (`core/plugins/cli.py`, `pyproject.toml`):** Tersedia perintah `maybeai plugin init <name>`, `maybeai plugin test <path>`, dan `maybeai plugin pack <path>` (juga via `python -m core.plugins.cli`).
 - **Built-in Word Chain (`!sambungkata` / `!wc`):** Plugin komunitas interaktif (`core/plugins/word_chain.py`) di mana penonton dan creator bermain sambung huruf terakhir (`!wc start`, `!wc <kata>`, `!wc score`, `!wc stop`) lengkap dengan papan skor dan pencegahan pengulangan kata.
+
+### 22. Autonomous Multi-Scene OBS Showrunner, Highlights, Vertical Clips & VOD Summarizer
+- **OBS WebSocket v5 Showrunner (`core/desktop/obs_client.py`):** `OBSWebSocketClient` (menggunakan opsional `obsws-python>=1.6.1`, *graceful offline fallback* bila OBS belum berjalan) terhubung ke `DesktopController`, `AutonomousMissionExecutor` (`social` $\rightarrow$ `Just Chatting`, `minecraft` $\rightarrow$ `Minecraft`, `chess` $\rightarrow$ `Chess`, `performance` $\rightarrow$ `Karaoke Stage`), `PerformanceDirector`, dan `CollabManager` (`Collab Split-Screen`), serta memancarkan event `obs_scene_changed`.
+- **Highlight Auto-Marker (`core/highlights/detector.py`):** `HighlightDetector` memantau `EventBus` untuk lonjakan chat (*chat burst*), donasi/SuperChat, barge-in suara Creator, penyelesaian goal, lonjakan mood, dan momen performa dengan deduplikasi *cooldown*, tombol manual (`mark_manual()`), serta pemicu `save_replay_buffer()` OBS.
+- **Vertical Clip Pipeline & VOD Summarizer (`core/highlights/clipper.py`, `core/highlights/vod_summarizer.py`):** `ClipPipeline` menyusun argumen `ffmpeg` `1080x1920` (9:16) secara aman via `asyncio.create_subprocess_exec` (tanpa `shell=True`), sedangkan `VODSummarizer` menulis laporan sesi Markdown ke `data/second_brain/streams/YYYY-MM-DD.md` saat shutdown (`vod_summary_enabled=true`).
+
+### 23. Docker Headless Deployment
+- **Container & Compose (`Dockerfile`, `docker-compose.yml`, `.dockerignore`):** Profil container Python 3.12-slim headless (`MAYBEAI_HEADLESS=1`) lengkap dengan `ffmpeg`, user non-root `maybeai`, volume persisten untuk `config/`, `data/`, `plugins/`, dan `data/clips/`, serta `HEALTHCHECK` ke `GET /api/health`.
 
 ---
 
@@ -266,7 +276,8 @@ MaybeAI/
 │   ├── chat_receiver.py           # Ingestion Twitch IRC (TLS/IRCv3), Web Chat, & Multi-Platform Registry
 │   ├── collab/                    # AI-to-AI Collab Protocol (CollabEnvelope HMAC & CollabManager)
 │   ├── platforms/                 # Adapter Live Chat (YouTube Live, Discord Gateway, TikTok Live)
-│   ├── plugins/                   # Community Plugin SDK, PluginRegistry, & WordChainPlugin (!wc)
+│   ├── highlights/                # HighlightDetector, ClipPipeline (9:16 ffmpeg), & VODSummarizer
+│   ├── plugins/                   # Community Plugin SDK, Subprocess Sandbox Worker, CLI, & WordChainPlugin (!wc)
 │   ├── moderator.py               # Filter keamanan, spam, & prompt injection
 │   ├── singer.py                  # Player BGM Karaoke & sinkronisasi lirik
 │   ├── stt.py                     # Full-Duplex EnergyVAD, StreamingSTTSession, & Whisper STT
@@ -321,8 +332,10 @@ MaybeAI/
 ├── tests/
 │   ├── __init__.py                # Menetapkan MAYBEAI_LLM_PROVIDER=mock saat test berjalan
 │   ├── test_guard_runner.js       # Uji unit guard mode Minecraft (Node.js)
-│   └── test_*.py                  # 33 modul pengujian unit & integrasi Python (300 tests)
-├── pyproject.toml                 # Metadata proyek & extras opsional ([stt-local], [embeddings-local], [tts-local], [tiktok], [dev])
+│   └── test_*.py                  # 35 modul pengujian unit & integrasi Python (315 tests)
+├── Dockerfile                     # Image headless Python 3.12-slim + ffmpeg & /api/health
+├── docker-compose.yml             # Orkestrasi layanan MaybeAI & volume persisten
+├── pyproject.toml                 # Metadata proyek, CLI entry point (`maybeai`), & extras (`[obs]`, `[tts-local]`, `[tiktok]`, dll)
 ├── run.py                         # FastAPI Web Server & Application Launcher
 ├── requirements.txt               # Daftar dependensi Python
 ├── start.bat                      # One-click Windows launcher (.venv, pip install, .env, run.py)
@@ -424,7 +437,7 @@ Akses halaman kontrol konfigurasi di: 👉 **`http://localhost:7860/settings`**
 *(Atau klik tombol **⚙️ Configuration Center** di bagian atas Web Dashboard utama).*
 
 ### Fitur Utama Configuration Center:
-1. **Navigasi Sidebar Responsif:** 19 kategori pengaturan (termasuk `stt`, `security`, `youtube`, `discord`, `collab`, dan `plugins`) plus tampilan *System Diagnostics* dengan ikon khas cyberpunk.
+1. **Navigasi Sidebar Responsif:** 21 kategori pengaturan (termasuk `obs`, `highlights`, `stt`, `security`, `youtube`, `discord`, `tiktok`, `avatar`, `collab`, dan `plugins`) plus tampilan *System Diagnostics* dengan ikon khas cyberpunk.
 2. **Pencarian Real-Time (*Search Box*):** Menemukan pengaturan apapun hanya dengan mengetikkan kata kunci (contoh: *temperature*, *streaming*, *embedding*, *youtube*, *discord*, *token*, *stt*, *vad*, *barge*, *collab*, *plugins*).
 3. **Perlindungan Token & Masking:** Secret sensitif seperti `twitch.oauth_token`, `youtube.api_key`, `discord.bot_token`, `security.creator_token`, dan `collab.shared_secret` disamarkan menjadi `********` dan dipertahankan saat penyimpanan atomik bila tidak diubah.
 4. **Live Slider & Toggle:** Setiap slider menampilkan nilai numerik secara *real-time*, ditambah editor list interaktif untuk `security.allowed_origins` dan `plugins.enabled_plugins`.
@@ -455,7 +468,7 @@ MaybeAI menerapkan kontrol akses ketat untuk melindungi endpoint kontrol dan eks
   - **`tts`:** `provider` (`edge-tts` | `kokoro` | `elevenlabs` | `gpt_sovits` | `fish_speech`), `rvc_enabled`, `rvc_url`, `rvc_pitch_shift`, `kokoro_url`, `custom_tts_url`, `elevenlabs_voice_id`.
   - **`twitch` / `discord` / `tiktok`:** `twitch.use_tls`, `twitch.port` (IRCv3 tags `bits`/`sub`/`raid`), `discord.use_gateway`, `discord.reply_enabled`, serta kategori **`tiktok`** (`enabled`, `username`).
   - **`vision` & `avatar`:** `vision.vlm_enabled`, `vision.vlm_interval_sec` (`aperceive_with_vlm()`), serta kategori **`avatar`** (`renderer`: `canvas` | `vrm`, `vrm_url`).
-  - **`stt`, `security`, `collab`, `plugins`:** Mengatur AudioWorklet/EnergyVAD/barge-in, token akses creator (`********`), kolaborasi AI peer-to-peer (`duet_sync`, `emote_sync`, `game_move`), dan lifecycle plugin SDK.
+  - **`stt`, `security`, `collab`, `plugins`, `obs`, `highlights`:** Mengatur AudioWorklet/EnergyVAD/barge-in, token akses creator (`********`), kolaborasi AI peer-to-peer (`duet_sync`, `emote_sync`, `game_move`), lifecycle & `sandbox_mode` plugin SDK, kredensial OBS WebSocket v5 (`obs.password` dimasking `********`), serta threshold auto-highlight & VOD summary (`highlights`).
 - **Otentikasi `/ws/collab` & Aksi Creator-Only `/ws`:**
   - Endpoint peer `/ws/collab` memverifikasi `MAYBEAI_COLLAB_SECRET` / `collab.shared_secret` menggunakan `hmac.compare_digest` (atau mewajibkan alamat loopback bila secret belum diset), serta memvalidasi tanda tangan HMAC-SHA256 pada `CollabEnvelope`.
   - Event `/ws` sensitif (`barge_in`, `voice_audio_chunk`, `mission_action`, serta mutasi `collab_action` & `plugin_action`) ditolak dengan `{"type": "error", "data": {"code": "forbidden"}}` jika pengirim bukan Creator terotorisasi.
@@ -559,6 +572,9 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
   - `POST /api/missions/toggle`: Menyalakan, menjeda, atau melanjutkan background loop misi otonom.
   - `GET /api/collab/status`: Status sesi AI-to-AI Collab (`floor_state`, `turn_count`, `max_collab_turns`, `turns_exhausted`, `secret_configured`, `recent_messages`).
   - `POST /api/collab/action`: Aksi kolaborasi (`connect`, `disconnect`, `initiate`, `send_utterance`, `duet_sync`, `emote_sync`, `reset_turns`, `status`).
+  - `GET /api/health`: Healthcheck layanan (`{"status": "ok"}`) untuk Docker/load balancer.
+  - `GET /api/obs/status` & `POST /api/obs/action`: Telemetri OBS WebSocket v5 dan kontrol scene/stream/replay buffer (`connect`, `disconnect`, `switch_scene`, `save_replay`, `start_stream`, `stop_stream`).
+  - `GET /api/highlights/status` & `POST /api/highlights/action`: Status auto-highlight, clipper, & VOD summarizer serta aksi (`mark`, `clip`, `summarize`).
   - `GET /api/plugins`: Daftar plugin terdaftar, manifest command/event, status `enabled`/`loaded`, dan statistik error.
   - `POST /api/plugins/action`: Aksi lifecycle plugin (`enable`, `disable`, `reload`, `list`).
 
@@ -614,12 +630,12 @@ node tests/test_guard_runner.js
 
 ### Hasil Verifikasi:
 ```text
-Ran 300 tests
+Ran 315 tests
 OK
 ```
-- **Total Test Cases:** 300 Python unit/integration tests + `test_guard_runner.js` (Node.js)
+- **Total Test Cases:** 315 Python unit/integration tests + `test_guard_runner.js` (Node.js)
 - **Success Rate:** **100% PASS (0 Failures, 0 Errors)**
-- **Modul Teruji:** `test_audioworklet_deck`, `test_autonomous_missions`, `test_avatar_vts_and_telemetry`, `test_brain`, `test_chat_receiver`, `test_chess`, `test_collab_and_plugins`, `test_configuration`, `test_desktop_companion`, `test_event_bus`, `test_fase1_hardening`, `test_goals`, `test_guard_mode`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_neural_tts_rvc`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_platforms_v2`, `test_relationships`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_voice_duplex`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
+- **Modul Teruji:** `test_audioworklet_deck`, `test_autonomous_missions`, `test_avatar_vts_and_telemetry`, `test_brain`, `test_chat_receiver`, `test_chess`, `test_collab_and_plugins`, `test_configuration`, `test_desktop_companion`, `test_event_bus`, `test_fase1_hardening`, `test_goals`, `test_guard_mode`, `test_highlights_and_vod`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_neural_tts_rvc`, `test_obs_showrunner`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_platforms_v2`, `test_relationships`, `test_sandbox_plugins_cli`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_voice_duplex`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
 
 ---
 

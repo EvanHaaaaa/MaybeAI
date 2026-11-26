@@ -1,0 +1,23 @@
+services:
+  maybeai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: maybeai-headless
+    ports:
+      - "7860:7860"
+    environment:
+      - MAYBEAI_HEADLESS=1
+      - MAYBEAI_LLM_PROVIDER=${MAYBEAI_LLM_PROVIDER:-mock}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - MAYBEAI_CREATOR_TOKEN=${MAYBEAI_CREATOR_TOKEN:-}
+      - OBS_WS_HOST=${OBS_WS_HOST:-host.docker.internal}
+      - OBS_WS_PORT=${OBS_WS_PORT:-4455}
+      - OBS_WS_PASSWORD=${OBS_WS_PASSWORD:-}
+    volumes:
+      - ./config:/app/config
+      - ./data:/app/data
+      - ./plugins:/app/plugins
+      - ./data/clips:/app/data/clips
+    restart: unless-stopped

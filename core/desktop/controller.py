@@ -3,12 +3,15 @@ import re
 import sys
 import time
 import shutil
+import asyncio
+import inspect
 import subprocess
 from typing import Dict, Any, List, Tuple, Optional
 from core.desktop.models import (
     DesktopPermissionConfig,
     DesktopNotification
 )
+from core.desktop.obs_client import OBSWebSocketClient
 
 
 _SHELL_METACHAR_RE = re.compile(r"[&|;$><`\\/\n\r\x00(){}\[\]*?~'\"%^!]")
@@ -21,10 +24,19 @@ class DesktopController:
     and streaming scene management.
     """
 
-    def __init__(self, config: DesktopPermissionConfig):
+    def __init__(
+        self,
+        config: DesktopPermissionConfig,
+        obs_client: Optional[OBSWebSocketClient] = None,
+    ):
         self.config = config
+        self.obs_client = obs_client
         self.notifications: List[DesktopNotification] = []
         self._seed_default_notifications()
+
+    def set_obs_client(self, obs_client: Optional[OBSWebSocketClient]) -> None:
+        """Attaches or replaces the OBSWebSocketClient used for live streaming ops."""
+        self.obs_client = obs_client
 
     def _seed_default_notifications(self):
         self.notifications = [
@@ -193,13 +205,41 @@ class DesktopController:
             return False, f"Gagal membuka aplikasi '{clean}': {e}"
 
     # --- 4. Streaming Ops ---
+    def _dispatch_obs_call(self, result: Any) -> Optional[Any]:
+        """Executes or schedules an awaitable OBS client call without breaking sync callers."""
+        if not inspect.isawaitable(result):
+            return result
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(result)
+            return None
+        except RuntimeError:
+            return asyncio.run(result)
+
     def switch_streaming_scene(self, scene_name: str) -> Tuple[str, str]:
         self.config.streaming_scene = scene_name
-        msg = f"Scene OBS berhasil dialihkan ke: '{scene_name}'."
-        return scene_name, msg
+        if self.obs_client is not None and getattr(self.obs_client, "is_connected", False):
+            try:
+                res = self._dispatch_obs_call(self.obs_client.switch_scene(scene_name))
+                if isinstance(res, dict) and res.get("scene"):
+                    self.config.streaming_scene = str(res["scene"])
+            except Exception as exc:
+                print(f"[DesktopController] OBS switch_scene fallback: {exc}")
+        msg = f"Scene OBS berhasil dialihkan ke: '{self.config.streaming_scene}'."
+        return self.config.streaming_scene, msg
 
     def toggle_streaming(self) -> Tuple[bool, str]:
-        self.config.is_streaming = not self.config.is_streaming
+        target_state = not self.config.is_streaming
+        self.config.is_streaming = target_state
+        if self.obs_client is not None and getattr(self.obs_client, "is_connected", False):
+            try:
+                res = self._dispatch_obs_call(
+                    self.obs_client.toggle_streaming(target_state=target_state)
+                )
+                if isinstance(res, dict) and "is_streaming" in res:
+                    self.config.is_streaming = bool(res["is_streaming"])
+            except Exception as exc:
+                print(f"[DesktopController] OBS toggle_streaming fallback: {exc}")
         msg = "Siaran langsung (Live Stream) DIMULAI! 🎉" if self.config.is_streaming else "Siaran langsung DIHENTIKAN."
         return self.config.is_streaming, msg
 

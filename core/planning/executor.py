@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from core.planning.models import Goal, GoalCategory, GoalStatus, GoalTier, Subtask
 from core.planning.engine import GoalEngine
+from core.desktop.obs_client import DEFAULT_SCENE_MAP
 
 
 class AutonomousMissionExecutor:
@@ -32,6 +33,8 @@ class AutonomousMissionExecutor:
         human_approval_required: bool = False,
         tick_interval_sec: float = 25.0,
         enabled: bool = True,
+        scene_switcher: Optional[Callable[[str, str], Any]] = None,
+        scene_map: Optional[Dict[str, str]] = None,
     ):
         self.goal_engine = goal_engine
         self.mood_engine = mood_engine
@@ -43,6 +46,12 @@ class AutonomousMissionExecutor:
         self.human_approval_required = bool(human_approval_required)
         self.tick_interval_sec = max(0.05, float(tick_interval_sec))
         self.enabled = bool(enabled)
+        self.scene_switcher = scene_switcher
+        self.scene_map: Dict[str, str] = dict(DEFAULT_SCENE_MAP)
+        if scene_map:
+            for k, v in scene_map.items():
+                if v:
+                    self.scene_map[str(k).strip().lower()] = str(v).strip()
 
         self.is_running: bool = False
         self.is_paused: bool = False
@@ -52,6 +61,7 @@ class AutonomousMissionExecutor:
         self.last_error: Optional[str] = None
         self.step_count: int = 0
         self.history: List[Dict[str, Any]] = []
+        self._last_scene: Optional[str] = None
 
         self._loop_task: Optional[asyncio.Task] = None
         self._step_lock = asyncio.Lock()
@@ -446,6 +456,19 @@ class AutonomousMissionExecutor:
             )
         return {"success": True, "prompt": outreach_prompt, "eval": eval_res}
 
+    async def _switch_scene_for_domain(self, domain: str, goal: Goal, subtask: Subtask) -> None:
+        if not self.scene_switcher:
+            return
+        scene_name = self.scene_map.get(domain) or self.scene_map.get("social", "Just Chatting")
+        if scene_name == self._last_scene:
+            return
+        reason = f"Entering {domain} mission: {goal.title} ({subtask.title})"
+        try:
+            await self._maybe_await(self.scene_switcher(scene_name, reason))
+            self._last_scene = scene_name
+        except Exception as exc:
+            print(f"[AutonomousMissionExecutor] scene_switcher error: {exc}")
+
     async def _execute_domain_action(self, plan: Dict[str, Any], goal: Goal, subtask: Subtask) -> Dict[str, Any]:
         domain = plan["domain"]
         if domain == "minecraft":
@@ -500,6 +523,7 @@ class AutonomousMissionExecutor:
             self.pending_approval = None
 
             try:
+                await self._switch_scene_for_domain(plan["domain"], active_goal, active_sub)
                 domain_result = await self._execute_domain_action(plan, active_goal, active_sub)
                 if isinstance(domain_result, dict) and domain_result.get("success") is False:
                     raise RuntimeError(domain_result.get("error") or domain_result.get("reason") or "Mission step failed")

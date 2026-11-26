@@ -355,6 +355,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof refreshMissionStatus === "function") refreshMissionStatus();
       if (typeof refreshCollabStatus === "function") refreshCollabStatus();
       if (typeof refreshPluginsList === "function") refreshPluginsList();
+      if (typeof refreshObsAndHighlightsStatus === "function") refreshObsAndHighlightsStatus();
     };
 
     ws.onclose = () => {
@@ -520,6 +521,10 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof appendCollabMessage === "function") appendCollabMessage(msg.data);
     } else if (msg.type === "plugin_event") {
       if (typeof handlePluginEvent === "function") handlePluginEvent(msg.data);
+    } else if (msg.type === "obs_scene_changed") {
+      if (typeof handleObsSceneChanged === "function") handleObsSceneChanged(msg.data);
+    } else if (msg.type === "highlight_marked") {
+      if (typeof handleHighlightMarked === "function") handleHighlightMarked(msg.data);
     } else if (msg.type === "audience_cheer") {
       triggerCheerEffect(msg.data);
     } else if (msg.type === "avatar_movement") {
@@ -5112,6 +5117,142 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (btnPluginsRefresh) {
     btnPluginsRefresh.addEventListener("click", refreshPluginsList);
+  }
+
+  // --- Fase 3: OBS Showrunner & Highlights Card ---
+  const obsSceneBadge = document.getElementById("obs-scene-badge");
+  const obsConnBadge = document.getElementById("obs-conn-badge");
+  const obsSceneSelect = document.getElementById("obsSceneSelect");
+  const btnObsSwitchScene = document.getElementById("btn-obs-switch-scene");
+  const btnObsSaveReplay = document.getElementById("btn-obs-save-replay");
+  const btnMarkHighlight = document.getElementById("btn-mark-highlight");
+  const highlightsListEl = document.getElementById("highlights-list");
+  let recentHighlights = [];
+
+  function updateObsUi(status) {
+    if (!status || typeof status !== "object") return;
+    const scene = status.current_scene || status.scene || "Just Chatting";
+    const connected = Boolean(status.connected);
+    if (obsSceneBadge) {
+      obsSceneBadge.textContent = `Scene: ${scene}`;
+    }
+    if (obsConnBadge) {
+      obsConnBadge.textContent = connected ? "OBS: Connected" : "OBS: Standby";
+      obsConnBadge.className = `badge ${connected ? "badge-online" : ""}`;
+    }
+    if (obsSceneSelect && scene) {
+      const hasOption = Array.from(obsSceneSelect.options).some(opt => opt.value === scene);
+      if (hasOption) obsSceneSelect.value = scene;
+    }
+  }
+
+  function renderHighlightsList(items) {
+    if (!highlightsListEl) return;
+    const list = Array.isArray(items) ? items : [];
+    if (list.length === 0) {
+      highlightsListEl.innerHTML = `<div class="collab-feed-empty">Belum ada highlight tercatat.</div>`;
+      return;
+    }
+    highlightsListEl.innerHTML = list.slice(0, 10).map(item => {
+      const reason = escapeHtml(String(item.reason || item.label || "highlight"));
+      const source = escapeHtml(String(item.source || "auto"));
+      const ts = escapeHtml(String(item.timestamp || item.time || ""));
+      const scoreVal = typeof item.score === "number" ? ` (${item.score.toFixed(2)})` : "";
+      return `<div class="collab-feed-item"><strong>📸 ${reason}</strong>${escapeHtml(scoreVal)} <span style="opacity:0.7;">[${source}${ts ? " • " + ts : ""}]</span></div>`;
+    }).join("");
+  }
+
+  function handleObsSceneChanged(data) {
+    if (!data) return;
+    const scene = data.scene || data.scene_name || data.current_scene;
+    if (scene && obsSceneBadge) {
+      obsSceneBadge.textContent = `Scene: ${scene}`;
+    }
+    if (scene && obsSceneSelect) {
+      const hasOption = Array.from(obsSceneSelect.options).some(opt => opt.value === scene);
+      if (hasOption) obsSceneSelect.value = scene;
+    }
+  }
+
+  function handleHighlightMarked(data) {
+    if (!data) return;
+    recentHighlights = [data, ...recentHighlights].slice(0, 15);
+    renderHighlightsList(recentHighlights);
+  }
+
+  async function refreshObsAndHighlightsStatus() {
+    try {
+      const [obsRes, hlRes] = await Promise.all([
+        authFetch("/api/obs/status"),
+        authFetch("/api/highlights/status")
+      ]);
+      if (obsRes.ok) {
+        updateObsUi(await obsRes.json());
+      }
+      if (hlRes.ok) {
+        const hlData = await hlRes.json();
+        const items = (hlData.highlights && Array.isArray(hlData.highlights.recent))
+          ? hlData.highlights.recent
+          : (Array.isArray(hlData.recent) ? hlData.recent : []);
+        if (items.length > 0) {
+          recentHighlights = items.slice().reverse();
+        }
+        renderHighlightsList(recentHighlights);
+      }
+    } catch (e) {}
+  }
+
+  if (btnObsSwitchScene) {
+    btnObsSwitchScene.addEventListener("click", async () => {
+      const scene = obsSceneSelect ? obsSceneSelect.value : "Just Chatting";
+      try {
+        const res = await authFetch("/api/obs/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "switch_scene", scene })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          updateObsUi(data.status || { current_scene: data.scene || scene, connected: true });
+        }
+      } catch (e) {}
+    });
+  }
+
+  if (btnObsSaveReplay) {
+    btnObsSaveReplay.addEventListener("click", async () => {
+      try {
+        const res = await authFetch("/api/obs/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "save_replay" })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.status) updateObsUi(data.status);
+        }
+      } catch (e) {}
+    });
+  }
+
+  if (btnMarkHighlight) {
+    btnMarkHighlight.addEventListener("click", async () => {
+      try {
+        const res = await authFetch("/api/highlights/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "mark", reason: "creator_manual", source: "studio" })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.result) {
+            handleHighlightMarked(data.result);
+          } else {
+            refreshObsAndHighlightsStatus();
+          }
+        }
+      } catch (e) {}
+    });
   }
 
   // --- 2D Animated Avatar Renderer ---

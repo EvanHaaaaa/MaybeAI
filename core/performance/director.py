@@ -1,9 +1,12 @@
+import asyncio
+import inspect
 import json
 import random
 import time
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Callable, Dict, Any, List, Optional, Tuple
 
+from core.desktop.obs_client import DEFAULT_SCENE_MAP
 from core.performance.models import (
     PerformanceStatus,
     SongMoodCategory,
@@ -27,11 +30,19 @@ class PerformanceDirector:
         songs_config_path: str = "config/songs.json",
         storage_path: Optional[str] = None,
         second_brain_dir: str = "data/second_brain",
-        data_dir: Optional[str] = None
+        data_dir: Optional[str] = None,
+        scene_switcher: Optional[Callable[[str, str], Any]] = None,
+        scene_map: Optional[Dict[str, str]] = None,
     ):
         self.songs_config_path = Path(songs_config_path)
         self.songs_catalog: Dict[str, Any] = {}
         self.load_songs_catalog()
+        self.scene_switcher = scene_switcher
+        self.scene_map: Dict[str, str] = dict(DEFAULT_SCENE_MAP)
+        if scene_map:
+            for k, v in scene_map.items():
+                if v:
+                    self.scene_map[str(k).strip().lower()] = str(v).strip()
 
         if storage_path is None:
             if data_dir:
@@ -173,6 +184,21 @@ class PerformanceDirector:
         self.sync_to_second_brain()
         return items
 
+    def _notify_scene_switch(self, scene_name: str, reason: str) -> None:
+        """Invokes optional scene_switcher callback (sync or async) without blocking or raising."""
+        if not self.scene_switcher:
+            return
+        try:
+            res = self.scene_switcher(scene_name, reason)
+            if inspect.isawaitable(res):
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(res)
+                except RuntimeError:
+                    asyncio.run(res)
+        except Exception as exc:
+            print(f"[PerformanceDirector] scene_switcher error: {exc}")
+
     # --- Performance Execution & Choreography ---
     def start_performance(
         self,
@@ -219,6 +245,10 @@ class PerformanceDirector:
         self.session.last_mc_intro = mc_speech
         self.session.updated_at = time.time()
         self.save()
+        self._notify_scene_switch(
+            self.scene_map.get("performance", "Karaoke Stage"),
+            f"Starting performance: {title}",
+        )
         return s_id, mc_speech
 
     def get_choreography_step_for_line(self, song_id: str, line_idx: int) -> ChoreographyStep:
@@ -321,6 +351,10 @@ class PerformanceDirector:
 
         self.save()
         self.sync_to_second_brain()
+        self._notify_scene_switch(
+            self.scene_map.get("social", "Just Chatting"),
+            f"Finished performance: {title} (score {score}/100)",
+        )
         return outro_speech, score
 
     # --- Second Brain Markdown Sync ---

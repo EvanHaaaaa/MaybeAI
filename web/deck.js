@@ -36,6 +36,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const badgeMood = document.getElementById("badge-mood");
   const badgeMission = document.getElementById("badge-mission");
   const badgeBargeIn = document.getElementById("badge-barge-in");
+  const deckScenePill = document.getElementById("deck-scene-pill");
   const deckFeedbackText = document.getElementById("deckFeedbackText");
 
   const deckAuthBar = document.getElementById("deck-auth-bar");
@@ -268,9 +269,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function refreshStatus() {
     try {
-      const [mRes, vRes] = await Promise.all([
+      const [mRes, vRes, oRes] = await Promise.all([
         authFetch("/api/missions/status"),
-        authFetch("/api/voice/status")
+        authFetch("/api/voice/status"),
+        authFetch("/api/obs/status")
       ]);
       if (mRes.status === 401 || mRes.status === 403 || vRes.status === 401 || vRes.status === 403) {
         if (deckAuthBar) deckAuthBar.style.display = "flex";
@@ -282,6 +284,11 @@ document.addEventListener("DOMContentLoaded", () => {
           bargeInCount = vData.barge_in_count;
           if (badgeBargeIn) badgeBargeIn.textContent = `Barge-In: ${bargeInCount}`;
         }
+      }
+      if (oRes.ok && deckScenePill) {
+        const oData = await oRes.json();
+        const scene = oData.current_scene || oData.scene || "Standby";
+        deckScenePill.textContent = `Scene: ${scene}`;
       }
     } catch (e) {}
   }
@@ -349,6 +356,11 @@ document.addEventListener("DOMContentLoaded", () => {
       } else if (msg.type === "stt_final") {
         const txt = data.text || data.transcript || "";
         if (txt) setFeedback(`✅ Sent: "${txt}"`);
+      } else if (msg.type === "obs_scene_changed") {
+        const scene = data.scene || data.scene_name || data.current_scene || "Standby";
+        if (deckScenePill) deckScenePill.textContent = `Scene: ${scene}`;
+      } else if (msg.type === "highlight_marked") {
+        setFeedback(`📸 Highlight marked: ${data.reason || data.label || "manual"}`);
       }
     };
   }
@@ -503,6 +515,27 @@ document.addEventListener("DOMContentLoaded", () => {
       stopAudioOutput();
       if (sendWs({ type: "barge_in", reason: "stop_speech" })) {
         setFeedback("🛑 Speech & singing stopped.");
+      }
+    });
+  }
+
+  const btnMarkHighlight = document.getElementById("btn-deck-mark-highlight");
+  if (btnMarkHighlight) {
+    btnMarkHighlight.addEventListener("click", async () => {
+      setFeedback("📸 Marking highlight...");
+      try {
+        const res = await authFetch("/api/highlights/action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "mark", reason: "stream_deck", source: "deck" })
+        });
+        if (res.ok) {
+          setFeedback("📸 Highlight marked!");
+        } else {
+          setFeedback("⚠️ Failed to mark highlight.");
+        }
+      } catch (e) {
+        setFeedback("⚠️ Network error marking highlight.");
       }
     });
   }

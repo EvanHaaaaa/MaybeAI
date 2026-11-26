@@ -178,6 +178,22 @@
     "enabled_plugins": [
       "word_chain"
     ],
-    "hook_timeout_sec": 5.0
+    "hook_timeout_sec": 5.0,
+    "sandbox_mode": "subprocess"
+  },
+  "obs": {
+    "enabled": false,
+    "host": "localhost",
+    "port": 4455,
+    "password": "",
+    "auto_scene_switch": true,
+    "replay_buffer_enabled": true
+  },
+  "highlights": {
+    "enabled": true,
+    "chat_burst_threshold": 8,
+    "cooldown_sec": 30.0,
+    "auto_clip_vertical": false,
+    "vod_summary_enabled": true
   }
 }

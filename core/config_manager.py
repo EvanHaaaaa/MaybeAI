@@ -196,7 +196,23 @@ class ConfigManager:
             "enabled": True,
             "plugins_dir": "plugins",
             "enabled_plugins": ["word_chain"],
-            "hook_timeout_sec": 5.0
+            "hook_timeout_sec": 5.0,
+            "sandbox_mode": "subprocess"
+        },
+        "obs": {
+            "enabled": False,
+            "host": "localhost",
+            "port": 4455,
+            "password": "",
+            "auto_scene_switch": True,
+            "replay_buffer_enabled": True
+        },
+        "highlights": {
+            "enabled": True,
+            "chat_burst_threshold": 8,
+            "cooldown_sec": 30.0,
+            "auto_clip_vertical": False,
+            "vod_summary_enabled": True
         }
     }
 
@@ -235,6 +251,7 @@ class ConfigManager:
         ("discord", "bot_token", "bot_token_configured"),
         ("security", "creator_token", "creator_token_configured"),
         ("collab", "shared_secret", "shared_secret_configured"),
+        ("obs", "password", "password_configured"),
     )
 
     def get_public_config(self) -> Dict[str, Any]:
@@ -1338,6 +1355,128 @@ class ConfigManager:
                 "min": 0.5,
                 "max": 30.0,
                 "default": 5.0,
+                "restart_required": False
+            },
+            {
+                "path": "plugins.sandbox_mode",
+                "category": "plugins",
+                "label": "Plugin Sandbox Mode",
+                "description": "Isolasi eksekusi plugin eksternal dalam subprocess terpisah atau in-process.",
+                "type": "select",
+                "options": [
+                    {"value": "subprocess", "label": "Subprocess Sandbox (Isolated)"},
+                    {"value": "inprocess", "label": "In-Process (Legacy)"}
+                ],
+                "default": "subprocess",
+                "restart_required": False
+            },
+
+            # 18. OBS Showrunner
+            {
+                "path": "obs.enabled",
+                "category": "obs",
+                "label": "OBS WebSocket Enabled",
+                "description": "Mengaktifkan integrasi OBS Studio via obs-websocket v5.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "obs.host",
+                "category": "obs",
+                "label": "OBS WebSocket Host",
+                "description": "Alamat host OBS WebSocket server (default: localhost).",
+                "type": "text",
+                "default": "localhost",
+                "restart_required": False
+            },
+            {
+                "path": "obs.port",
+                "category": "obs",
+                "label": "OBS WebSocket Port",
+                "description": "Port OBS WebSocket v5 (default: 4455).",
+                "type": "number",
+                "min": 1,
+                "max": 65535,
+                "default": 4455,
+                "restart_required": False
+            },
+            {
+                "path": "obs.password",
+                "category": "obs",
+                "label": "OBS WebSocket Password",
+                "description": "Password otentikasi OBS WebSocket server (disembunyikan).",
+                "type": "secret",
+                "default": "",
+                "restart_required": False
+            },
+            {
+                "path": "obs.auto_scene_switch",
+                "category": "obs",
+                "label": "Autonomous Scene Switching",
+                "description": "Izinkan Eve mengganti scene OBS otomatis sesuai aktivitas (Minecraft, Karaoke, Collab).",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "obs.replay_buffer_enabled",
+                "category": "obs",
+                "label": "OBS Replay Buffer",
+                "description": "Simpan klip replay buffer OBS otomatis saat momen highlight terdeteksi.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+
+            # 19. Highlights & VOD
+            {
+                "path": "highlights.enabled",
+                "category": "highlights",
+                "label": "Highlight Auto-Marker Enabled",
+                "description": "Deteksi otomatis momen highlight dari lonjakan chat, donasi, dan pencapaian misi.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "highlights.chat_burst_threshold",
+                "category": "highlights",
+                "label": "Chat Burst Threshold",
+                "description": "Jumlah pesan chat dalam jendela singkat untuk memicu penandaan highlight.",
+                "type": "number",
+                "min": 2,
+                "max": 100,
+                "default": 8,
+                "restart_required": False
+            },
+            {
+                "path": "highlights.cooldown_sec",
+                "category": "highlights",
+                "label": "Highlight Cooldown (sec)",
+                "description": "Jeda minimum antar penandaan highlight otomatis.",
+                "type": "number",
+                "min": 1.0,
+                "max": 600.0,
+                "default": 30.0,
+                "restart_required": False
+            },
+            {
+                "path": "highlights.auto_clip_vertical",
+                "category": "highlights",
+                "label": "Auto-Clip Vertical (9:16)",
+                "description": "Ekspor klip vertikal 9:16 otomatis via ffmpeg saat replay tersimpan.",
+                "type": "toggle",
+                "default": False,
+                "restart_required": False
+            },
+            {
+                "path": "highlights.vod_summary_enabled",
+                "category": "highlights",
+                "label": "VOD Summary Markdown",
+                "description": "Buat ringkasan stream Markdown di data/second_brain/streams/ saat shutdown.",
+                "type": "toggle",
+                "default": True,
                 "restart_required": False
             }
         ]

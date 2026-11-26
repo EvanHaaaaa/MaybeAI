@@ -235,6 +235,136 @@ async def _handle_plugin_action(payload: Dict[str, Any]) -> tuple[int, Dict[str,
     return 400, {"success": False, "error": f"Unknown plugin action: '{action}'"}
 
 
+def _get_obs_status() -> Dict[str, Any]:
+    obs = getattr(orchestrator, "obs", None)
+    if obs is not None and hasattr(obs, "get_status"):
+        return obs.get_status()
+    return {"connected": False, "enabled": False}
+
+
+async def _maybe_await(res: Any) -> Any:
+    if inspect.isawaitable(res):
+        return await res
+    return res
+
+
+async def _handle_obs_action(payload: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
+    obs = getattr(orchestrator, "obs", None)
+    action = str(payload.get("action") or "").strip().lower()
+    if action == "status":
+        return 200, {"success": True, "status": _get_obs_status()}
+    if obs is None:
+        return 503, {"success": False, "error": "OBS client is not initialized"}
+    if action == "connect":
+        ok = await _maybe_await(obs.connect())
+        return 200, {"success": bool(ok), "status": _get_obs_status()}
+    if action == "disconnect":
+        await _maybe_await(obs.disconnect())
+        return 200, {"success": True, "status": _get_obs_status()}
+    if action in ("switch_scene", "set_scene"):
+        scene = str(payload.get("scene") or payload.get("scene_name") or "").strip()
+        if not scene:
+            return 400, {"success": False, "error": "Missing 'scene' parameter"}
+        if hasattr(orchestrator, "switch_obs_scene"):
+            res = await orchestrator.switch_obs_scene(scene, reason="manual")
+        else:
+            res = await _maybe_await(obs.switch_scene(scene))
+        ok = bool(res.get("success", True)) if isinstance(res, dict) else bool(res)
+        return 200, {"success": ok, "scene": scene, "result": res, "status": _get_obs_status()}
+    if action in ("save_replay", "save_replay_buffer"):
+        res = await _maybe_await(obs.save_replay_buffer())
+        ok = bool(res.get("success", True)) if isinstance(res, dict) else bool(res)
+        return 200, {"success": ok, "result": res, "status": _get_obs_status()}
+    if action in ("start_replay", "start_replay_buffer") and hasattr(obs, "start_replay_buffer"):
+        res = await _maybe_await(obs.start_replay_buffer())
+        ok = bool(res.get("success", True)) if isinstance(res, dict) else bool(res)
+        return 200, {"success": ok, "result": res, "status": _get_obs_status()}
+    if action in ("start_stream", "stop_stream", "toggle_stream") and hasattr(obs, "toggle_streaming"):
+        target = True if action == "start_stream" else (False if action == "stop_stream" else None)
+        res = await _maybe_await(obs.toggle_streaming(target_state=target))
+        ok = bool(res.get("success", True)) if isinstance(res, dict) else bool(res)
+        return 200, {"success": ok, "result": res, "status": _get_obs_status()}
+    return 400, {"success": False, "error": f"Unknown OBS action: '{action}'"}
+
+
+def _get_highlights_status() -> Dict[str, Any]:
+    highlights = getattr(orchestrator, "highlights", None)
+    clipper = getattr(orchestrator, "clipper", None)
+    vod = getattr(orchestrator, "vod_summarizer", None)
+    h_status = highlights.get_status() if highlights is not None and hasattr(highlights, "get_status") else {}
+    c_status = clipper.get_status() if clipper is not None and hasattr(clipper, "get_status") else {}
+    v_status = vod.get_status() if vod is not None and hasattr(vod, "get_status") else {}
+    return {
+        "enabled": bool(h_status.get("enabled", highlights is not None)),
+        "highlights": h_status,
+        "clipper": c_status,
+        "vod_summarizer": v_status,
+    }
+
+
+async def _handle_highlights_action(payload: Dict[str, Any]) -> tuple[int, Dict[str, Any]]:
+    action = str(payload.get("action") or "").strip().lower()
+    if action == "status":
+        return 200, {"success": True, **_get_highlights_status()}
+    highlights = getattr(orchestrator, "highlights", None)
+    clipper = getattr(orchestrator, "clipper", None)
+    vod = getattr(orchestrator, "vod_summarizer", None)
+    if action in ("mark", "mark_highlight"):
+        if highlights is None:
+            return 503, {"success": False, "error": "Highlight detector is not initialized"}
+        reason = str(payload.get("reason") or payload.get("label") or "manual_mark")
+        user = str(payload.get("user") or "Creator")
+        source = str(payload.get("source") or "creator")
+        if hasattr(highlights, "mark_manual"):
+            res = await _maybe_await(highlights.mark_manual(
+                reason=reason,
+                user=user,
+                details={"source": source},
+            ))
+        elif hasattr(highlights, "mark_highlight"):
+            res = await _maybe_await(highlights.mark_highlight(reason=reason, source=source))
+        else:
+            return 501, {"success": False, "error": "Highlight marking not supported"}
+        if hasattr(res, "to_dict"):
+            res = res.to_dict()
+        return 200, {"success": bool(res), "result": res, **_get_highlights_status()}
+    if action in ("clip", "create_clip"):
+        if clipper is None:
+            return 503, {"success": False, "error": "Clip pipeline is not initialized"}
+        input_path = str(payload.get("input_path") or payload.get("replay_path") or "")
+        if not input_path:
+            return 400, {"success": False, "error": "Missing 'input_path' parameter"}
+        output_path = payload.get("output_path")
+        start_sec = float(payload.get("start_sec", 0.0) or 0.0)
+        duration_sec = float(payload.get("duration_sec", 30.0) or 30.0)
+        subtitle_path = payload.get("subtitle_path")
+        if hasattr(clipper, "create_vertical_clip"):
+            res = await _maybe_await(clipper.create_vertical_clip(
+                input_path=input_path,
+                output_path=output_path,
+                start_sec=start_sec,
+                duration_sec=duration_sec,
+                subtitle_path=subtitle_path,
+            ))
+        elif hasattr(clipper, "create_clip"):
+            res = await _maybe_await(clipper.create_clip(input_path=input_path))
+        else:
+            return 501, {"success": False, "error": "Clip creation not supported"}
+        ok = bool(res.get("success", True)) if isinstance(res, dict) else bool(res)
+        return 200, {"success": ok, "result": res, **_get_highlights_status()}
+    if action in ("summarize", "vod_summary", "generate_summary"):
+        if vod is None:
+            return 503, {"success": False, "error": "VOD summarizer is not initialized"}
+        if hasattr(vod, "generate_summary"):
+            res = await _maybe_await(vod.generate_summary())
+        elif hasattr(vod, "summarize"):
+            res = await _maybe_await(vod.summarize())
+        else:
+            return 501, {"success": False, "error": "VOD summary not supported"}
+        return 200, {"success": True, "result": res, **_get_highlights_status()}
+    return 400, {"success": False, "error": f"Unknown highlights action: '{action}'"}
+
+
 @app.middleware("http")
 async def verify_api_origin_middleware(request: Request, call_next):
     is_mutating_api = request.url.path.startswith("/api/") and request.method in ("PUT", "POST", "PATCH", "DELETE")
@@ -309,6 +439,11 @@ async def reset_configuration(req: Optional[Dict[str, Any]] = None):
 async def test_feature_diagnostic(feature: str, req: Optional[Dict[str, Any]] = None):
     payload = req or {}
     return await config_mgr.test_feature(feature, orchestrator, payload)
+
+@app.get("/api/health")
+async def get_health():
+    return {"status": "ok"}
+
 
 @app.get("/api/system/diagnostics")
 async def get_system_diagnostics_report():
@@ -611,6 +746,32 @@ async def get_plugins_list():
 @app.post("/api/plugins/action")
 async def post_plugins_action(req: Dict[str, Any]):
     status_code, body = await _handle_plugin_action(req or {})
+    if status_code != 200:
+        return JSONResponse(status_code=status_code, content=body)
+    return body
+
+
+@app.get("/api/obs/status")
+async def get_obs_status():
+    return _get_obs_status()
+
+
+@app.post("/api/obs/action")
+async def post_obs_action(req: Dict[str, Any]):
+    status_code, body = await _handle_obs_action(req or {})
+    if status_code != 200:
+        return JSONResponse(status_code=status_code, content=body)
+    return body
+
+
+@app.get("/api/highlights/status")
+async def get_highlights_status():
+    return _get_highlights_status()
+
+
+@app.post("/api/highlights/action")
+async def post_highlights_action(req: Dict[str, Any]):
+    status_code, body = await _handle_highlights_action(req or {})
     if status_code != 200:
         return JSONResponse(status_code=status_code, content=body)
     return body

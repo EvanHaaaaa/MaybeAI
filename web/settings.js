@@ -148,7 +148,9 @@ document.addEventListener("DOMContentLoaded", () => {
       minecraft: { title: "⛏️ Minecraft Engine", desc: "Mode santai vs kompe, jarak follow bodyguard player, dan batas keselamatan HP." },
       autonomous: { title: "🤖 Autonomous Agent", desc: "Perencanaan target mandiri, misi otonom closed-loop, jeda obrolan spontan, dan persetujuan aksi." },
       collab: { title: "🤝 AI Collab Protocol", desc: "Kolaborasi multi-VTuber via /ws/collab dengan HMAC-SHA256, turn-taking, dan batas anti-loop." },
-      plugins: { title: "🧩 Plugins & SDK", desc: "Ekstensi plugin built-in & eksternal (misal: word_chain) dengan isolasi error dan timeout hook." },
+      plugins: { title: "🧩 Plugins & SDK", desc: "Ekstensi plugin built-in & eksternal (misal: word_chain) dengan isolasi sandbox subprocess dan timeout hook." },
+      obs: { title: "🎬 OBS Showrunner", desc: "Kontrol scene OBS Studio otomatis, replay buffer, dan otentikasi obs-websocket v5." },
+      highlights: { title: "📸 Highlights & VOD", desc: "Deteksi highlight otomatis, pipeline klip vertikal ffmpeg, dan ringkasan VOD Markdown." },
       performance: { title: "⚡ Performance & Network", desc: "Batas antrean tugas simultan, heartbeat ping, dan alokasi buffer audio." }
     };
 

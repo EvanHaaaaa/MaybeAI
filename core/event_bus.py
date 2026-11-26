@@ -31,6 +31,9 @@ MISSION_STATUS = "mission.status"
 COLLAB_MESSAGE = "collab.message"
 COLLAB_STATE = "collab.state"
 PLUGIN_EVENT = "plugin.event"
+OBS_SCENE_CHANGED = "obs.scene_changed"
+HIGHLIGHT_MARKED = "highlight.marked"
+VOD_SUMMARY_READY = "vod.summary_ready"
 
 
 class Events:
@@ -61,6 +64,9 @@ class Events:
     COLLAB_MESSAGE = COLLAB_MESSAGE
     COLLAB_STATE = COLLAB_STATE
     PLUGIN_EVENT = PLUGIN_EVENT
+    OBS_SCENE_CHANGED = OBS_SCENE_CHANGED
+    HIGHLIGHT_MARKED = HIGHLIGHT_MARKED
+    VOD_SUMMARY_READY = VOD_SUMMARY_READY
 
 
 # Bidirectional mapping between legacy WebSocket event types and canonical EventBus names
@@ -90,6 +96,9 @@ WS_TO_BUS_EVENT: Dict[str, str] = {
     "collab_message": COLLAB_MESSAGE,
     "collab_state": COLLAB_STATE,
     "plugin_event": PLUGIN_EVENT,
+    "obs_scene_changed": OBS_SCENE_CHANGED,
+    "highlight_marked": HIGHLIGHT_MARKED,
+    "vod_summary_ready": VOD_SUMMARY_READY,
 }
 BUS_TO_WS_EVENT: Dict[str, str] = {v: k for k, v in WS_TO_BUS_EVENT.items()}
 

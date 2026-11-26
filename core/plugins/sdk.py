@@ -1,7 +1,17 @@
 import copy
 import inspect
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+
+
+ALLOWED_PLUGIN_PERMISSIONS: Tuple[str, ...] = (
+    "chat:read",
+    "tts:speak",
+    "event:sub",
+    "event:pub",
+    "state:rw",
+)
+DEFAULT_PLUGIN_PERMISSIONS: Tuple[str, ...] = ("chat:read", "event:sub")
 
 
 @dataclass
@@ -16,6 +26,7 @@ class PluginManifest:
     commands: List[str] = field(default_factory=list)
     events: List[str] = field(default_factory=list)
     creator_only_commands: List[str] = field(default_factory=list)
+    permissions: List[str] = field(default_factory=lambda: list(DEFAULT_PLUGIN_PERMISSIONS))
 
     def __post_init__(self) -> None:
         self.id = str(self.id or "").strip()
@@ -28,6 +39,15 @@ class PluginManifest:
         self.creator_only_commands = [
             self._norm_cmd(c) for c in (self.creator_only_commands or []) if str(c).strip()
         ]
+        if self.permissions is None:
+            self.permissions = list(DEFAULT_PLUGIN_PERMISSIONS)
+        else:
+            seen: List[str] = []
+            for p in self.permissions:
+                perm = str(p).strip()
+                if perm and perm not in seen:
+                    seen.append(perm)
+            self.permissions = seen
 
     @staticmethod
     def _norm_cmd(cmd: str) -> str:
@@ -44,6 +64,12 @@ class PluginManifest:
         for cmd in self.commands:
             if not cmd.startswith("!") or len(cmd) < 2:
                 raise ValueError(f"Plugin '{self.id}' has invalid command '{cmd}'.")
+        for perm in self.permissions:
+            if perm not in ALLOWED_PLUGIN_PERMISSIONS:
+                raise ValueError(
+                    f"Plugin '{self.id}' has invalid permission '{perm}'. "
+                    f"Allowed: {ALLOWED_PLUGIN_PERMISSIONS}"
+                )
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -55,6 +81,7 @@ class PluginManifest:
             "commands": list(self.commands),
             "events": list(self.events),
             "creator_only_commands": list(self.creator_only_commands),
+            "permissions": list(self.permissions),
         }
 
 

@@ -1,4 +1,6 @@
 from core.plugins.sdk import (
+    ALLOWED_PLUGIN_PERMISSIONS,
+    DEFAULT_PLUGIN_PERMISSIONS,
     MaybeAIPlugin,
     PluginContext,
     PluginManifest,
@@ -9,6 +11,8 @@ from core.plugins.registry import PluginRegistry
 from core.plugins.word_chain import WordChainPlugin
 
 __all__ = [
+    "ALLOWED_PLUGIN_PERMISSIONS",
+    "DEFAULT_PLUGIN_PERMISSIONS",
     "MaybeAIPlugin",
     "PluginContext",
     "PluginManifest",
