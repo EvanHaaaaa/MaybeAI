@@ -88,7 +88,7 @@ class ChessController:
         # If Eve is White, she makes the first move automatically!
         if self.eve_color == "white":
             await asyncio.sleep(0.8)
-            await self.make_bot_move()
+            await self.amake_bot_move()
 
         return intro_speech
 
@@ -149,17 +149,10 @@ class ChessController:
         if self.is_active and not self.engine.board.is_game_over():
             current_turn = "white" if self.engine.board.turn == chess.WHITE else "black"
             if current_turn == self.eve_color:
-                await self.make_bot_move()
+                await self.amake_bot_move()
 
-    async def make_bot_move(self) -> Optional[str]:
-        """Calculates and executes Eve's move."""
-        if not self.is_active or self.engine.board.is_game_over():
-            return None
-
-        best_move = self.engine.choose_move()
-        if not best_move:
-            return None
-
+    async def _apply_bot_move(self, best_move: chess.Move) -> str:
+        """Applies a chosen bot move, emits commentary/state, and checks game over."""
         is_capture = self.engine.board.is_capture(best_move)
         captured_piece = self.engine.board.piece_at(best_move.to_square)
         is_queen_capture = captured_piece is not None and captured_piece.piece_type == chess.QUEEN
@@ -189,6 +182,28 @@ class ChessController:
             await self._handle_game_over()
 
         return san
+
+    async def make_bot_move(self) -> Optional[str]:
+        """Calculates and executes Eve's move synchronously on the current thread."""
+        if not self.is_active or self.engine.board.is_game_over():
+            return None
+
+        best_move = self.engine.choose_move()
+        if not best_move:
+            return None
+
+        return await self._apply_bot_move(best_move)
+
+    async def amake_bot_move(self) -> Optional[str]:
+        """Calculates Eve's move in a worker thread via asyncio.to_thread and executes it."""
+        if not self.is_active or self.engine.board.is_game_over():
+            return None
+
+        best_move = await asyncio.to_thread(self.engine.choose_move)
+        if not best_move:
+            return None
+
+        return await self._apply_bot_move(best_move)
 
     async def _handle_game_over(self):
         state = self.engine.get_game_state()

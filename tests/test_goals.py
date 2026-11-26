@@ -2,6 +2,7 @@ import unittest
 import os
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 from core.planning.models import Goal, Subtask, GoalTier, GoalStatus, GoalCategory
 from core.planning.decomposer import GoalDecomposer
 from core.planning.replanner import StrategyReplanner
@@ -163,7 +164,8 @@ class TestGoalBrainIntegration(unittest.TestCase):
         self.assertIn("AUTONOMOUS GOALS & ACTIVE AGENDA", prompt)
 
     def test_mock_response_answers_goal_query(self):
-        resp = self.brain.conversation.generate_mock_response("Creator", "Eve, apa target atau rencanamu hari ini?")
+        with patch("core.conversation.engine.random.random", return_value=0.99):
+            resp = self.brain.conversation.generate_mock_response("Creator", "Eve, apa target atau rencanamu hari ini?")
         self.assertTrue("agenda" in resp.lower() or "misi" in resp.lower() or "progres" in resp.lower())
 
 

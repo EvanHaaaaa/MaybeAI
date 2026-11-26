@@ -1,9 +1,10 @@
 import os
 import json
+import inspect
 import asyncio
 import tempfile
 from pathlib import Path
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, Callable, List, Set
 import edge_tts
 import pygame
 
@@ -14,14 +15,22 @@ class Singer:
     with pitch-prosody modulation, real-time lip sync, and subtitle sync.
     """
 
-    def __init__(self, songs_config_path: str = "config/songs.json", voice: str = "en-US-AnaNeural"):
+    def __init__(
+        self,
+        songs_config_path: str = "config/songs.json",
+        voice: str = "en-US-AnaNeural",
+        output_mode: str = "both",
+    ):
         self.songs_config_path = Path(songs_config_path)
         self.voice = voice
+        mode = str(output_mode or "both").strip().lower()
+        self.output_mode = mode if mode in ("server", "browser", "both") else "both"
         self.songs: Dict[str, Any] = {}
         self.temp_dir = Path(tempfile.gettempdir()) / "maybeai_karaoke"
         self.temp_dir.mkdir(parents=True, exist_ok=True)
         self.is_singing = False
         self._stop_requested = False
+        self._active_channel: Any = None
         self.load_songs()
 
     def load_songs(self):
@@ -42,21 +51,33 @@ class Singer:
         """Immediately aborts current song."""
         self._stop_requested = True
         try:
+            if self._active_channel is not None:
+                self._active_channel.stop()
+                self._active_channel = None
             if pygame.mixer.get_init():
                 pygame.mixer.music.stop()
-                pygame.mixer.stop()
+        except Exception:
+            pass
+
+    @staticmethod
+    def _cleanup_vocal_file(file_path: str) -> None:
+        try:
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
         except Exception:
             pass
 
     async def sing(
         self,
         song_id: str,
-        on_lyric_update: Optional[Callable[[str, str], None]] = None,
-        on_mouth_update: Optional[Callable[[float], None]] = None
+        on_lyric_update: Optional[Callable[[str, str], Any]] = None,
+        on_mouth_update: Optional[Callable[[float], Any]] = None,
+        on_vocal_audio: Optional[Callable[[bytes, str], Any]] = None,
     ) -> bool:
         """
         Executes full karaoke performance:
         Plays BGM + Sings lyric lines in rhythm + updates avatar lip-sync & emotion.
+        Cleans up all temporary vocal_*.mp3 files in finally.
         """
         song = self.songs.get(song_id)
         if not song:
@@ -65,21 +86,24 @@ class Singer:
 
         self.is_singing = True
         self._stop_requested = False
+        created_vocal_files: Set[str] = set()
 
         bgm_file = song.get("bgm_file")
         bgm_vol = song.get("bgm_volume", 0.3)
         lyrics = song.get("lyrics", [])
+        use_server_audio = self.output_mode in ("server", "both")
 
         try:
-            if not pygame.mixer.get_init():
-                pygame.mixer.init()
+            if use_server_audio:
+                if not pygame.mixer.get_init():
+                    pygame.mixer.init()
 
-            # 1. Start Backing Track (BGM)
-            if bgm_file and Path(bgm_file).exists():
-                pygame.mixer.music.load(bgm_file)
-                pygame.mixer.music.set_volume(bgm_vol)
-                pygame.mixer.music.play()
-                print(f"[Singer] Started BGM: {bgm_file} at volume {bgm_vol}")
+                # 1. Start Backing Track (BGM)
+                if bgm_file and Path(bgm_file).exists():
+                    pygame.mixer.music.load(bgm_file)
+                    pygame.mixer.music.set_volume(bgm_vol)
+                    pygame.mixer.music.play()
+                    print(f"[Singer] Started BGM: {bgm_file} at volume {bgm_vol}")
 
             # 2. Iterate through lyrics
             for idx, line_data in enumerate(lyrics):
@@ -102,11 +126,12 @@ class Singer:
                 # Notify subtitle & emotion
                 if on_lyric_update:
                     res = on_lyric_update(text, emotion)
-                    if asyncio.iscoroutine(res):
+                    if inspect.isawaitable(res):
                         await res
 
                 # Generate melodic vocal file
                 vocal_file = str(self.temp_dir / f"vocal_{song_id}_{idx}.mp3")
+                created_vocal_files.add(vocal_file)
                 comm = edge_tts.Communicate(
                     text=text,
                     voice=self.voice,
@@ -115,28 +140,58 @@ class Singer:
                 )
                 await comm.save(vocal_file)
 
-                # Play vocal on dedicated channel so BGM keeps playing simultaneously
-                sound = pygame.mixer.Sound(vocal_file)
-                sound.set_volume(1.0)
-                channel = sound.play()
+                if on_vocal_audio and self.output_mode in ("browser", "both"):
+                    try:
+                        audio_bytes = Path(vocal_file).read_bytes()
+                        if audio_bytes:
+                            cb_res = on_vocal_audio(audio_bytes, text)
+                            if inspect.isawaitable(cb_res):
+                                await cb_res
+                    except Exception:
+                        pass
 
-                # Dynamic lip-sync while vocal line plays
-                step = 0
-                while channel.get_busy() and not self._stop_requested:
-                    await asyncio.sleep(0.08)
-                    step += 1
-                    if on_mouth_update:
-                        val = 0.7 if step % 2 == 0 else 0.2
-                        on_mouth_update(val)
+                if use_server_audio:
+                    # Play vocal on dedicated channel so BGM keeps playing simultaneously
+                    sound = pygame.mixer.Sound(vocal_file)
+                    sound.set_volume(1.0)
+                    channel = sound.play()
+                    self._active_channel = channel
+
+                    # Dynamic lip-sync while vocal line plays
+                    step = 0
+                    while channel is not None and channel.get_busy() and not self._stop_requested:
+                        await asyncio.sleep(0.08)
+                        step += 1
+                        if on_mouth_update:
+                            val = 0.7 if step % 2 == 0 else 0.2
+                            m_res = on_mouth_update(val)
+                            if inspect.isawaitable(m_res):
+                                await m_res
+                    self._active_channel = None
+                else:
+                    est_duration = max(1.0, len(text.split()) / 2.6)
+                    steps = max(1, int(est_duration / 0.1))
+                    for step in range(steps):
+                        if self._stop_requested:
+                            break
+                        await asyncio.sleep(0.1)
+                        if on_mouth_update:
+                            val = 0.7 if step % 2 == 0 else 0.2
+                            m_res = on_mouth_update(val)
+                            if inspect.isawaitable(m_res):
+                                await m_res
 
                 if on_mouth_update:
-                    on_mouth_update(0.0)
+                    m_res = on_mouth_update(0.0)
+                    if inspect.isawaitable(m_res):
+                        await m_res
 
             # Wait a moment for outro
-            await asyncio.sleep(1.5)
+            if not self._stop_requested:
+                await asyncio.sleep(1.5)
 
             # Fade out BGM
-            if pygame.mixer.music.get_busy():
+            if use_server_audio and pygame.mixer.get_init() and pygame.mixer.music.get_busy():
                 pygame.mixer.music.fadeout(1500)
                 await asyncio.sleep(1.5)
 
@@ -147,5 +202,13 @@ class Singer:
             return False
         finally:
             self.is_singing = False
+            self._active_channel = None
+            for vf in list(created_vocal_files):
+                self._cleanup_vocal_file(vf)
             if on_mouth_update:
-                on_mouth_update(0.0)
+                try:
+                    m_res = on_mouth_update(0.0)
+                    if inspect.isawaitable(m_res):
+                        await m_res
+                except Exception:
+                    pass

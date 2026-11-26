@@ -193,7 +193,8 @@ class Brain:
         donation_amount: str = "",
         is_group_debate: bool = False,
         debate_users: Optional[List[str]] = None,
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None,
+        is_creator: bool = False
     ) -> str:
         provider = self.get_provider()
 
@@ -204,7 +205,7 @@ class Brain:
                 image_base64 = obs.thumbnail_base64
 
         # Build dynamic contextual system prompt
-        system_prompt = self.conversation.build_system_prompt(
+        system_prompt = await self.conversation.abuild_system_prompt(
             current_user=user_name,
             game_context=game_context,
             is_donation=is_donation,
@@ -228,7 +229,8 @@ class Brain:
                 is_donation=is_donation,
                 donation_amount=donation_amount,
                 is_group_debate=is_group_debate,
-                debate_users=debate_users
+                debate_users=debate_users,
+                is_creator=is_creator
             )
 
         # Record full turn in multi-turn memory
@@ -244,7 +246,8 @@ class Brain:
         donation_amount: str = "",
         is_group_debate: bool = False,
         debate_users: Optional[List[str]] = None,
-        image_base64: Optional[str] = None
+        image_base64: Optional[str] = None,
+        is_creator: bool = False
     ) -> AsyncIterator[str]:
         """
         Streams incremental LLM text chunks as they are generated, then records
@@ -258,7 +261,7 @@ class Brain:
             if any(w in message.lower() for w in ["layar", "screen", "liat", "lihat", "gambar"]):
                 image_base64 = obs.thumbnail_base64
 
-        system_prompt = self.conversation.build_system_prompt(
+        system_prompt = await self.conversation.abuild_system_prompt(
             current_user=user_name,
             game_context=game_context,
             is_donation=is_donation,
@@ -275,7 +278,7 @@ class Brain:
         elif provider == "gemini":
             stream = self._stream_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64)
         else:
-            stream = self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users)
+            stream = self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
         accumulated: List[str] = []
         async for chunk in stream:
@@ -355,7 +358,8 @@ class Brain:
 
     async def _stream_mock(
         self, user_name: str, message: str, game_context: str,
-        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]]
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
+        is_creator: bool = False
     ) -> AsyncIterator[str]:
         response = self.conversation.generate_mock_response(
             user_name=user_name,
@@ -364,7 +368,8 @@ class Brain:
             is_donation=is_donation,
             donation_amount=donation_amount,
             is_group_debate=is_group_debate,
-            debate_users=debate_users
+            debate_users=debate_users,
+            is_creator=is_creator
         )
         for chunk in self._split_mock_chunks(response):
             await asyncio.sleep(0)

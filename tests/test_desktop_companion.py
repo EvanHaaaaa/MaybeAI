@@ -281,17 +281,25 @@ class TestDesktopIntegration(unittest.TestCase):
         self.assertTrue(state["desktop"]["master_enabled"])
 
     def test_conversational_mock_responses(self):
-        # Test volume down
-        r1 = self.conv.generate_mock_response("User", "eve kecilin volume dong")
+        # Test volume down (creator)
+        r1 = self.conv.generate_mock_response("User", "eve kecilin volume dong", is_creator=True)
         self.assertTrue(any(w in r1.lower() for w in ["volume", "turun", "nyaman", "siap"]))
 
-        # Test media next
-        r2 = self.conv.generate_mock_response("User", "eve ganti lagu dong")
+        # Test media next (creator)
+        r2 = self.conv.generate_mock_response("User", "eve ganti lagu dong", is_creator=True)
         self.assertTrue(any(w in r2.lower() for w in ["lagu", "musik", "berikut"]))
 
-        # Test app launch
-        r3 = self.conv.generate_mock_response("User", "eve tolong buka notepad")
-        self.assertTrue(any(w in r3.lower() for w in ["notepad", "aplikasi", "buka"]))
+        # Test app launch (creator, mock DesktopController.launch_app so no live notepad.exe spawns)
+        with patch.object(DesktopController, "launch_app", return_value=(True, "Membuka notepad (mocked)")) as mock_launch:
+            r3 = self.conv.generate_mock_response("User", "eve tolong buka notepad", is_creator=True)
+            self.assertTrue(any(w in r3.lower() for w in ["notepad", "aplikasi", "buka"]))
+            mock_launch.assert_called_once()
+
+        # Test non-creator refusal (must not execute desktop action or spawn app)
+        with patch.object(DesktopController, "launch_app") as mock_launch_denied:
+            r4 = self.conv.generate_mock_response("RandomViewer", "eve tolong buka notepad", is_creator=False)
+            self.assertIn("creator", r4.lower())
+            mock_launch_denied.assert_not_called()
 
 
 if __name__ == "__main__":

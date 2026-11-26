@@ -179,3 +179,11 @@ body {
   line-height: 1.35;
   max-width: 360px;
 }
+
+.hide-avatar .obs-avatar-wrap {
+  display: none !important;
+}
+
+.hide-subs .obs-subtitles {
+  display: none !important;
+}

@@ -52,12 +52,14 @@ class TestTTSEngine(unittest.IsolatedAsyncioTestCase):
         def fake_init():
             mixer_state["initialized"] = True
 
-        fake_music = MagicMock()
-        fake_music.get_busy.return_value = False
+        fake_channel = MagicMock()
+        fake_channel.get_busy.return_value = False
+        fake_sound = MagicMock()
+        fake_sound.play.return_value = fake_channel
         fake_mixer = MagicMock()
         fake_mixer.get_init.side_effect = fake_get_init
         fake_mixer.init.side_effect = fake_init
-        fake_mixer.music = fake_music
+        fake_mixer.Sound.return_value = fake_sound
 
         fake_pygame = types.ModuleType("pygame")
         fake_pygame.mixer = fake_mixer
@@ -82,10 +84,9 @@ class TestTTSEngine(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(out1)
         self.assertIsNotNone(out2)
         self.assertEqual(fake_mixer.init.call_count, 1)
-        self.assertEqual(fake_music.load.call_count, 2)
-        self.assertEqual(fake_music.play.call_count, 2)
-        self.assertEqual(fake_music.stop.call_count, 2)
-        self.assertEqual(fake_music.unload.call_count, 2)
+        self.assertEqual(fake_mixer.Sound.call_count, 2)
+        self.assertEqual(fake_sound.play.call_count, 2)
+        self.assertEqual(fake_channel.stop.call_count, 2)
         self.assertEqual(mouth_updates[-1], 0.0)
         self.assertTrue(any(v > 0.0 for v in mouth_updates))
 

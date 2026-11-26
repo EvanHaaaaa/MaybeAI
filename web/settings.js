@@ -10,6 +10,45 @@ document.addEventListener("DOMContentLoaded", () => {
   let activeCategory = "diagnostics";
   let searchQuery = "";
 
+  const CREATOR_TOKEN_KEY = "maybeai_creator_token";
+
+  function getCreatorToken() {
+    try {
+      const urlToken = new URLSearchParams(window.location.search).get("token");
+      if (urlToken && urlToken.trim()) {
+        const clean = urlToken.trim();
+        try {
+          localStorage.setItem(CREATOR_TOKEN_KEY, clean);
+        } catch (e) {}
+        return clean;
+      }
+    } catch (e) {}
+    try {
+      return localStorage.getItem(CREATOR_TOKEN_KEY) || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  getCreatorToken();
+
+  function authFetch(url, options = {}) {
+    const token = getCreatorToken();
+    const headers = Object.assign({}, options.headers || {});
+    if (token) {
+      headers["X-Creator-Token"] = token;
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return fetch(url, Object.assign({}, options, { headers }));
+  }
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return "";
+    const el = document.createElement("div");
+    el.textContent = String(str);
+    return el.innerHTML;
+  }
+
   // DOM Elements
   const sidebarNav = document.getElementById("sidebarNav");
   const settingsContent = document.getElementById("settingsContent");
@@ -38,9 +77,9 @@ document.addEventListener("DOMContentLoaded", () => {
   async function init() {
     try {
       const [cfgRes, schemaRes, diagRes] = await Promise.all([
-        fetch("/api/config").then(r => r.json()),
-        fetch("/api/config/schema").then(r => r.json()),
-        fetch("/api/system/diagnostics").then(r => r.json())
+        authFetch("/api/config").then(r => r.json()),
+        authFetch("/api/config/schema").then(r => r.json()),
+        authFetch("/api/system/diagnostics").then(r => r.json())
       ]);
 
       savedConfig = cfgRes;
@@ -392,7 +431,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let html = `
       <div class="category-header">
         <h2 class="category-title">🔍 Search Results</h2>
-        <p class="category-desc">Found ${matches.length} parameter(s) matching "${searchQuery}".</p>
+        <p class="category-desc">Found ${matches.length} parameter(s) matching "${escapeHtml(searchQuery)}".</p>
       </div>
       <div class="settings-group">
     `;
@@ -611,7 +650,7 @@ document.addEventListener("DOMContentLoaded", () => {
         btnRefresh.disabled = true;
         btnRefresh.innerHTML = `<span>⏳</span> Refreshing...`;
         try {
-          diagnostics = await fetch("/api/system/diagnostics").then(r => r.json());
+          diagnostics = await authFetch("/api/system/diagnostics").then(r => r.json());
           renderDiagnosticsView();
           showToast("Telemetry refreshed successfully!", "success");
         } catch (err) {
@@ -633,21 +672,21 @@ document.addEventListener("DOMContentLoaded", () => {
         if (statusEl) statusEl.textContent = `Running ${testName.toUpperCase()} diagnostic...`;
 
         try {
-          const res = await fetch(`/api/config/test/${testName}`, {
+          const res = await authFetch(`/api/config/test/${testName}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" }
           }).then(r => r.json());
 
           const timestamp = new Date().toLocaleTimeString();
           if (consoleEl) {
-            consoleEl.innerHTML = `[${timestamp}] [TEST: ${testName.toUpperCase()}] SUCCESS: ${res.success ? 'PASSED ✅' : 'FAILED ❌'}\n` +
+            consoleEl.textContent = `[${timestamp}] [TEST: ${testName.toUpperCase()}] SUCCESS: ${res.success ? 'PASSED ✅' : 'FAILED ❌'}\n` +
               JSON.stringify(res, null, 2);
           }
           if (statusEl) statusEl.textContent = `Test ${testName.toUpperCase()} completed.`;
           showToast(`Test ${testName.toUpperCase()} completed successfully!`, "success");
         } catch (err) {
           if (consoleEl) {
-            consoleEl.innerHTML = `[ERROR: ${testName.toUpperCase()}] ${err.message}`;
+            consoleEl.textContent = `[ERROR: ${testName.toUpperCase()}] ${err.message}`;
           }
           showToast(`Test ${testName.toUpperCase()} error: ${err.message}`, "danger");
         } finally {
@@ -697,7 +736,7 @@ document.addEventListener("DOMContentLoaded", () => {
     btnSaveAllChanges.innerHTML = `<span>⏳</span> Saving & Applying...`;
 
     try {
-      const res = await fetch("/api/config", {
+      const res = await authFetch("/api/config", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(draftConfig)
@@ -737,7 +776,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // --- Reset Category or All ---
   async function resetCategory(category) {
     try {
-      const res = await fetch("/api/config/reset", {
+      const res = await authFetch("/api/config/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ category })
@@ -757,7 +796,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function resetAllSettings() {
     try {
-      const res = await fetch("/api/config/reset", {
+      const res = await authFetch("/api/config/reset", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({})

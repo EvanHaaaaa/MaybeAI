@@ -77,6 +77,7 @@ class ConfigManager:
         "tts": {
             "enabled": True,
             "provider": "edge-tts",
+            "output_mode": "both",
             "voice": "en-US-AnaNeural",
             "rate": "+5%",
             "pitch": "+10Hz",
@@ -309,6 +310,26 @@ class ConfigManager:
                 "default": False,
                 "restart_required": False
             },
+            {
+                "path": "system.host",
+                "category": "general",
+                "label": "Server Host",
+                "description": "Alamat IP/hostname binding untuk server web & WebSocket MaybeAI.",
+                "type": "text",
+                "default": "127.0.0.1",
+                "restart_required": True
+            },
+            {
+                "path": "system.port",
+                "category": "general",
+                "label": "Server Port",
+                "description": "Port TCP untuk dashboard Web UI, OBS Overlay, dan WebSocket.",
+                "type": "number",
+                "min": 1,
+                "max": 65535,
+                "default": 7860,
+                "restart_required": True
+            },
 
             # 2. AI & Brain
             {
@@ -395,6 +416,15 @@ class ConfigManager:
                 "default": "llama3.2",
                 "restart_required": False
             },
+            {
+                "path": "llm.streaming_enabled",
+                "category": "brain",
+                "label": "Streaming Responses",
+                "description": "Mengirim respons LLM secara streaming per token/frasa untuk latensi lebih rendah.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
 
             # 3. Personality
             {
@@ -443,6 +473,15 @@ class ConfigManager:
                 "max": 100,
                 "unit": "%",
                 "default": 60,
+                "restart_required": False
+            },
+            {
+                "path": "personality.custom_instructions",
+                "category": "personality",
+                "label": "Custom Persona Instructions",
+                "description": "Instruksi tambahan bebas untuk menyesuaikan gaya bicara atau lore karakter Eve.",
+                "type": "text",
+                "default": "",
                 "restart_required": False
             },
 
@@ -523,6 +562,29 @@ class ConfigManager:
                 "category": "voice",
                 "label": "Text-to-Speech Output",
                 "description": "Menghasilkan suara sintetis vokal via Edge-TTS dan audio playback.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "tts.output_mode",
+                "category": "voice",
+                "label": "Audio Output Mode",
+                "description": "Menentukan tujuan output audio TTS: server (Pygame), browser (Web Audio / OBS), atau keduanya.",
+                "type": "select",
+                "options": [
+                    {"label": "Both (Server + Browser)", "value": "both"},
+                    {"label": "Browser Only (Web Audio / OBS)", "value": "browser"},
+                    {"label": "Server Only (Host Pygame)", "value": "server"}
+                ],
+                "default": "both",
+                "restart_required": False
+            },
+            {
+                "path": "tts.interruptible",
+                "category": "voice",
+                "label": "Interruptible TTS (Barge-In)",
+                "description": "Mengizinkan suara TTS Eve langsung dipotong saat Creator melakukan voice barge-in.",
                 "type": "toggle",
                 "default": True,
                 "restart_required": False
@@ -742,6 +804,15 @@ class ConfigManager:
                 "restart_required": False
             },
             {
+                "path": "moderator.prompt_injection_filter",
+                "category": "moderator",
+                "label": "Prompt Injection Filter",
+                "description": "Mendeteksi dan memblokir pola manipulasi instruksi/jailbreak dari chat penonton.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
                 "path": "moderator.max_message_length",
                 "category": "moderator",
                 "label": "Max Message Length",
@@ -800,6 +871,15 @@ class ConfigManager:
             },
 
             # 12. Autonomous Agent
+            {
+                "path": "autonomous_agent.enabled",
+                "category": "autonomous",
+                "label": "Autonomous Agent Enabled",
+                "description": "Mengaktifkan agen otonom Eve untuk perencanaan agenda, idle banter, dan misi mandiri.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
             {
                 "path": "autonomous_agent.goal_planning_enabled",
                 "category": "autonomous",

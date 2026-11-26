@@ -10,6 +10,141 @@ document.addEventListener("DOMContentLoaded", () => {
   const donAmount = document.getElementById("don-amount");
   const donText = document.getElementById("don-text");
 
+  // Query parameter flags (?hide_avatar=1, ?hide_subs=1, ?muted=1)
+  const initialParams = new URLSearchParams(window.location.search);
+  const isTruthyParam = (val) => val === "1" || val === "true" || val === "yes";
+  if (isTruthyParam(initialParams.get("hide_avatar"))) {
+    document.body.classList.add("hide-avatar");
+  }
+  if (isTruthyParam(initialParams.get("hide_subs"))) {
+    document.body.classList.add("hide-subs");
+  }
+  const browserAudioEnabled = !isTruthyParam(initialParams.get("muted"));
+
+  // Web Audio API FIFO Queue + AnalyserNode RMS Lip-Sync (unmuted by default for OBS)
+  let audioCtx = null;
+  let audioAnalyser = null;
+  let audioAnalyserData = null;
+  const audioQueue = [];
+  let isPlayingAudioQueue = false;
+  let currentAudioSource = null;
+  let audioLipSyncRaf = null;
+
+  function ensureAudioContext() {
+    if (!browserAudioEnabled) return null;
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!audioCtx) {
+      audioCtx = new AudioCtx();
+      audioAnalyser = audioCtx.createAnalyser();
+      audioAnalyser.fftSize = 256;
+      audioAnalyserData = new Uint8Array(audioAnalyser.frequencyBinCount);
+      audioAnalyser.connect(audioCtx.destination);
+    }
+    if (audioCtx.state === "suspended") {
+      audioCtx.resume().catch(() => {});
+    }
+    return audioCtx;
+  }
+
+  if (browserAudioEnabled) {
+    const resumeOnce = () => {
+      if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume().catch(() => {});
+      }
+    };
+    window.addEventListener("pointerdown", resumeOnce, { once: true });
+    window.addEventListener("keydown", resumeOnce, { once: true });
+  }
+
+  function decodeBase64ToArrayBuffer(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  function updateAudioLipSync() {
+    if (!isPlayingAudioQueue || !audioAnalyser || !audioAnalyserData) {
+      audioLipSyncRaf = null;
+      return;
+    }
+    audioAnalyser.getByteTimeDomainData(audioAnalyserData);
+    let sumSq = 0;
+    for (let i = 0; i < audioAnalyserData.length; i++) {
+      const sample = (audioAnalyserData[i] - 128) / 128;
+      sumSq += sample * sample;
+    }
+    const rms = Math.sqrt(sumSq / audioAnalyserData.length);
+    targetMouthOpen = Math.min(1.0, Math.max(0.0, rms * 5.0));
+    audioLipSyncRaf = requestAnimationFrame(updateAudioLipSync);
+  }
+
+  function playNextAudioChunk() {
+    if (!browserAudioEnabled || isPlayingAudioQueue || audioQueue.length === 0) return;
+    const ctxAudio = ensureAudioContext();
+    if (!ctxAudio || !audioAnalyser) return;
+
+    const buffer = audioQueue.shift();
+    const source = ctxAudio.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioAnalyser);
+
+    currentAudioSource = source;
+    isPlayingAudioQueue = true;
+
+    source.onended = () => {
+      if (currentAudioSource === source) {
+        currentAudioSource = null;
+      }
+      isPlayingAudioQueue = false;
+      if (audioQueue.length > 0 && browserAudioEnabled) {
+        playNextAudioChunk();
+      } else {
+        targetMouthOpen = 0.0;
+      }
+    };
+
+    try {
+      source.start(0);
+      if (!audioLipSyncRaf) {
+        audioLipSyncRaf = requestAnimationFrame(updateAudioLipSync);
+      }
+    } catch (e) {
+      isPlayingAudioQueue = false;
+      currentAudioSource = null;
+    }
+  }
+
+  async function enqueueAudioChunk(b64) {
+    if (!browserAudioEnabled || !b64) return;
+    const ctxAudio = ensureAudioContext();
+    if (!ctxAudio) return;
+    try {
+      const arrayBuf = decodeBase64ToArrayBuffer(b64);
+      const decoded = await ctxAudio.decodeAudioData(arrayBuf);
+      audioQueue.push(decoded);
+      playNextAudioChunk();
+    } catch (e) {}
+  }
+
+  function stopBrowserAudioOutput() {
+    audioQueue.length = 0;
+    isPlayingAudioQueue = false;
+    if (audioLipSyncRaf) {
+      cancelAnimationFrame(audioLipSyncRaf);
+      audioLipSyncRaf = null;
+    }
+    if (currentAudioSource) {
+      try { currentAudioSource.onended = null; currentAudioSource.stop(); } catch (e) {}
+      currentAudioSource = null;
+    }
+    targetMouthOpen = 0.0;
+    mouthOpen = 0.0;
+  }
+
   // Avatar animation state
   let mouthOpen = 0.0;
   let targetMouthOpen = 0.0;
@@ -89,6 +224,24 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (Array.isArray(data.emotions) && data.emotions.length > 0) {
         setEmotion(data.emotions[0]);
+      }
+    } else if (msg.type === "ai_chunk") {
+      if (data.chunk) {
+        showSubtitle(`"${data.chunk}"`, false, 10000);
+      }
+      if (data.emotion) {
+        setEmotion(data.emotion);
+      }
+    } else if (msg.type === "audio_chunk") {
+      const b64 = data.audio_b64 || data.audio || data.data || data.chunk;
+      if (b64) {
+        enqueueAudioChunk(b64);
+      }
+    } else if (msg.type === "voice_barge_in") {
+      isSinging = false;
+      stopBrowserAudioOutput();
+      if (subtitlesEl) {
+        subtitlesEl.classList.remove("is-singing");
       }
     } else if (msg.type === "donation_received") {
       showDonationAlert(data.user || "Viewer", data.amount || "", data.text || "");

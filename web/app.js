@@ -140,7 +140,171 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // --- Creator Token Persistence & Authenticated Fetch ---
+  const CREATOR_TOKEN_KEY = "maybeai_creator_token";
+
+  function getCreatorToken() {
+    try {
+      const urlToken = new URLSearchParams(window.location.search).get("token");
+      if (urlToken && urlToken.trim()) {
+        const clean = urlToken.trim();
+        try {
+          localStorage.setItem(CREATOR_TOKEN_KEY, clean);
+        } catch (e) {}
+        return clean;
+      }
+    } catch (e) {}
+    try {
+      return localStorage.getItem(CREATOR_TOKEN_KEY) || localStorage.maybeai_creator_token || "";
+    } catch (e) {
+      return "";
+    }
+  }
+
+  getCreatorToken();
+
+  function authFetch(url, options = {}) {
+    const token = getCreatorToken();
+    const headers = Object.assign({}, options.headers || {});
+    if (token) {
+      headers["X-Creator-Token"] = token;
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    return fetch(url, Object.assign({}, options, { headers }));
+  }
+
+  // --- Browser Web Audio API Playback (FIFO Queue + AnalyserNode RMS Lip-Sync) ---
+  const toggleAudioBtn = document.getElementById("toggle-audio-btn");
+  let browserAudioEnabled = false;
+  let browserAudioCtx = null;
+  let browserAudioAnalyser = null;
+  let browserAudioData = null;
+  const browserAudioQueue = [];
+  let isPlayingAudioQueue = false;
+  let currentAudioSource = null;
+  let audioLipSyncRaf = null;
+
+  function ensureBrowserAudioContext() {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+    if (!browserAudioCtx) {
+      browserAudioCtx = new AudioCtx();
+      browserAudioAnalyser = browserAudioCtx.createAnalyser();
+      browserAudioAnalyser.fftSize = 256;
+      browserAudioData = new Uint8Array(browserAudioAnalyser.frequencyBinCount);
+      browserAudioAnalyser.connect(browserAudioCtx.destination);
+    }
+    if (browserAudioCtx.state === "suspended") {
+      browserAudioCtx.resume().catch(() => {});
+    }
+    return browserAudioCtx;
+  }
+
+  function decodeBase64ToArrayBuffer(b64) {
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  function updateBrowserAudioLipSync() {
+    if (!isPlayingAudioQueue || !browserAudioAnalyser || !browserAudioData) {
+      audioLipSyncRaf = null;
+      return;
+    }
+    browserAudioAnalyser.getByteTimeDomainData(browserAudioData);
+    let sumSq = 0;
+    for (let i = 0; i < browserAudioData.length; i++) {
+      const sample = (browserAudioData[i] - 128) / 128;
+      sumSq += sample * sample;
+    }
+    const rms = Math.sqrt(sumSq / browserAudioData.length);
+    const level = Math.min(1.0, Math.max(0.0, rms * 5.0));
+    targetMouthOpen = level;
+    if (meterFill) {
+      meterFill.style.width = `${Math.min(100, Math.round(level * 100))}%`;
+    }
+    audioLipSyncRaf = requestAnimationFrame(updateBrowserAudioLipSync);
+  }
+
+  function playNextAudioChunk() {
+    if (!browserAudioEnabled || isPlayingAudioQueue || browserAudioQueue.length === 0) return;
+    const ctxAudio = ensureBrowserAudioContext();
+    if (!ctxAudio || !browserAudioAnalyser) return;
+
+    const buffer = browserAudioQueue.shift();
+    const source = ctxAudio.createBufferSource();
+    source.buffer = buffer;
+    source.connect(browserAudioAnalyser);
+
+    currentAudioSource = source;
+    isPlayingAudioQueue = true;
+    markEveSpeaking(true);
+
+    source.onended = () => {
+      if (currentAudioSource === source) {
+        currentAudioSource = null;
+      }
+      isPlayingAudioQueue = false;
+      if (browserAudioQueue.length > 0 && browserAudioEnabled) {
+        playNextAudioChunk();
+      } else {
+        targetMouthOpen = 0.0;
+        if (meterFill) meterFill.style.width = "0%";
+        markEveSpeaking(false);
+      }
+    };
+
+    try {
+      source.start(0);
+      if (!audioLipSyncRaf) {
+        audioLipSyncRaf = requestAnimationFrame(updateBrowserAudioLipSync);
+      }
+    } catch (e) {
+      isPlayingAudioQueue = false;
+      currentAudioSource = null;
+      markEveSpeaking(false);
+    }
+  }
+
+  async function enqueueAudioChunk(b64) {
+    if (!browserAudioEnabled || !b64) return;
+    const ctxAudio = ensureBrowserAudioContext();
+    if (!ctxAudio) return;
+    try {
+      const arrayBuf = decodeBase64ToArrayBuffer(b64);
+      const decoded = await ctxAudio.decodeAudioData(arrayBuf);
+      browserAudioQueue.push(decoded);
+      playNextAudioChunk();
+    } catch (e) {}
+  }
+
+  if (toggleAudioBtn) {
+    toggleAudioBtn.addEventListener("click", () => {
+      browserAudioEnabled = !browserAudioEnabled;
+      if (browserAudioEnabled) {
+        ensureBrowserAudioContext();
+        toggleAudioBtn.textContent = "🔇 Mute Browser Audio";
+      } else {
+        toggleAudioBtn.textContent = "🔊 Unmute Browser Audio";
+        stopBrowserAudioOutput();
+      }
+    });
+  }
+
   function stopBrowserAudioOutput() {
+    browserAudioQueue.length = 0;
+    isPlayingAudioQueue = false;
+    if (audioLipSyncRaf) {
+      cancelAnimationFrame(audioLipSyncRaf);
+      audioLipSyncRaf = null;
+    }
+    if (currentAudioSource) {
+      try { currentAudioSource.onended = null; currentAudioSource.stop(); } catch (e) {}
+      currentAudioSource = null;
+    }
     try {
       if (window.speechSynthesis && window.speechSynthesis.speaking) {
         window.speechSynthesis.cancel();
@@ -177,13 +341,7 @@ document.addEventListener("DOMContentLoaded", () => {
       reconnectTimer = null;
     }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const urlParams = new URLSearchParams(window.location.search);
-    const urlToken = urlParams.get("token");
-    let storedToken = null;
-    try {
-      storedToken = localStorage.getItem("maybeai_creator_token") || localStorage.maybeai_creator_token || null;
-    } catch (e) {}
-    const creatorToken = urlToken || storedToken;
+    const creatorToken = getCreatorToken();
     let wsUrl = `${protocol}//${window.location.host}/ws`;
     if (creatorToken) {
       wsUrl += `?token=${encodeURIComponent(creatorToken)}`;
@@ -248,6 +406,14 @@ document.addEventListener("DOMContentLoaded", () => {
       markEveSpeaking(true);
       if (msg.data && msg.data.chunk) {
         subtitles.textContent = `"${msg.data.chunk}"`;
+      }
+      if (msg.data && msg.data.emotion) {
+        setEmotion(msg.data.emotion);
+      }
+    } else if (msg.type === "audio_chunk") {
+      const b64 = msg.data && (msg.data.audio_b64 || msg.data.audio || msg.data.data || msg.data.chunk);
+      if (b64) {
+        enqueueAudioChunk(b64);
       }
       if (msg.data && msg.data.emotion) {
         setEmotion(msg.data.emotion);
@@ -452,8 +618,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function escapeHtml(string) {
+    if (string === null || string === undefined) return "";
     const el = document.createElement("div");
-    el.innerText = string;
+    el.textContent = String(string);
     return el.innerHTML;
   }
 
@@ -613,7 +780,7 @@ document.addEventListener("DOMContentLoaded", () => {
   async function startVadMonitor() {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return;
     try {
-      const resp = await fetch("/api/voice/status");
+      const resp = await authFetch("/api/voice/status");
       if (resp.ok) {
         const vst = await resp.json();
         const th = vst && vst.stt && Number(vst.stt.vad_energy_threshold);
@@ -2467,10 +2634,10 @@ document.addEventListener("DOMContentLoaded", () => {
           const isLeader = (data.active_team.leader === mem);
           pill.className = `mp-member-pill ${isLeader ? "leader" : ""}`;
 
-          const roleClass = `role-${role.toLowerCase()}`;
+          const roleClass = `role-${escapeHtml(role.toLowerCase())}`;
           pill.innerHTML = `
-            <span class="member-name">${mem === "Eve" ? "👑 Eve" : mem}</span>
-            <span class="role-badge ${roleClass}">${role}</span>
+            <span class="member-name">${mem === "Eve" ? "👑 Eve" : escapeHtml(mem)}</span>
+            <span class="role-badge ${roleClass}">${escapeHtml(role)}</span>
           `;
           mpMembersList.appendChild(pill);
         });
@@ -2545,16 +2712,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
         card.innerHTML = `
           <div class="contributor-header">
-            <span class="contributor-name">👤 ${p.player_name} <small style="color:var(--text-muted); font-weight:normal;">(${p.role_specialty || "General"})</small></span>
-            <span class="reputation-badge ${repClass}">Rep: ${Math.round(p.reputation)}/100 (${repLabel})</span>
+            <span class="contributor-name">👤 ${escapeHtml(p.player_name)} <small style="color:var(--text-muted); font-weight:normal;">(${escapeHtml(p.role_specialty || "General")})</small></span>
+            <span class="reputation-badge ${repClass}">Rep: ${Math.round(p.reputation)}/100 (${escapeHtml(repLabel)})</span>
           </div>
           <div class="contributor-stats">
-            <span class="stat-pill">🎁 Donasi: ${donStr}</span>
-            <span class="stat-pill">⚔️ Mob: ${p.mobs_killed_for_team || 0}</span>
-            <span class="stat-pill">🏡 Bangun: ${p.structures_built || 0}</span>
-            ${p.times_attacked_eve > 0 ? `<span class="stat-pill" style="color:#f87171;">⚠️ Serang Eve: ${p.times_attacked_eve}x</span>` : ""}
+            <span class="stat-pill">🎁 Donasi: ${escapeHtml(donStr)}</span>
+            <span class="stat-pill">⚔️ Mob: ${Number(p.mobs_killed_for_team || 0)}</span>
+            <span class="stat-pill">🏡 Bangun: ${Number(p.structures_built || 0)}</span>
+            ${p.times_attacked_eve > 0 ? `<span class="stat-pill" style="color:#f87171;">⚠️ Serang Eve: ${Number(p.times_attacked_eve)}x</span>` : ""}
           </div>
-          ${p.notes && p.notes.length > 0 ? `<div class="stat-notes">Catatan: "${p.notes[p.notes.length - 1]}"</div>` : ""}
+          ${p.notes && p.notes.length > 0 ? `<div class="stat-notes">Catatan: "${escapeHtml(p.notes[p.notes.length - 1])}"</div>` : ""}
         `;
         mpContributorsList.appendChild(card);
       });
@@ -2587,15 +2754,15 @@ document.addEventListener("DOMContentLoaded", () => {
 
           tCard.innerHTML = `
             <div class="trade-header">
-              <span class="trade-proposer">⚖️ ${tr.proposer}</span>
-              <span class="trade-verdict-badge ${vClass}">${vText}</span>
+              <span class="trade-proposer">⚖️ ${escapeHtml(tr.proposer)}</span>
+              <span class="trade-verdict-badge ${vClass}">${escapeHtml(vText)}</span>
             </div>
             <div class="trade-items-row">
-              <span>Tawarkan: ${offStr || "Kosong"}</span>
+              <span>Tawarkan: ${escapeHtml(offStr || "Kosong")}</span>
               <span class="trade-arrow">➔</span>
-              <span>Minta: ${reqStr || "Kosong"}</span>
+              <span>Minta: ${escapeHtml(reqStr || "Kosong")}</span>
             </div>
-            ${tr.eve_verdict ? `<p class="trade-comment">"${tr.eve_verdict}"</p>` : ""}
+            ${tr.eve_verdict ? `<p class="trade-comment">"${escapeHtml(tr.eve_verdict)}"</p>` : ""}
           `;
           mpBarterHistory.appendChild(tCard);
         });
@@ -2622,8 +2789,8 @@ document.addEventListener("DOMContentLoaded", () => {
         turnDiv.innerHTML = `
           <span class="speaker-avatar">${avatar}</span>
           <div class="turn-content">
-            <span class="speaker-name">${turn.speaker} <span class="turn-time">${timeStr}</span></span>
-            <span class="turn-msg">${turn.message}</span>
+            <span class="speaker-name">${escapeHtml(turn.speaker)} <span class="turn-time">${escapeHtml(timeStr)}</span></span>
+            <span class="turn-msg">${escapeHtml(turn.message)}</span>
           </div>
         `;
         mpGroupChatHistory.appendChild(turnDiv);
@@ -2826,8 +2993,8 @@ document.addEventListener("DOMContentLoaded", () => {
         const tag = document.createElement("span");
         tag.className = "dt-app-tag";
         tag.innerHTML = `
-          <span>💻 ${app}</span>
-          <span class="dt-app-remove" data-app="${app}" title="Hapus dari whitelist">✕</span>
+          <span>💻 ${escapeHtml(app)}</span>
+          <span class="dt-app-remove" data-app="${escapeHtml(app)}" title="Hapus dari whitelist">✕</span>
         `;
         dtAllowedAppsList.appendChild(tag);
       });
@@ -2849,11 +3016,11 @@ document.addEventListener("DOMContentLoaded", () => {
         item.className = "dt-notif-item";
         item.innerHTML = `
           <div class="notif-header">
-            <span class="notif-source">${n.source}</span>
-            <span class="notif-time">${n.time_str || ''}</span>
+            <span class="notif-source">${escapeHtml(n.source)}</span>
+            <span class="notif-time">${escapeHtml(n.time_str || '')}</span>
           </div>
-          <div class="notif-title">${n.title}</div>
-          <div class="notif-body">${n.body}</div>
+          <div class="notif-title">${escapeHtml(n.title)}</div>
+          <div class="notif-body">${escapeHtml(n.body)}</div>
         `;
         dtNotifsList.appendChild(item);
       });
@@ -2865,13 +3032,13 @@ document.addEventListener("DOMContentLoaded", () => {
       data.audit_log.forEach(a => {
         const row = document.createElement("div");
         row.className = "dt-audit-item";
-        const stClass = `audit-status-${(a.status || 'executed').toLowerCase()}`;
+        const stClass = `audit-status-${escapeHtml((a.status || 'executed').toLowerCase())}`;
         row.innerHTML = `
           <div class="audit-left">
-            <span class="audit-status-badge ${stClass}">${a.status}</span>
-            <span class="audit-details"><strong>${a.action_type}</strong>: ${a.details}</span>
+            <span class="audit-status-badge ${stClass}">${escapeHtml(a.status)}</span>
+            <span class="audit-details"><strong>${escapeHtml(a.action_type)}</strong>: ${escapeHtml(a.details)}</span>
           </div>
-          <span class="audit-time">${a.requested_at_str || ''}</span>
+          <span class="audit-time">${escapeHtml(a.requested_at_str || '')}</span>
         `;
         dtAuditList.appendChild(row);
       });
@@ -3274,7 +3441,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
           }
 
-          btn.innerHTML = `<span class="opt-key">${optKey}</span> <span class="opt-txt">${optText}</span>`;
+          btn.innerHTML = `<span class="opt-key">${escapeHtml(optKey)}</span> <span class="opt-txt">${escapeHtml(optText)}</span>`;
           btn.addEventListener("click", () => {
             const user = mgChatUser ? (mgChatUser.value.trim() || "ChatterPro") : "ChatterPro";
             sendMinigameAction({
@@ -3372,10 +3539,10 @@ document.addEventListener("DOMContentLoaded", () => {
         item.innerHTML = `
           <div class="mg-leader-rank">${medal}</div>
           <div class="mg-leader-info">
-            <span class="mg-leader-name">${p.username}</span>
-            <small class="mg-leader-sub">Benar: ${p.correct_answers || 0} • Menang: ${p.games_won || 0} • Streak: 🔥${p.streak || 0}</small>
+            <span class="mg-leader-name">${escapeHtml(p.username)}</span>
+            <small class="mg-leader-sub">Benar: ${Number(p.correct_answers || 0)} • Menang: ${Number(p.games_won || 0)} • Streak: 🔥${Number(p.streak || 0)}</small>
           </div>
-          <div class="mg-leader-pts"><strong>${p.score || 0}</strong> <small>pts</small></div>
+          <div class="mg-leader-pts"><strong>${Number(p.score || 0)}</strong> <small>pts</small></div>
         `;
         mgLeaderboardList.appendChild(item);
       });
@@ -3639,17 +3806,17 @@ document.addEventListener("DOMContentLoaded", () => {
 
           card.innerHTML = `
             <div class="choice-header">
-              <span class="choice-key-tag">${optKey}</span>
-              <span class="choice-label">${c.label}</span>
-              <span class="choice-dc-badge">DC ${c.dc_check || 10} (${c.stat_affinity || 'Luck'})</span>
+              <span class="choice-key-tag">${escapeHtml(optKey)}</span>
+              <span class="choice-label">${escapeHtml(c.label)}</span>
+              <span class="choice-dc-badge">DC ${Number(c.dc_check || 10)} (${escapeHtml(c.stat_affinity || 'Luck')})</span>
             </div>
-            <p class="choice-desc">${c.description}</p>
+            <p class="choice-desc">${escapeHtml(c.description)}</p>
             <div class="choice-vote-row">
               <span>Votes: <strong>${voteCount}</strong> (${votePct}%)</span>
               <div class="choice-vote-bar">
                 <div class="choice-vote-fill" style="width: ${votePct}%;"></div>
               </div>
-              <button type="button" class="btn btn-secondary btn-sm btn-vote-choice" style="font-size: 10px; padding: 2px 8px;">Vote ${optKey}</button>
+              <button type="button" class="btn btn-secondary btn-sm btn-vote-choice" style="font-size: 10px; padding: 2px 8px;">Vote ${escapeHtml(optKey)}</button>
             </div>
           `;
 
@@ -3697,8 +3864,8 @@ document.addEventListener("DOMContentLoaded", () => {
       }
       if (storyD20Outcome) {
         storyD20Outcome.innerHTML = `
-          <strong>${r.roller} melempar D20:</strong> [Dadu ${r.d20_value} + ${r.modifier} Bonus = <strong>${r.total}</strong> vs DC ${r.dc_target}]<br>
-          <span style="color: ${r.is_success ? '#4ade80' : '#f87171'}; font-weight: 600;">${r.outcome_text}</span>
+          <strong>${escapeHtml(r.roller)} melempar D20:</strong> [Dadu ${Number(r.d20_value)} + ${Number(r.modifier)} Bonus = <strong>${Number(r.total)}</strong> vs DC ${Number(r.dc_target)}]<br>
+          <span style="color: ${r.is_success ? '#4ade80' : '#f87171'}; font-weight: 600;">${escapeHtml(r.outcome_text)}</span>
         `;
       }
     }
@@ -3752,7 +3919,7 @@ document.addEventListener("DOMContentLoaded", () => {
         suggs.forEach(s => {
           const div = document.createElement("div");
           div.className = "suggestion-item";
-          div.innerHTML = `<strong>${s.user}</strong>: "${s.action}" <small style="color: #64748b;">(${s.time})</small>`;
+          div.innerHTML = `<strong>${escapeHtml(s.user)}</strong>: "${escapeHtml(s.action)}" <small style="color: #64748b;">(${escapeHtml(s.time)})</small>`;
           storySuggestionsList.appendChild(div);
         });
       }
@@ -3777,10 +3944,10 @@ document.addEventListener("DOMContentLoaded", () => {
         row.className = "history-item-row";
         row.innerHTML = `
           <div class="history-meta">
-            <span class="history-title">${h.title}</span>
-            <small class="history-sub">${h.summary || ''}</small>
+            <span class="history-title">${escapeHtml(h.title)}</span>
+            <small class="history-sub">${escapeHtml(h.summary || '')}</small>
           </div>
-          <div class="history-stats">${h.final_hp || '-'}HP | ${h.final_gold || '-'}G</div>
+          <div class="history-stats">${escapeHtml(h.final_hp || '-')}HP | ${escapeHtml(h.final_gold || '-')}G</div>
         `;
         storyHistoryTable.appendChild(row);
       });
@@ -4073,8 +4240,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
         row.innerHTML = `
           <div class="setlist-meta">
-            <span class="setlist-song-name">#${item.order} ${item.title}</span>
-            <small class="setlist-desc">${item.reason}</small>
+            <span class="setlist-song-name">#${Number(item.order)} ${escapeHtml(item.title)}</span>
+            <small class="setlist-desc">${escapeHtml(item.reason)}</small>
           </div>
           <span class="badge" style="font-size: 10px;">${statusBadge}</span>
         `;
@@ -4103,7 +4270,7 @@ document.addEventListener("DOMContentLoaded", () => {
           const div = document.createElement("div");
           div.className = "suggestion-item";
           const icon = c.type === "encore" ? "💖" : "✨";
-          div.innerHTML = `<strong>${c.user}</strong>: ${icon} bersorak di panggung! <small style="color: #64748b;">(${c.time})</small>`;
+          div.innerHTML = `<strong>${escapeHtml(c.user)}</strong>: ${icon} bersorak di panggung! <small style="color: #64748b;">(${escapeHtml(c.time)})</small>`;
           perfCheersList.appendChild(div);
         });
       }
@@ -4117,10 +4284,10 @@ document.addEventListener("DOMContentLoaded", () => {
         div.className = "history-item-row";
         div.innerHTML = `
           <div class="history-meta">
-            <span class="history-title">${h.concert_title || h.title}</span>
-            <small class="history-sub">${h.completed_at || ''}</small>
+            <span class="history-title">${escapeHtml(h.concert_title || h.title)}</span>
+            <small class="history-sub">${escapeHtml(h.completed_at || '')}</small>
           </div>
-          <div class="history-stats">Score: ${h.score || 95}/100 • ✨ ${h.glowsticks || 0}</div>
+          <div class="history-stats">Score: ${Number(h.score || 95)}/100 • ✨ ${Number(h.glowsticks || 0)}</div>
         `;
         perfHistoryTable.appendChild(div);
       });
@@ -4319,11 +4486,11 @@ document.addEventListener("DOMContentLoaded", () => {
           const dateStr = unl.unlocked_at ? new Date(unl.unlocked_at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "Unlocked";
           return `
             <div class="p-milestone-item p-milestone-unlocked">
-              <span class="p-milestone-icon">${unl.icon || p.icon}</span>
+              <span class="p-milestone-icon">${escapeHtml(unl.icon || p.icon)}</span>
               <div class="p-milestone-info">
-                <span class="p-milestone-title">${unl.title || p.title}</span>
-                <span class="p-milestone-desc">${unl.description || p.desc}</span>
-                <span class="p-milestone-date">✨ Terbuka pukul ${dateStr}</span>
+                <span class="p-milestone-title">${escapeHtml(unl.title || p.title)}</span>
+                <span class="p-milestone-desc">${escapeHtml(unl.description || p.desc)}</span>
+                <span class="p-milestone-date">✨ Terbuka pukul ${escapeHtml(dateStr)}</span>
               </div>
             </div>
           `;
@@ -4332,8 +4499,8 @@ document.addEventListener("DOMContentLoaded", () => {
             <div class="p-milestone-item p-milestone-locked">
               <span class="p-milestone-icon">🔒</span>
               <div class="p-milestone-info">
-                <span class="p-milestone-title">${p.title}</span>
-                <span class="p-milestone-desc">${p.desc}</span>
+                <span class="p-milestone-title">${escapeHtml(p.title)}</span>
+                <span class="p-milestone-desc">${escapeHtml(p.desc)}</span>
                 <span class="p-milestone-date">Terkunci (Belum Memenuhi Syarat)</span>
               </div>
             </div>
@@ -4353,13 +4520,13 @@ document.addEventListener("DOMContentLoaded", () => {
           return `
             <div class="p-history-item">
               <div class="p-hist-main">
-                <span class="p-hist-trigger">${h.trigger}</span>
-                <span class="p-hist-narrative">${h.narrative}</span>
+                <span class="p-hist-trigger">${escapeHtml(h.trigger)}</span>
+                <span class="p-hist-narrative">${escapeHtml(h.narrative)}</span>
               </div>
               <div class="p-hist-meta">
-                <span class="p-hist-deltas">${deltaStrs}</span>
-                <span class="badge badge-accent">+${h.exp_gained} EXP</span>
-                <span class="p-hist-time">${timeStr}</span>
+                <span class="p-hist-deltas">${escapeHtml(deltaStrs)}</span>
+                <span class="badge badge-accent">+${Number(h.exp_gained)} EXP</span>
+                <span class="p-hist-time">${escapeHtml(timeStr)}</span>
               </div>
             </div>
           `;
@@ -4451,7 +4618,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function refreshMissionStatus() {
     try {
-      const res = await fetch("/api/missions/status");
+      const res = await authFetch("/api/missions/status");
       if (res.ok) {
         const data = await res.json();
         updateMissionUi(data);
@@ -4528,7 +4695,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnMissionToggle) {
     btnMissionToggle.addEventListener("click", async () => {
       try {
-        const res = await fetch("/api/missions/toggle", {
+        const res = await authFetch("/api/missions/toggle", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enabled: !missionLoopActive })
@@ -4544,7 +4711,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnMissionStep) {
     btnMissionStep.addEventListener("click", async () => {
       try {
-        const res = await fetch("/api/missions/step", {
+        const res = await authFetch("/api/missions/step", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ force: false })
@@ -4560,7 +4727,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnMissionApprove) {
     btnMissionApprove.addEventListener("click", async () => {
       try {
-        const res = await fetch("/api/missions/step", {
+        const res = await authFetch("/api/missions/step", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "approve", force: true })
@@ -4580,7 +4747,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (btnMissionReject) {
     btnMissionReject.addEventListener("click", async () => {
       try {
-        const res = await fetch("/api/missions/step", {
+        const res = await authFetch("/api/missions/step", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action: "reject" })
@@ -4611,7 +4778,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function refreshCollabStatus() {
     try {
-      const res = await fetch("/api/collab/status");
+      const res = await authFetch("/api/collab/status");
       if (res.ok) {
         const data = await res.json();
         updateCollabUi(data);
@@ -4621,7 +4788,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function postCollabAction(payload) {
     try {
-      const res = await fetch("/api/collab/action", {
+      const res = await authFetch("/api/collab/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
@@ -4719,7 +4886,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function refreshPluginsList() {
     try {
-      const res = await fetch("/api/plugins");
+      const res = await authFetch("/api/plugins");
       if (res.ok) {
         const data = await res.json();
         const plugins = Array.isArray(data) ? data : (data.plugins || []);
@@ -4730,7 +4897,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   async function postPluginAction(action, pluginId) {
     try {
-      const res = await fetch("/api/plugins/action", {
+      const res = await authFetch("/api/plugins/action", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: action, plugin_id: pluginId })

@@ -256,24 +256,18 @@ class ConversationEngine:
 
         return self.INTENT_GENERAL, None
 
-    def build_system_prompt(
+    def _assemble_system_prompt(
         self,
         current_user: str,
+        recall_res: Any,
         game_context: str = "",
         is_donation: bool = False,
         donation_amount: str = "",
         is_group_debate: bool = False,
         debate_users: Optional[List[str]] = None,
-        current_message: str = ""
     ) -> str:
         social_context = self.user_memory.get_social_context(current_user)
         chat_digest = self.chat_curator.get_chat_digest()
-        recall_res = self.episodic_memory.recall(
-            query=current_message,
-            current_user=current_user,
-            game_context=game_context,
-            top_k=3
-        )
         memory_recall_block = recall_res.to_prompt_text(current_user)
         mood_directive = self.mood.get_behavioral_directive()
         goal_directive = self.goals.get_goal_directive()
@@ -321,6 +315,59 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             storytelling_directive=storytelling_directive,
             performance_directive=performance_directive,
             personality_directive=personality_directive
+        )
+
+    def build_system_prompt(
+        self,
+        current_user: str,
+        game_context: str = "",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        is_group_debate: bool = False,
+        debate_users: Optional[List[str]] = None,
+        current_message: str = ""
+    ) -> str:
+        recall_res = self.episodic_memory.recall(
+            query=current_message,
+            current_user=current_user,
+            game_context=game_context,
+            top_k=3
+        )
+        return self._assemble_system_prompt(
+            current_user=current_user,
+            recall_res=recall_res,
+            game_context=game_context,
+            is_donation=is_donation,
+            donation_amount=donation_amount,
+            is_group_debate=is_group_debate,
+            debate_users=debate_users,
+        )
+
+    async def abuild_system_prompt(
+        self,
+        current_user: str,
+        game_context: str = "",
+        is_donation: bool = False,
+        donation_amount: str = "",
+        is_group_debate: bool = False,
+        debate_users: Optional[List[str]] = None,
+        current_message: str = ""
+    ) -> str:
+        """Async counterpart to build_system_prompt using non-blocking retriever.arecall."""
+        recall_res = await self.episodic_memory.retriever.arecall(
+            query=current_message,
+            current_user=current_user,
+            game_context=game_context,
+            top_k=3
+        )
+        return self._assemble_system_prompt(
+            current_user=current_user,
+            recall_res=recall_res,
+            game_context=game_context,
+            is_donation=is_donation,
+            donation_amount=donation_amount,
+            is_group_debate=is_group_debate,
+            debate_users=debate_users,
         )
 
     def generate_spontaneous_improv_text(self, game_context: str = "") -> str:
@@ -397,7 +444,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
         is_donation: bool = False,
         donation_amount: str = "",
         is_group_debate: bool = False,
-        debate_users: Optional[List[str]] = None
+        debate_users: Optional[List[str]] = None,
+        is_creator: bool = False
     ) -> str:
         """
         Bilingual, highly dynamic offline fallback engine exhibiting all chat interaction capabilities:
@@ -488,6 +536,8 @@ Grounded Rule: If the user asks what is on screen, comments on their gameplay/de
             "desktop companion", "izin desktop", "notifikasi", "scene obs"
         ])
         if is_desktop_query and self.desktop:
+            if not is_creator:
+                return f"[emotion: smug] Eits {user_name}, fitur kontrol desktop dan sistem cuma boleh diatur sama Creator-ku tersayang ya! [action: wink]"
             # Volume
             if any(k in msg_lower for k in ["kecilin volume", "turunin volume", "suara kekencengan"]):
                 _, msg = self.desktop.controller.adjust_volume(-10)

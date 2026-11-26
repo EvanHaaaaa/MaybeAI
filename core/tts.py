@@ -136,6 +136,8 @@ class TTSEngine:
     Supports both single-shot speak() and pipelined streaming speak_stream().
     """
 
+    _VALID_OUTPUT_MODES = ("server", "browser", "both")
+
     def __init__(
         self,
         voice: str = "en-US-AnaNeural",
@@ -143,14 +145,21 @@ class TTSEngine:
         pitch: str = "+10Hz",
         enabled: bool = True,
         interruptible: bool = True,
+        output_mode: str = "both",
+        on_audio_ready: Optional[Callable[[bytes, str, str], Any]] = None,
     ):
         self.voice = voice
         self.rate = rate
         self.pitch = pitch
         self.enabled = enabled
         self.interruptible = interruptible
+        mode = str(output_mode or "both").strip().lower()
+        self.output_mode = mode if mode in self._VALID_OUTPUT_MODES else "both"
+        self.on_audio_ready = on_audio_ready
         self.last_error: Optional[str] = None
         self._mixer_initialized: bool = False
+        self._tts_channel: Any = None
+        self._tts_sound: Any = None
         self._is_speaking: bool = False
         self._was_interrupted: bool = False
         self._stop_requested: bool = False
@@ -178,6 +187,7 @@ class TTSEngine:
         rate: Optional[str] = None,
         pitch: Optional[str] = None,
         interruptible: Optional[bool] = None,
+        output_mode: Optional[str] = None,
     ):
         if enabled is not None:
             self.enabled = bool(enabled)
@@ -189,6 +199,10 @@ class TTSEngine:
             self.pitch = pitch.strip()
         if interruptible is not None:
             self.interruptible = bool(interruptible)
+        if output_mode is not None:
+            mode = str(output_mode).strip().lower()
+            if mode in self._VALID_OUTPUT_MODES:
+                self.output_mode = mode
 
     def get_status(self) -> dict:
         return {
@@ -198,6 +212,7 @@ class TTSEngine:
             "rate": self.rate,
             "pitch": self.pitch,
             "interruptible": self.interruptible,
+            "output_mode": self.output_mode,
             "is_speaking": self._is_speaking,
             "was_interrupted": self._was_interrupted,
             "last_error": self.last_error
@@ -240,13 +255,12 @@ class TTSEngine:
                 stopped = True
 
         try:
-            import pygame
-            if self._mixer_initialized and isinstance(pygame.mixer.get_init(), tuple):
-                if pygame.mixer.music.get_busy():
+            if self._tts_channel is not None:
+                if self._tts_channel.get_busy():
                     stopped = True
-                pygame.mixer.music.stop()
-                if hasattr(pygame.mixer.music, "unload"):
-                    pygame.mixer.music.unload()
+                self._tts_channel.stop()
+                self._tts_channel = None
+            self._tts_sound = None
         except Exception:
             pass
 
@@ -271,6 +285,16 @@ class TTSEngine:
         self._active_mouth_callback = on_mouth_update
         output_file: Optional[str] = None
 
+        async def _emit_browser_audio(out_path: str, spoken_text: str) -> None:
+            if self.on_audio_ready is None or self.output_mode not in ("browser", "both"):
+                return
+            try:
+                audio_bytes = Path(out_path).read_bytes()
+            except Exception:
+                return
+            if audio_bytes:
+                await self._invoke_callback(self.on_audio_ready, audio_bytes, spoken_text, self.voice)
+
         async def _run_speak(out_path: str) -> str:
             communicate = edge_tts.Communicate(
                 text=text,
@@ -279,7 +303,11 @@ class TTSEngine:
                 pitch=self.pitch
             )
             await communicate.save(out_path)
-            await self._play_and_lipsync(out_path, text, on_mouth_update)
+            await _emit_browser_audio(out_path, text)
+            if self.output_mode in ("server", "both"):
+                await self._play_and_lipsync(out_path, text, on_mouth_update)
+            else:
+                await self._simulate_mouth_flap(text, on_mouth_update)
             self.last_error = None
             return out_path
 
@@ -420,7 +448,19 @@ class TTSEngine:
                     if clean_text:
                         await self._invoke_callback(on_sentence_start, clean_text)
                         if file_path:
-                            await self._play_and_lipsync(file_path, clean_text, on_mouth_update)
+                            if self.on_audio_ready is not None and self.output_mode in ("browser", "both"):
+                                try:
+                                    audio_bytes = Path(file_path).read_bytes()
+                                    if audio_bytes:
+                                        await self._invoke_callback(
+                                            self.on_audio_ready, audio_bytes, clean_text, self.voice
+                                        )
+                                except Exception:
+                                    pass
+                            if self.output_mode in ("server", "both"):
+                                await self._play_and_lipsync(file_path, clean_text, on_mouth_update)
+                            else:
+                                await self._simulate_mouth_flap(clean_text, on_mouth_update)
                         else:
                             await self._simulate_mouth_flap(clean_text, on_mouth_update)
                 finally:
@@ -497,12 +537,17 @@ class TTSEngine:
 
     async def _play_and_lipsync(self, file_path: str, text: str, on_mouth_update: Optional[Callable[[float], Any]]):
         """
-        Simulate/Play audio and fire dynamic lip-sync mouth pulses based on text timing.
+        Simulate/Play audio via dedicated pygame.mixer.Sound channel and fire dynamic lip-sync mouth pulses.
         """
+        if self.output_mode == "browser":
+            await self._simulate_mouth_flap(text, on_mouth_update)
+            self._cleanup_audio_file(file_path)
+            return
+
         # Estimate duration roughly based on word count (approx 150 words/min = 2.5 words/sec)
         words = len(text.split())
         est_duration = max(1.0, words / 2.6)
-        loaded = False
+        channel = None
 
         try:
             import pygame
@@ -510,15 +555,16 @@ class TTSEngine:
                 if not isinstance(pygame.mixer.get_init(), tuple):
                     pygame.mixer.init()
                 self._mixer_initialized = True
-            pygame.mixer.music.load(file_path)
-            loaded = True
-            pygame.mixer.music.play()
+            sound = pygame.mixer.Sound(file_path)
+            self._tts_sound = sound
+            channel = sound.play()
+            self._tts_channel = channel
 
-            # Dynamic lip sync while music is playing
+            # Dynamic lip sync while dedicated TTS channel is playing
             interval = 0.08
             elapsed = 0.0
             step = 0
-            while pygame.mixer.music.get_busy() or elapsed < est_duration:
+            while (channel is not None and channel.get_busy() in (True, 1)) or elapsed < est_duration:
                 await asyncio.sleep(interval)
                 elapsed += interval
                 step += 1
@@ -547,12 +593,11 @@ class TTSEngine:
             if on_mouth_update:
                 await self._invoke_callback(on_mouth_update, 0.0)
         finally:
-            if loaded:
+            if channel is not None:
                 try:
-                    import pygame
-                    pygame.mixer.music.stop()
-                    if hasattr(pygame.mixer.music, "unload"):
-                        pygame.mixer.music.unload()
+                    channel.stop()
                 except Exception:
                     pass
+            self._tts_channel = None
+            self._tts_sound = None
             self._cleanup_audio_file(file_path)

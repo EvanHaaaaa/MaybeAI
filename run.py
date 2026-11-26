@@ -92,6 +92,27 @@ def _get_configured_creator_token() -> str:
     return ""
 
 
+def _is_http_creator_authorized(request: Request) -> tuple[bool, int, str]:
+    configured_token = _get_configured_creator_token()
+    if configured_token:
+        provided_token = (request.headers.get("x-creator-token") or "").strip()
+        if not provided_token:
+            auth_header = request.headers.get("authorization", "")
+            if auth_header.lower().startswith("bearer "):
+                provided_token = auth_header[7:].strip()
+        if not provided_token or not secrets.compare_digest(
+            provided_token.encode("utf-8"),
+            configured_token.encode("utf-8"),
+        ):
+            return False, 401, "Creator authentication required"
+        return True, 200, ""
+
+    client_host = request.client.host if request.client else None
+    if client_host not in _LOOPBACK_HOSTS:
+        return False, 403, "Creator access restricted to loopback"
+    return True, 200, ""
+
+
 def _is_ws_creator_authorized(websocket: WebSocket) -> bool:
     client_host = websocket.client.host if websocket.client else None
     if client_host not in _LOOPBACK_HOSTS:
@@ -216,10 +237,15 @@ async def _handle_plugin_action(payload: Dict[str, Any]) -> tuple[int, Dict[str,
 
 @app.middleware("http")
 async def verify_api_origin_middleware(request: Request, call_next):
-    if request.url.path.startswith("/api/") and request.method in ("PUT", "POST", "PATCH", "DELETE"):
+    is_mutating_api = request.url.path.startswith("/api/") and request.method in ("PUT", "POST", "PATCH", "DELETE")
+    is_sensitive_get = request.url.path == "/api/config" and request.method == "GET"
+    if is_mutating_api or is_sensitive_get:
         origin = request.headers.get("origin")
         if origin is not None and not _is_allowed_origin(origin):
             return JSONResponse(status_code=403, content={"detail": "Forbidden origin"})
+        authorized, status_code, detail = _is_http_creator_authorized(request)
+        if not authorized:
+            return JSONResponse(status_code=status_code, content={"detail": detail})
     return await call_next(request)
 
 # Mount static files
@@ -586,6 +612,19 @@ async def post_plugins_action(req: Dict[str, Any]):
     return body
 
 
+_CREATOR_ONLY_WS_ACTIONS = frozenset({
+    "config_action",
+    "desktop_action",
+    "minecraft_action",
+    "chess_action",
+    "set_llm_provider",
+    "personality_action",
+    "performance_action",
+    "vision_action",
+    "goal_action",
+})
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     origin = websocket.headers.get("origin")
@@ -716,6 +755,13 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
+            msg_type = data.get("type")
+            if msg_type in _CREATOR_ONLY_WS_ACTIONS and not ws_creator_authorized:
+                await websocket.send_json({
+                    "type": "error",
+                    "data": {"error": f"Creator authorization required for {msg_type}", "code": "forbidden"}
+                })
+                continue
             if data.get("type") == "user_message":
                 user = data.get("user", "User")
                 text = data.get("text", "")
@@ -1396,6 +1442,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
 @app.websocket("/ws/collab")
 async def collab_websocket_endpoint(websocket: WebSocket):
+    origin = websocket.headers.get("origin")
+    if origin is not None and not _is_allowed_origin(origin):
+        await websocket.close(code=1008)
+        return
+
     client_host = websocket.client.host if websocket.client else None
     is_loopback = client_host in _LOOPBACK_HOSTS
     secret = _get_collab_secret()
@@ -1411,13 +1462,10 @@ async def collab_websocket_endpoint(websocket: WebSocket):
             auth_header = websocket.headers.get("authorization", "")
             if auth_header.lower().startswith("bearer "):
                 provided_secret = auth_header[7:].strip()
-        if provided_secret and not hmac.compare_digest(
+        if not provided_secret or not hmac.compare_digest(
             provided_secret.encode("utf-8"),
             secret.encode("utf-8"),
         ):
-            await websocket.close(code=1008)
-            return
-        if not provided_secret and not is_loopback:
             await websocket.close(code=1008)
             return
     elif not is_loopback:
@@ -1434,7 +1482,7 @@ async def collab_websocket_endpoint(websocket: WebSocket):
     if secret_overridden:
         orchestrator.collab.shared_secret = secret
 
-    orchestrator.collab.set_peer_sender(send_to_peer)
+    sender_id = orchestrator.collab.register_peer_sender(send_to_peer)
     try:
         while True:
             raw = await websocket.receive_json()
@@ -1449,16 +1497,19 @@ async def collab_websocket_endpoint(websocket: WebSocket):
     except Exception:
         pass
     finally:
-        orchestrator.collab.set_peer_sender(None)
+        orchestrator.collab.unregister_peer_sender(sender_id)
         if secret_overridden and orchestrator.collab.shared_secret == secret:
             orchestrator.collab.shared_secret = prev_collab_secret
 
 
 
 def main():
+    sys_cfg = config_mgr.settings.get("system", {})
+    default_host = sys_cfg.get("host", "127.0.0.1") if isinstance(sys_cfg, dict) else "127.0.0.1"
+    default_port = int(sys_cfg.get("port", 7860)) if isinstance(sys_cfg, dict) else 7860
     parser = argparse.ArgumentParser(description="MaybeAI - Eve Maybe (Autonomous AI VTuber)")
-    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface")
-    parser.add_argument("--port", type=int, default=7860, help="Web port (default: 7860)")
+    parser.add_argument("--host", type=str, default=default_host, help=f"Host interface (default: {default_host})")
+    parser.add_argument("--port", type=int, default=default_port, help=f"Web port (default: {default_port})")
     parser.add_argument("--provider", type=str, choices=["mock", "openai", "gemini", "ollama"], help="Override LLM provider")
     args = parser.parse_args()
 

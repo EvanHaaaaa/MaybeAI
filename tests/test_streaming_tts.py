@@ -262,19 +262,21 @@ class TestTTSEngineStreaming(unittest.IsolatedAsyncioTestCase):
         def fake_init():
             mixer_state["initialized"] = True
 
-        fake_music = MagicMock()
-        fake_music.get_busy.return_value = False
+        fake_channel = MagicMock()
+        fake_channel.get_busy.return_value = False
+        fake_sound = MagicMock()
+        fake_sound.play.return_value = fake_channel
         fake_mixer = MagicMock()
         fake_mixer.get_init.side_effect = fake_get_init
         fake_mixer.init.side_effect = fake_init
-        fake_mixer.music = fake_music
+        fake_mixer.Sound.return_value = fake_sound
 
         fake_pygame = types.ModuleType("pygame")
         fake_pygame.mixer = fake_mixer
-        return fake_pygame, fake_mixer, fake_music
+        return fake_pygame, fake_mixer, fake_sound
 
     async def test_speak_stream_pipelines_synthesis_parses_tags_and_cleans_up(self):
-        fake_pygame, fake_mixer, fake_music = self._make_fake_pygame()
+        fake_pygame, fake_mixer, fake_sound = self._make_fake_pygame()
         synthesized_texts = []
         created_files = []
 
@@ -321,7 +323,7 @@ class TestTTSEngineStreaming(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(sentences_started, ["Halo semuanya!", "Ini kalimat streaming kedua."])
         self.assertEqual(tags_seen, [(["happy"], []), ([], ["wink"])])
         self.assertEqual(fake_mixer.init.call_count, 1)
-        self.assertEqual(fake_music.play.call_count, 2)
+        self.assertEqual(fake_sound.play.call_count, 2)
         self.assertEqual(mouth_values[-1], 0.0)
         for fp in created_files:
             self.assertFalse(os.path.exists(fp), f"Temp file not deleted: {fp}")

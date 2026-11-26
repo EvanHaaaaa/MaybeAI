@@ -57,6 +57,7 @@
   "tts": {
     "enabled": true,
     "provider": "edge-tts",
+    "output_mode": "both",
     "voice": "en-US-AnaNeural",
     "rate": "+5%",
     "pitch": "+12Hz",

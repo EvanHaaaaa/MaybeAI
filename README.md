@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python 3.12" />
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688.svg" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Tests-274%20Passed%20(100%25)-success.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-283%20Passed%20(100%25)-success.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/UI-Cyberpunk%20Futuristic-8b5cf6.svg" alt="UI" />
   <img src="https://img.shields.io/badge/Live2D-VTube%20Studio%20API-ff69b4.svg" alt="VTS" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
@@ -314,9 +314,11 @@ MaybeAI/
 ├── tests/
 │   ├── __init__.py                # Menetapkan MAYBEAI_LLM_PROVIDER=mock saat test berjalan
 │   ├── test_guard_runner.js       # Uji unit guard mode Minecraft (Node.js)
-│   └── test_*.py                  # 28 modul pengujian unit & integrasi Python (274 tests)
+│   └── test_*.py                  # 29 modul pengujian unit & integrasi Python (283 tests)
+├── pyproject.toml                 # Metadata proyek & extras opsional ([stt-local], [embeddings-local], [dev])
 ├── run.py                         # FastAPI Web Server & Application Launcher
 ├── requirements.txt               # Daftar dependensi Python
+├── start.bat                      # One-click Windows launcher (.venv, pip install, .env, run.py)
 ├── LICENSE                        # Lisensi MIT (EvanH 2026)
 ├── push.bat                       # Skrip utilitas push Git (Windows)
 ├── .env.example                   # Template variabel lingkungan (.env)
@@ -604,12 +606,12 @@ node tests/test_guard_runner.js
 
 ### Hasil Verifikasi:
 ```text
-Ran 274 tests
+Ran 283 tests
 OK
 ```
-- **Total Test Cases:** 274 Python unit/integration tests + `test_guard_runner.js` (Node.js)
+- **Total Test Cases:** 283 Python unit/integration tests + `test_guard_runner.js` (Node.js)
 - **Success Rate:** **100% PASS (0 Failures, 0 Errors)**
-- **Modul Teruji:** `test_autonomous_missions`, `test_brain`, `test_chat_receiver`, `test_chess`, `test_collab_and_plugins`, `test_configuration`, `test_desktop_companion`, `test_event_bus`, `test_goals`, `test_guard_mode`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_relationships`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_voice_duplex`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
+- **Modul Teruji:** `test_autonomous_missions`, `test_brain`, `test_chat_receiver`, `test_chess`, `test_collab_and_plugins`, `test_configuration`, `test_desktop_companion`, `test_event_bus`, `test_fase1_hardening`, `test_goals`, `test_guard_mode`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_relationships`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_voice_duplex`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
 
 ---
 

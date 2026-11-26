@@ -2,6 +2,25 @@
 
 All notable changes to **MaybeAI (Eve Maybe)** are documented in this file.
 
+## [2026-11-26] — Fase 1 Hardening: Security Parity, Browser Audio Unification & Packaging
+
+### Security & Auth Parity
+- **Secret Masking in Live Broadcasts (`core/orchestrator.py`):** Masked `ConfigManager.SECRET_MASK_FIELDS` (`creator_token`, `shared_secret`, `oauth_token`, `api_key`, `bot_token`) to `"********"` in `configuration_updated` WebSocket broadcasts via `_mask_settings_for_broadcast()`.
+- **HTTP `/api/*` & `/ws` Auth Parity (`run.py`):** Added `_is_http_creator_authorized()` enforcing `creator_token` (`X-Creator-Token` / `Authorization: Bearer`) or loopback-only access on mutating `/api/*` routes and `GET /api/config`. Enforced `ws_creator_authorized` on all mutating `/ws` actions (`config_action`, `desktop_action`, `minecraft_action`, `chess_action`, `set_llm_provider`, `personality_action`, `performance_action`, `vision_action`, `goal_action`).
+- **Mock-Mode Desktop Guardrail & Async Performance (`core/conversation/engine.py`, `core/brain.py`, `core/memory/database.py`, `core/chess/controller.py`):** Gated `DesktopController` actions in `generate_mock_response()` behind `is_creator=True`, switched `Brain` prompt building to async `abuild_system_prompt()`, enabled SQLite WAL mode, and added `ChessController.amake_bot_move()` offloaded via `asyncio.to_thread()`.
+- **Collab `/ws/collab` Hardening (`run.py`, `core/collab/manager.py`):** Enforced Origin validation, strict `shared_secret` verification on loopback when configured, and per-connection `_inbound_senders` tracking (`register_peer_sender()` / `unregister_peer_sender()`).
+
+### Browser Audio Unification & Frontend Hardening
+- **Unified Audio Streaming (`core/tts.py`, `core/singer.py`, `core/orchestrator.py`):** Added `tts.output_mode` (`"both" | "browser" | "server"`), `audio_chunk` WebSocket streaming (`{"audio_b64", "mime": "audio/mpeg", ...}`), dedicated `pygame.mixer.Sound` channel playback (eliminating `pygame.mixer.music` BGM contention), guaranteed `vocal_*.mp3` cleanup in `Singer.sing()`, `Orchestrator._speech_lock` serialization, and `_bg_tasks` cancellation in `Orchestrator.shutdown()`.
+- **Web Studio, OBS Overlay & Settings Sync (`web/app.js`, `web/overlay.js`, `web/overlay.css`, `web/settings.js`, `web/settings.css`, `web/style.css`, `core/config_manager.py`, `config/settings.json`):** Wired Web Audio API `AudioContext` + `AnalyserNode` RMS lip-sync and FIFO `audio_chunk` playback on `/` and `/overlay`, added `authFetch` + `escapeHtml()` XSS protection, added `@media (max-width: 900px)` responsive CSS, and synced `get_schema()` (`81` settings keys including `tts.output_mode`).
+
+### Packaging, Launcher & Tests
+- **Packaging & Launcher (`pyproject.toml`, `start.bat`, `.env.example`):** Added `pyproject.toml` with optional extras (`[stt-local]`, `[embeddings-local]`, `[dev]`), Windows one-click launcher `start.bat`, and marked reserved/future keys in `.env.example`.
+- **Tests (`tests/test_fase1_hardening.py`, `tests/test_desktop_companion.py`, `tests/test_tts.py`, `tests/test_streaming_tts.py`):** Added `tests/test_fase1_hardening.py`, mocked `DesktopController.launch_app` in `test_desktop_companion.py` (eliminating `notepad.exe` `ResourceWarning`), and updated TTS mocks for `pygame.mixer.Sound`.
+- **Verified Suite:** `283` Python unit/integration tests passing (`0` failures, `0` errors) + `tests/test_guard_runner.js` passing.
+
+---
+
 ## [2026-11-25] — Long-Term Autonomous Vision: Full-Duplex Voice & Barge-In, Closed-Loop Missions, AI Collab Protocol & Plugin SDK
 
 ### Pillar 1 — Full-Duplex Voice & Barge-In

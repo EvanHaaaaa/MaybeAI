@@ -25,6 +25,8 @@ class MemoryDatabase:
     def _get_connection(self) -> sqlite3.Connection:
         con = sqlite3.connect(str(self.db_path), timeout=10.0)
         con.row_factory = sqlite3.Row
+        con.execute("PRAGMA journal_mode=WAL;")
+        con.execute("PRAGMA synchronous=NORMAL;")
         return con
 
     def _init_db(self):

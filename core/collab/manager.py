@@ -2,6 +2,7 @@ import asyncio
 import inspect
 import os
 import time
+import uuid
 from collections import deque
 from typing import Any, Awaitable, Callable, Deque, Dict, Optional, Tuple
 
@@ -62,6 +63,7 @@ class CollabManager:
         self._ws_client: Optional[aiohttp.ClientWebSocketResponse] = None
         self._receive_task: Optional[asyncio.Task] = None
         self._inbound_send_cb: Optional[Callable[[Dict[str, Any]], Awaitable[Any]]] = None
+        self._inbound_senders: Dict[str, Callable[[Dict[str, Any]], Awaitable[Any]]] = {}
         self._on_reply_needed: Optional[Callable[[CollabEnvelope], Any]] = None
         self._lock = asyncio.Lock()
 
@@ -105,14 +107,45 @@ class CollabManager:
     def set_reply_callback(self, callback: Optional[Callable[[CollabEnvelope], Any]]) -> None:
         self._on_reply_needed = callback
 
-    def set_peer_sender(self, send_cb: Optional[Callable[[Dict[str, Any]], Awaitable[Any]]], peer_name: Optional[str] = None) -> None:
-        """Registers an inbound `/ws/collab` peer sender callback so replies reach the connected peer."""
+    def register_peer_sender(
+        self,
+        send_cb: Callable[[Dict[str, Any]], Awaitable[Any]],
+        peer_name: Optional[str] = None,
+        conn_id: Optional[str] = None,
+    ) -> str:
+        """Registers an inbound `/ws/collab` peer sender callback under a unique connection ID."""
+        sender_id = conn_id or uuid.uuid4().hex
+        self._inbound_senders[sender_id] = send_cb
         self._inbound_send_cb = send_cb
-        self.peer_connected = send_cb is not None
+        self.peer_connected = True
         if peer_name:
             self.connected_peer = peer_name
-        elif send_cb is None:
-            self.connected_peer = None
+        return sender_id
+
+    def unregister_peer_sender(self, conn_id: str) -> None:
+        """Removes a specific inbound `/ws/collab` peer sender callback without clearing other peers."""
+        self._inbound_senders.pop(conn_id, None)
+        if self._inbound_senders:
+            self._inbound_send_cb = next(reversed(self._inbound_senders.values()))
+            self.peer_connected = True
+        else:
+            self._inbound_send_cb = None
+            has_outbound = self._ws_client is not None and not self._ws_client.closed
+            if not has_outbound:
+                self.peer_connected = False
+                self.connected_peer = None
+
+    def set_peer_sender(self, send_cb: Optional[Callable[[Dict[str, Any]], Awaitable[Any]]], peer_name: Optional[str] = None) -> None:
+        """Registers or clears inbound `/ws/collab` peer sender callbacks."""
+        if send_cb is None:
+            self._inbound_senders.clear()
+            self._inbound_send_cb = None
+            has_outbound = self._ws_client is not None and not self._ws_client.closed
+            if not has_outbound:
+                self.peer_connected = False
+                self.connected_peer = None
+        else:
+            self.register_peer_sender(send_cb, peer_name=peer_name)
 
     async def _emit(self, event_name: str, payload: Dict[str, Any]) -> None:
         if self.event_bus is None:
@@ -179,6 +212,15 @@ class CollabManager:
             except Exception as exc:
                 print(f"[CollabManager] Outbound WS send failed: {exc}")
                 self.peer_connected = False
+        elif self._inbound_senders:
+            for sender_id, cb in list(self._inbound_senders.items()):
+                try:
+                    res = cb(data)
+                    if inspect.isawaitable(res):
+                        await res
+                    sent = True
+                except Exception as exc:
+                    print(f"[CollabManager] Inbound peer send failed ({sender_id}): {exc}")
         elif self._inbound_send_cb is not None:
             try:
                 res = self._inbound_send_cb(data)
@@ -500,6 +542,7 @@ class CollabManager:
 
     async def shutdown(self) -> None:
         await self.disconnect_peer()
+        self._inbound_senders.clear()
         self._inbound_send_cb = None
 
     def get_status(self) -> Dict[str, Any]:
