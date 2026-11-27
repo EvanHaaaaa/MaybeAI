@@ -11,3 +11,5 @@ numpy>=1.26.0
 python-chess>=1.11.0
 pillow>=10.0.0
 mss>=9.0.0
+tiktoken>=0.7.0
+yt-dlp>=2024.8.6
