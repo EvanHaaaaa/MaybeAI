@@ -6,7 +6,7 @@
     "port": 7860,
     "bot_enabled": true,
     "autonomous_mode": true,
-    "debug_mode": true,
+    "debug_mode": false,
     "language": "id-ID",
     "response_timeout_sec": 15
   },

@@ -160,8 +160,8 @@ flowchart TD
 - **YouTube Song Request & AI Cover / Auto-Karaoke (`core/youtube_karaoke.py`):** Mendukung permintaan lagu langsung dari URL YouTube yang tervalidasi SSRF (`validate_outbound_url`), mengunduh audio & subtitle VTT/SRT via `yt-dlp`, memisahkan vokal/instrumen dengan `ffmpeg` / `demucs` serta konversi suara opsional melalui `RVCVoiceConverter`, menyimpan cache di `data/karaoke_cache/`, dan memutar via `POST /api/performance/youtube`, WebSocket `performance_action` `"youtube"`, maupun bar kontrol di Dashboard UI.
 - **Katalog Lagu Kustom:** Mudah menambahkan lagu baru melalui `config/songs.json` dan folder `assets/songs/`.
 
-### 6. Minecraft Dual-Mode Engine & Portable Bridge
-- **Zero-Setup Node.js Portable:** MaybeAI menyertakan runtime Node.js portabel internal di Windows; Anda tidak perlu menginstal Node.js secara manual di komputer!
+### 6. Minecraft Dual-Mode Engine & Node.js Bridge
+- **Node.js Mineflayer Bridge (`minecraft/`):** Jalankan `cd minecraft && npm install` pada clone baru (Node.js 18+), atau letakkan runtime portabel lokal di `minecraft/node/` jika ingin mode portabel di Windows. (Lihat [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) untuk lisensi dependensi.)
 - **Mode Santai (Casual & Social):**
   - Menyapa player saat mendekat.
   - Membalas gerakan *friendly crouch / t-bag* sebagai tanda damai.

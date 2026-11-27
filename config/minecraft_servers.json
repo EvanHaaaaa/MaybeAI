@@ -1,18 +1,18 @@
 [
   {
-    "id": "raehost_server",
-    "name": "Raehost Server",
-    "host": "basic.raehost.com",
-    "port": 19214,
-    "version": "1.21.1",
-    "notes": "Community / Private Server (Paper 1.21.1)"
-  },
-  {
     "id": "localhost_server",
     "name": "Localhost LAN",
     "host": "localhost",
     "port": 25565,
     "version": "1.21.1",
-    "notes": "Default Singleplayer LAN"
+    "notes": "Default Singleplayer / Local LAN Server"
+  },
+  {
+    "id": "custom_server",
+    "name": "Custom Server (Placeholder)",
+    "host": "mc.example.com",
+    "port": 25565,
+    "version": "1.21.1",
+    "notes": "Replace with your own Minecraft server host and port"
   }
 ]

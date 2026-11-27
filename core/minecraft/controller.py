@@ -386,8 +386,8 @@ class MinecraftController:
             return "No server selected."
 
         name = self.active_server.get("name", "Minecraft Server")
-        host = self.active_server.get("host", "basic.raehost.com")
-        port = self.active_server.get("port", 19214)
+        host = self.active_server.get("host", "localhost")
+        port = self.active_server.get("port", 25565)
         version = self.active_server.get("version", "1.21.1")
 
         self.connection_status = "connecting"
