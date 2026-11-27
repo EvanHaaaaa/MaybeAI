@@ -1,5 +1,6 @@
 import os
 import re
+import math
 import json
 import time
 import asyncio
@@ -135,14 +136,107 @@ class ContextBudgetManager:
         "[PERFORMANCE",
     )
 
+    _ENCODING_CACHE: Dict[str, Any] = {}
+
     def __init__(self, settings: Optional[Dict[str, Any]] = None):
         self.settings = settings or {}
 
+    @classmethod
+    def _model_family_key(cls, model: Optional[str]) -> str:
+        name = (model or "").strip().lower()
+        if not name:
+            return "cl100k_base"
+        if any(prefix in name for prefix in ("gpt-4o", "o1", "o3", "o4")):
+            return "o200k_base"
+        if any(prefix in name for prefix in ("gpt-4", "gpt-3.5", "text-embedding")):
+            return "cl100k_base"
+        return name
+
+    @classmethod
+    def _get_tiktoken_encoding(cls, model: Optional[str] = None) -> Any:
+        """Returns a cached tiktoken encoding for the model family, or None if unavailable."""
+        family = cls._model_family_key(model)
+        if family in cls._ENCODING_CACHE:
+            return cls._ENCODING_CACHE[family]
+        try:
+            import tiktoken  # type: ignore
+        except ImportError:
+            return None
+
+        enc = None
+        try:
+            if model and family not in ("cl100k_base", "o200k_base"):
+                try:
+                    enc = tiktoken.encoding_for_model(model)
+                except KeyError:
+                    enc = tiktoken.get_encoding("cl100k_base")
+            else:
+                enc = tiktoken.get_encoding(family)
+        except Exception:
+            enc = None
+
+        if enc is not None:
+            cls._ENCODING_CACHE[family] = enc
+        return enc
+
     @staticmethod
-    def estimate_tokens(text: str) -> int:
+    def _fallback_estimate_tokens(text: str) -> int:
+        """
+        Subword/CJK/emoji-aware token estimator when tiktoken is unavailable.
+        Weights CJK ideographs/kana/hangul (~1.5 tokens/char), emoji/supplementary
+        Unicode (~2.5 tokens/char), non-ASCII (~1.0), ASCII punctuation (~0.6),
+        newlines (~0.5), ASCII alphanumerics (~0.25), and spaces (~0.1).
+        """
         if not text:
             return 0
-        return (len(text) + 3) // 4
+        total = 0.0
+        for ch in text:
+            code = ord(ch)
+            if code > 0xFFFF or (0x2600 <= code <= 0x27BF) or (0x2300 <= code <= 0x23FF):
+                total += 2.5
+            elif (
+                (0x4E00 <= code <= 0x9FFF)
+                or (0x3400 <= code <= 0x4DBF)
+                or (0x3040 <= code <= 0x30FF)
+                or (0xAC00 <= code <= 0xD7AF)
+                or (0xF900 <= code <= 0xFAFF)
+                or (0xFF00 <= code <= 0xFFEF)
+            ):
+                total += 1.5
+            elif code > 127:
+                total += 1.0
+            elif ch.isalnum():
+                total += 0.25
+            elif ch == "\n":
+                total += 0.5
+            elif ch.isspace():
+                total += 0.1
+            else:
+                total += 0.6
+        return max(1, math.ceil(total))
+
+    @classmethod
+    def estimate_tokens(cls, text: str, model: Optional[str] = None) -> int:
+        if not text:
+            return 0
+        enc = cls._get_tiktoken_encoding(model)
+        if enc is not None:
+            try:
+                return len(enc.encode(text))
+            except Exception:
+                pass
+        return cls._fallback_estimate_tokens(text)
+
+    def _resolve_model_for_provider(self, provider: str) -> str:
+        prov = (provider or "mock").strip().lower()
+        llm_cfg = self.settings.get("llm", {}) if isinstance(self.settings, dict) else {}
+        if prov == "openai":
+            return str(llm_cfg.get("model") or "gpt-4o-mini")
+        if prov == "gemini":
+            return str(llm_cfg.get("gemini_model") or "gemini-3-flash-preview")
+        if prov == "ollama":
+            return str(llm_cfg.get("ollama_model") or "llama3.2")
+        return prov
 
     def get_budget(self, provider: str) -> int:
         prov = (provider or "mock").strip().lower()
@@ -200,13 +294,14 @@ class ContextBudgetManager:
         current_message_text: str = "",
     ) -> Tuple[str, List[Dict[str, Any]]]:
         budget = self.get_budget(provider)
+        model_name = self._resolve_model_for_provider(provider)
         blocks = self._segment_system_prompt(system_prompt)
         history = [dict(item) for item in (history_items or [])]
-        msg_tokens = self.estimate_tokens(current_message_text)
+        msg_tokens = self.estimate_tokens(current_message_text, model=model_name)
 
         def total_tokens() -> int:
-            sys_tok = sum(self.estimate_tokens(text) for _, text in blocks)
-            hist_tok = sum(self.estimate_tokens(str(item.get("content", ""))) for item in history)
+            sys_tok = sum(self.estimate_tokens(text, model=model_name) for _, text in blocks)
+            hist_tok = sum(self.estimate_tokens(str(item.get("content", "")), model=model_name) for item in history)
             return sys_tok + hist_tok + msg_tokens
 
         def drop_tier(target_tier: str) -> bool:
@@ -234,10 +329,23 @@ class ContextBudgetManager:
 
         # Final safeguard if system_core + current_message_text still exceeds budget
         if total_tokens() > budget and blocks:
-            available_chars = max(0, (budget - msg_tokens) * 4)
+            hist_tok = sum(self.estimate_tokens(str(item.get("content", "")), model=model_name) for item in history)
+            remaining = max(0, budget - msg_tokens - hist_tok)
             joined = "\n\n".join(text for _, text in blocks)
-            if len(joined) > available_chars:
-                joined = joined[:available_chars].rstrip()
+            if remaining <= 0:
+                return "", history
+            if self.estimate_tokens(joined, model=model_name) > remaining:
+                lo, hi = 0, len(joined)
+                best = ""
+                while lo <= hi:
+                    mid = (lo + hi) // 2
+                    candidate = joined[:mid].rstrip()
+                    if self.estimate_tokens(candidate, model=model_name) <= remaining:
+                        best = candidate
+                        lo = mid + 1
+                    else:
+                        hi = mid - 1
+                joined = best
             return joined, history
 
         return "\n\n".join(text for _, text in blocks), history
@@ -284,6 +392,13 @@ class Brain:
     def _get_failover_timeout_sec(self) -> float:
         llm_cfg = self.settings.get("llm", {}) if isinstance(self.settings, dict) else {}
         return max(0.1, float(llm_cfg.get("failover_timeout_sec", 1.8)))
+
+    def _get_response_timeout_sec(self) -> float:
+        sys_cfg = self.settings.get("system", {}) if isinstance(self.settings, dict) else {}
+        try:
+            return max(0.05, float(sys_cfg.get("response_timeout_sec", 15.0) or 15.0))
+        except (TypeError, ValueError):
+            return 15.0
 
     def _get_streaming_timeout(self) -> aiohttp.ClientTimeout:
         """Returns streaming ClientTimeout: fast connect/failover, generous per-chunk sock_read."""
@@ -527,6 +642,8 @@ class Brain:
 
         response: Optional[str] = None
         chain = self._get_failover_chain(provider)
+        response_timeout = self._get_response_timeout_sec()
+        deadline = time.monotonic() + response_timeout
         for candidate in chain:
             if candidate == "mock":
                 response = self.conversation.generate_mock_response(
@@ -540,15 +657,27 @@ class Brain:
                     is_creator=is_creator
                 )
                 break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                print(f"[Brain Warning] Overall response_timeout_sec ({response_timeout:.2f}s) exceeded. Using persona fallback.")
+                break
             if not self._is_provider_configured(candidate):
                 continue
             if not self.circuit_breaker.allow_request(candidate):
                 continue
 
-            text, status_code, err = await self._call_provider_once(
-                candidate, system_prompt, user_name, message,
-                is_donation, donation_amount, image_base64
-            )
+            try:
+                text, status_code, err = await asyncio.wait_for(
+                    self._call_provider_once(
+                        candidate, system_prompt, user_name, message,
+                        is_donation, donation_amount, image_base64
+                    ),
+                    timeout=remaining,
+                )
+            except asyncio.TimeoutError:
+                self.circuit_breaker.record_failure(candidate, reason="response_timeout_sec exceeded")
+                print(f"[Brain Warning] Provider '{candidate}' exceeded response_timeout_sec ({response_timeout:.2f}s). Falling back.")
+                break
             if text:
                 self.circuit_breaker.record_success(candidate)
                 response = text

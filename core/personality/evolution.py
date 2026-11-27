@@ -90,12 +90,15 @@ class PersonalityEvolutionEngine:
     def __init__(
         self,
         storage_path: str = "data/personality/evolution.json",
-        second_brain_path: str = "data/second_brain/personality/evolution.md"
+        second_brain_path: str = "data/second_brain/personality/evolution.md",
+        dynamic_synthesis: bool = True,
     ):
         self.storage_path = Path(storage_path)
         self.second_brain_path = Path(second_brain_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self.second_brain_path.parent.mkdir(parents=True, exist_ok=True)
+        self.dynamic_synthesis: bool = bool(dynamic_synthesis)
+        self.evolution_log: List[Dict[str, Any]] = []
         self.profile = self._load_profile()
         self._update_archetype()
         self.sync_to_second_brain()
@@ -105,6 +108,8 @@ class PersonalityEvolutionEngine:
             try:
                 with open(self.storage_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    if isinstance(data.get("evolution_log"), list):
+                        self.evolution_log = list(data["evolution_log"])
                     return EvolutionProfile.from_dict(data)
             except Exception as e:
                 print(f"[PersonalityEngine] Error loading profile from {self.storage_path}: {e}")
@@ -112,8 +117,10 @@ class PersonalityEvolutionEngine:
 
     def save_profile(self):
         try:
+            payload = self.profile.to_dict()
+            payload["evolution_log"] = self.evolution_log[-100:]
             with open(self.storage_path, "w", encoding="utf-8") as f:
-                json.dump(self.profile.to_dict(), f, indent=2, ensure_ascii=False)
+                json.dump(payload, f, indent=2, ensure_ascii=False)
             self.sync_to_second_brain()
         except Exception as e:
             print(f"[PersonalityEngine] Error saving profile to {self.storage_path}: {e}")
@@ -490,9 +497,117 @@ _Catatan Arsitektur: Seluruh perubahan sifat dikontrol secara matematis dengan a
         except Exception as e:
             print(f"[PersonalityEngine] Error writing second brain: {e}")
 
+    def synthesize_from_reflection(
+        self,
+        reflection_summary: str,
+        mood_state: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Synthesizes bounded personality trait adjustments from a reflection summary
+        and current mood state, gated by `self.dynamic_synthesis`.
+        All traits are strictly bounded within [0.05, 0.98] and every applied
+        synthesis is recorded in the auditable `evolution_log`.
+        """
+        if not self.dynamic_synthesis:
+            return {
+                "applied": False,
+                "reason": "dynamic_synthesis_disabled",
+                "trait_changes": {},
+                "current_traits": dict(self.profile.traits),
+                "archetype": self.profile.archetype,
+            }
+
+        summary = (reflection_summary or "").strip()
+        lower = summary.lower()
+        mood_dims = {}
+        if isinstance(mood_state, dict):
+            raw_dims = mood_state.get("dimensions") if isinstance(mood_state.get("dimensions"), dict) else mood_state
+            for k in ("happiness", "annoyance", "curiosity", "excitement", "competitiveness"):
+                if k in raw_dims:
+                    mood_dims[k] = float(raw_dims[k])
+
+        raw_deltas: Dict[str, float] = {k: 0.0 for k in self.profile.traits}
+
+        keyword_rules = [
+            (("warm", "kind", "friend", "grateful", "hangat", "akrab", "sahabat", "care", "support"), TraitKey.WARMTH.value, +0.025),
+            (("win", "lose", "defeat", "rematch", "compete", "menang", "kalah", "kompetitif", "rival"), TraitKey.COMPETITIVENESS.value, +0.025),
+            (("confident", "proud", "succeed", "mastered", "berhasil", "percaya diri", "bangga"), TraitKey.CONFIDENCE.value, +0.025),
+            (("sassy", "roast", "sarcastic", "tease", "sarkas", "usil", "troll", "tsundere"), TraitKey.SASSINESS.value, +0.025),
+            (("learn", "strategy", "curious", "analyze", "filosofi", "strategi", "belajar", "taktik"), TraitKey.INTELLECT.value, +0.025),
+            (("doubt", "overwhelmed", "ragu", "insecure"), TraitKey.CONFIDENCE.value, -0.015),
+            (("lonely", "distant", "cuek", "cold"), TraitKey.WARMTH.value, -0.015),
+        ]
+        for keywords, trait_key, delta in keyword_rules:
+            if trait_key in raw_deltas and any(kw in lower for kw in keywords):
+                raw_deltas[trait_key] += delta
+
+        # Gentle mood-state coupling
+        if mood_dims.get("happiness", 0.0) >= 0.70:
+            raw_deltas[TraitKey.WARMTH.value] = raw_deltas.get(TraitKey.WARMTH.value, 0.0) + 0.010
+        if mood_dims.get("annoyance", 0.0) >= 0.60:
+            raw_deltas[TraitKey.SASSINESS.value] = raw_deltas.get(TraitKey.SASSINESS.value, 0.0) + 0.010
+        if mood_dims.get("curiosity", 0.0) >= 0.70:
+            raw_deltas[TraitKey.INTELLECT.value] = raw_deltas.get(TraitKey.INTELLECT.value, 0.0) + 0.010
+        if mood_dims.get("competitiveness", 0.0) >= 0.70:
+            raw_deltas[TraitKey.COMPETITIVENESS.value] = raw_deltas.get(TraitKey.COMPETITIVENESS.value, 0.0) + 0.010
+
+        actual_changes: Dict[str, float] = {}
+        for trait, delta in raw_deltas.items():
+            capped_delta = max(-0.05, min(0.05, delta))
+            curr = self.profile.traits[trait]
+            if capped_delta == 0.0:
+                # Still enforce strict [0.05, 0.98] invariant
+                clamped = round(max(0.05, min(0.98, curr)), 4)
+                self.profile.traits[trait] = clamped
+                continue
+            if capped_delta > 0:
+                eff = capped_delta * max(0.2, (1.0 - curr))
+            else:
+                eff = capped_delta * max(0.2, curr)
+            new_val = round(max(0.05, min(0.98, curr + eff)), 4)
+            diff = round(new_val - curr, 4)
+            self.profile.traits[trait] = new_val
+            if diff != 0.0:
+                actual_changes[trait] = diff
+
+        newly_unlocked = self._check_milestones()
+        self._update_archetype()
+
+        audit_entry = {
+            "id": f"synth_{uuid.uuid4().hex[:8]}",
+            "timestamp": time.time(),
+            "source": "reflection_synthesis",
+            "reflection_summary": summary[:300],
+            "mood_snapshot": mood_dims,
+            "trait_changes": actual_changes,
+            "traits_after": dict(self.profile.traits),
+            "bounds": [0.05, 0.98],
+        }
+        self.evolution_log.append(audit_entry)
+        if len(self.evolution_log) > 100:
+            self.evolution_log = self.evolution_log[-100:]
+
+        self.save_profile()
+
+        return {
+            "applied": True,
+            "trait_changes": actual_changes,
+            "current_traits": dict(self.profile.traits),
+            "archetype": self.profile.archetype,
+            "newly_unlocked_milestones": [m.to_dict() for m in newly_unlocked],
+            "audit_entry": audit_entry,
+        }
+
+    def get_evolution_log(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Returns the auditable personality synthesis evolution log."""
+        if limit <= 0:
+            return list(self.evolution_log)
+        return list(self.evolution_log[-limit:])
+
     def reset_to_factory_defaults(self):
         """Resets profile to initial baseline factory defaults."""
         self.profile = EvolutionProfile()
+        self.evolution_log = []
         self._update_archetype()
         self.save_profile()
 
@@ -504,6 +619,8 @@ _Catatan Arsitektur: Seluruh perubahan sifat dikontrol secara matematis dengan a
             "exp_to_next_level": self.profile.exp_to_next_level,
             "archetype": self.profile.archetype,
             "archetype_desc": self.profile.archetype_desc,
+            "dynamic_synthesis": self.dynamic_synthesis,
+            "evolution_log_count": len(self.evolution_log),
             "traits": {k: round(v, 4) for k, v in self.profile.traits.items()},
             "milestones": [m.to_dict() for m in self.profile.milestones],
             "history": [h.to_dict() for h in self.profile.history[-15:]]

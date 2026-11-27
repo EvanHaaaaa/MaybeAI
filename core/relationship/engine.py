@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import uuid
 import random
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -23,13 +24,16 @@ class RelationshipEngine:
     def __init__(
         self,
         storage_path: str = "data/relationships/relationships.json",
-        markdown_dir: str = "data/second_brain/relationships"
+        markdown_dir: str = "data/second_brain/relationships",
+        dynamic_synthesis: bool = True,
     ):
         self.storage_path = Path(storage_path)
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
         self.markdown_dir = Path(markdown_dir)
         self.markdown_dir.mkdir(parents=True, exist_ok=True)
 
+        self.dynamic_synthesis: bool = bool(dynamic_synthesis)
+        self.evolution_log: List[Dict[str, Any]] = []
         self.profiles: Dict[str, RelationshipProfile] = {}
         self._load_or_initialize_defaults()
 
@@ -39,6 +43,8 @@ class RelationshipEngine:
             try:
                 with open(self.storage_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
+                    if isinstance(data.get("evolution_log"), list):
+                        self.evolution_log = list(data["evolution_log"])
                     for item in data.get("profiles", []):
                         p = RelationshipProfile.from_dict(item)
                         self.profiles[p.username.lower()] = p
@@ -291,6 +297,120 @@ Affinity Metrics: Familiarity: {int(prof.familiarity * 100)}% | Trust: {int(prof
 BEHAVIORAL DIRECTIVE FOR {prof.username.upper()}:
 {tier_instructions}"""
 
+    def synthesize_from_reflection(
+        self,
+        reflection_summary: str,
+        mood_state: Optional[Dict[str, Any]] = None,
+        username: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Synthesizes bounded relationship dimension adjustments from a reflection summary
+        and current mood state, gated by `self.dynamic_synthesis`.
+        All adjusted metrics are strictly bounded within [0.05, 0.98] and recorded
+        in the auditable `evolution_log`.
+        """
+        if not self.dynamic_synthesis:
+            return {
+                "applied": False,
+                "reason": "dynamic_synthesis_disabled",
+                "updated_users": [],
+                "changes": {},
+            }
+
+        summary = (reflection_summary or "").strip()
+        lower = summary.lower()
+
+        # Resolve target profiles: explicit username, or profiles mentioned in summary
+        targets: List[RelationshipProfile] = []
+        if username:
+            targets.append(self.get_relationship(username))
+        else:
+            for key, prof in self.profiles.items():
+                if key in lower:
+                    targets.append(prof)
+
+        mood_dims: Dict[str, float] = {}
+        if isinstance(mood_state, dict):
+            raw_dims = mood_state.get("dimensions") if isinstance(mood_state.get("dimensions"), dict) else mood_state
+            for k in ("happiness", "annoyance", "curiosity", "excitement", "competitiveness"):
+                if k in raw_dims:
+                    mood_dims[k] = float(raw_dims[k])
+
+        deltas = {
+            "familiarity": 0.0,
+            "trust": 0.0,
+            "rivalry": 0.0,
+            "gaming_affinity": 0.0,
+            "affection": 0.0,
+        }
+
+        if any(w in lower for w in ("trust", "help", "kind", "friend", "grateful", "support", "percaya", "bantu", "hangat", "makasih")):
+            deltas["trust"] += 0.030
+            deltas["affection"] += 0.030
+            deltas["familiarity"] += 0.020
+        if any(w in lower for w in ("game", "minecraft", "coop", "mabar", "team", "mining")):
+            deltas["gaming_affinity"] += 0.030
+            deltas["familiarity"] += 0.020
+        if any(w in lower for w in ("rival", "chess", "catur", "rematch", "compete", "duel", "tease")):
+            deltas["rivalry"] += 0.030
+            deltas["familiarity"] += 0.020
+        if any(w in lower for w in ("betray", "rude", "ignore", "annoyed", "kasar", "kesal")):
+            deltas["trust"] -= 0.020
+            deltas["affection"] -= 0.020
+
+        if mood_dims.get("happiness", 0.0) >= 0.70:
+            deltas["affection"] += 0.010
+        if mood_dims.get("annoyance", 0.0) >= 0.65:
+            deltas["rivalry"] += 0.010
+            deltas["affection"] -= 0.010
+
+        user_changes: Dict[str, Dict[str, float]] = {}
+        updated_users: List[str] = []
+
+        for prof in targets:
+            changes: Dict[str, float] = {}
+            for field_name, delta in deltas.items():
+                capped = max(-0.05, min(0.05, delta))
+                curr = float(getattr(prof, field_name))
+                new_val = round(max(0.05, min(0.98, curr + capped)), 4)
+                setattr(prof, field_name, new_val)
+                diff = round(new_val - curr, 4)
+                if diff != 0.0:
+                    changes[field_name] = diff
+            prof.recalculate_tier()
+            self.sync_to_markdown(prof.username)
+            updated_users.append(prof.username)
+            user_changes[prof.username] = changes
+
+        audit_entry = {
+            "id": f"rel_synth_{uuid.uuid4().hex[:8]}",
+            "timestamp": time.time(),
+            "source": "reflection_synthesis",
+            "reflection_summary": summary[:300],
+            "mood_snapshot": mood_dims,
+            "updated_users": updated_users,
+            "changes": user_changes,
+            "bounds": [0.05, 0.98],
+        }
+        self.evolution_log.append(audit_entry)
+        if len(self.evolution_log) > 100:
+            self.evolution_log = self.evolution_log[-100:]
+
+        self.save()
+
+        return {
+            "applied": True,
+            "updated_users": updated_users,
+            "changes": user_changes,
+            "audit_entry": audit_entry,
+        }
+
+    def get_evolution_log(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Returns the auditable relationship synthesis evolution log."""
+        if limit <= 0:
+            return list(self.evolution_log)
+        return list(self.evolution_log[-limit:])
+
     def get_state(self) -> Dict[str, Any]:
         """Telemetry snapshot for WebSocket broadcasting and dashboard UI."""
         profiles_dict = {uname: p.to_dict() for uname, p in self.profiles.items()}
@@ -301,7 +421,9 @@ BEHAVIORAL DIRECTIVE FOR {prof.username.upper()}:
         return {
             "profiles": profiles_dict,
             "total_users": len(self.profiles),
-            "tier_counts": tier_counts
+            "tier_counts": tier_counts,
+            "dynamic_synthesis": self.dynamic_synthesis,
+            "evolution_log_count": len(self.evolution_log),
         }
 
     def sync_to_markdown(self, username: str):
@@ -352,9 +474,10 @@ BEHAVIORAL DIRECTIVE FOR {prof.username.upper()}:
             return None
 
     def save(self):
-        """Persists all relationships to JSON."""
+        """Persists all relationships and evolution log to JSON."""
         data = {
-            "profiles": [p.to_dict() for p in self.profiles.values()]
+            "profiles": [p.to_dict() for p in self.profiles.values()],
+            "evolution_log": self.evolution_log[-100:],
         }
         try:
             with open(self.storage_path, "w", encoding="utf-8") as f:

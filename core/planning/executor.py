@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from core.planning.models import Goal, GoalCategory, GoalStatus, GoalTier, Subtask
 from core.planning.engine import GoalEngine
-from core.planning.replanner import MAX_REPLAN_ATTEMPTS
+from core.planning.replanner import MAX_REPLAN_ATTEMPTS, StrategyReplanner
 from core.desktop.obs_client import DEFAULT_SCENE_MAP
 
 
@@ -39,6 +39,7 @@ class AutonomousMissionExecutor:
         scene_map: Optional[Dict[str, str]] = None,
         telemetry_timeout_sec: float = 2.0,
         telemetry_poll_interval_sec: float = 0.2,
+        use_causal_reflection: Optional[bool] = None,
     ):
         self.goal_engine = goal_engine
         self.mood_engine = mood_engine
@@ -54,6 +55,11 @@ class AutonomousMissionExecutor:
         self.scene_switcher = scene_switcher
         self.telemetry_timeout_sec = max(0.05, float(telemetry_timeout_sec))
         self.telemetry_poll_interval_sec = max(0.01, float(telemetry_poll_interval_sec))
+        self.use_causal_reflection: bool = (
+            StrategyReplanner.use_causal_reflection
+            if use_causal_reflection is None
+            else bool(use_causal_reflection)
+        )
         self.scene_map: Dict[str, str] = dict(DEFAULT_SCENE_MAP)
         if scene_map:
             for k, v in scene_map.items():
@@ -575,6 +581,12 @@ class AutonomousMissionExecutor:
                         self.mood_engine.apply_stimulus("goal_milestone_completed")
 
                 self.last_error = None
+                if self.use_causal_reflection:
+                    StrategyReplanner.record_strategy_outcome(
+                        strategy=active_sub.strategy or plan["action_name"],
+                        success=True,
+                        category=plan["domain"],
+                    )
                 self.goal_engine.save()
 
                 updated_goal = self.goal_engine.get_active_goal()
@@ -607,13 +619,50 @@ class AutonomousMissionExecutor:
             except Exception as exc:
                 reason = str(exc) or f"{plan['domain']} execution failed"
                 self.last_error = reason
+                recent_lessons = (
+                    StrategyReplanner.sync_goal_reflections(self.goal_engine.get_all_goals(), limit=5)
+                    if self.use_causal_reflection
+                    else []
+                )
                 if active_sub.attempts >= MAX_REPLAN_ATTEMPTS:
                     active_sub.mark_failed(reason)
                     active_goal.recalculate_progress()
                     active_goal.status = GoalStatus.FAILED.value
-                    active_goal.reflection = (
-                        f"Subtask '{active_sub.title}' gagal setelah {active_sub.attempts} percobaan: {reason}."
-                    )
+                    if self.use_causal_reflection:
+                        StrategyReplanner.record_strategy_outcome(
+                            strategy=active_sub.strategy or plan["action_name"],
+                            success=False,
+                            category=plan["domain"],
+                            failure_reason=reason,
+                        )
+                        diagnosis = StrategyReplanner.diagnose_failure(
+                            failed_subtask=active_sub,
+                            failure_reason=reason,
+                            goal=active_goal,
+                            reflections=recent_lessons,
+                        )
+                        chosen_alt = StrategyReplanner.select_best_strategy(
+                            category=diagnosis["category"],
+                            root_cause=diagnosis["root_cause"],
+                            failed_strategies=diagnosis["failed_strategies"],
+                            reflections=diagnosis["matching_lessons"],
+                            failed_subtask=active_sub,
+                            failure_reason=reason,
+                        )
+                        lesson = active_goal.add_reflection_lesson(
+                            strategy_used=diagnosis["failed_strategy"],
+                            failure_reason=reason,
+                            root_cause=diagnosis["root_cause"],
+                            recommended_alternative=chosen_alt["strategy"],
+                            category=diagnosis["category"],
+                            subtask_title=active_sub.title,
+                            outcome="failed",
+                        )
+                        StrategyReplanner.record_reflection_lesson(lesson)
+                    else:
+                        active_goal.reflection = (
+                            f"Subtask '{active_sub.title}' gagal setelah {active_sub.attempts} percobaan: {reason}."
+                        )
                     fail_speech = (
                         f"[emotion: sad] Aduh chat, misi '{active_goal.title}' gagal setelah "
                         f"{MAX_REPLAN_ATTEMPTS} kali percobaan ({reason}). Kita hentikan dulu misi ini ya. [action: sigh]"
@@ -651,7 +700,12 @@ class AutonomousMissionExecutor:
                         "goal": active_goal.to_dict(),
                     }
 
-                new_sub, replan_speech = self.goal_engine.fail_and_replan_active_subtask(reason)
+                prev_causal = StrategyReplanner.use_causal_reflection
+                StrategyReplanner.use_causal_reflection = self.use_causal_reflection
+                try:
+                    new_sub, replan_speech = self.goal_engine.fail_and_replan_active_subtask(reason)
+                finally:
+                    StrategyReplanner.use_causal_reflection = prev_causal
                 if self.mood_engine and hasattr(self.mood_engine, "apply_stimulus"):
                     self.mood_engine.apply_stimulus("goal_strategy_failed")
                 if replan_speech:
@@ -775,6 +829,7 @@ class AutonomousMissionExecutor:
         human_approval_required: Optional[bool] = None,
         tick_interval_sec: Optional[float] = None,
         approval_timeout_sec: Optional[float] = None,
+        use_causal_reflection: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Updates runtime executor settings safely."""
         if enabled is not None:
@@ -785,6 +840,8 @@ class AutonomousMissionExecutor:
             self.tick_interval_sec = max(0.05, float(tick_interval_sec))
         if approval_timeout_sec is not None:
             self.approval_timeout_sec = max(0.0, float(approval_timeout_sec))
+        if use_causal_reflection is not None:
+            self.use_causal_reflection = bool(use_causal_reflection)
         status = self.get_status()
         self._emit_event_sync("mission.status", status)
         return status
@@ -798,6 +855,7 @@ class AutonomousMissionExecutor:
             "enabled": self.enabled,
             "is_running": self.is_running,
             "is_paused": self.is_paused,
+            "use_causal_reflection": bool(self.use_causal_reflection),
             "human_approval_required": self.human_approval_required,
             "approval_timeout_sec": self.approval_timeout_sec,
             "tick_interval_sec": self.tick_interval_sec,

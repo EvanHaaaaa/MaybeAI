@@ -56,7 +56,8 @@ class ConfigManager:
             "confidence": 60,
             "roasting_level": 55,
             "response_creativity": 80,
-            "custom_instructions": ""
+            "custom_instructions": "",
+            "dynamic_synthesis": True
         },
         "memory": {
             "enabled": True,
@@ -67,7 +68,9 @@ class ConfigManager:
             "similarity_threshold": 0.70,
             "auto_extract": True,
             "embedding_provider": "auto",
-            "vector_scan_limit": 2000
+            "vector_scan_limit": 2000,
+            "ann_backend": "auto",
+            "consolidation_enabled": True
         },
         "mood": {
             "enabled": True,
@@ -223,6 +226,9 @@ class ConfigManager:
             "cooldown_sec": 30.0,
             "auto_clip_vertical": False,
             "vod_summary_enabled": True
+        },
+        "planning": {
+            "use_causal_reflection": True
         }
     }
 
@@ -558,6 +564,15 @@ class ConfigManager:
                 "default": "",
                 "restart_required": False
             },
+            {
+                "path": "personality.dynamic_synthesis",
+                "category": "personality",
+                "label": "Dynamic Personality Synthesis",
+                "description": "Aktifkan sintesis kepribadian & hubungan dinamis berbasis refleksi dan mood.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
 
             # 4. Memory & Second Brain
             {
@@ -603,6 +618,30 @@ class ConfigManager:
                     {"label": "Hash (Offline Zero-Dependency Fallback)", "value": "hash"}
                 ],
                 "default": "auto",
+                "restart_required": False
+            },
+            {
+                "path": "memory.ann_backend",
+                "category": "memory",
+                "label": "ANN Vector Index Backend",
+                "description": "Backend indeks Approximate Nearest Neighbor untuk pencarian memori skala besar.",
+                "type": "select",
+                "options": [
+                    {"label": "Auto (Best Available)", "value": "auto"},
+                    {"label": "HNSW (hnswlib)", "value": "hnsw"},
+                    {"label": "FAISS", "value": "faiss"},
+                    {"label": "Linear Scan", "value": "linear"}
+                ],
+                "default": "auto",
+                "restart_required": False
+            },
+            {
+                "path": "memory.consolidation_enabled",
+                "category": "memory",
+                "label": "Memory Consolidation Enabled",
+                "description": "Aktifkan konsolidasi & peringkasan memori episodik secara periodik.",
+                "type": "toggle",
+                "default": True,
                 "restart_required": False
             },
 
@@ -1182,8 +1221,8 @@ class ConfigManager:
             {
                 "path": "performance.max_concurrent_tasks",
                 "category": "performance",
-                "label": "Max Concurrent Tasks (Advisory)",
-                "description": "Reserved/advisory batas antrean tugas simultan di master orchestrator loop.",
+                "label": "Max Concurrent Tasks",
+                "description": "Batas maksimum tugas latar belakang simultan yang dijadwalkan di orchestrator.",
                 "type": "number",
                 "min": 1,
                 "max": 10,
@@ -1193,8 +1232,8 @@ class ConfigManager:
             {
                 "path": "performance.websocket_ping_interval_sec",
                 "category": "performance",
-                "label": "WebSocket Keepalive Ping (Advisory)",
-                "description": "Reserved/advisory interval heartbeat ping ke dashboard Web UI.",
+                "label": "WebSocket Keepalive Ping (sec)",
+                "description": "Interval heartbeat ping ke dashboard Web UI dalam detik.",
                 "type": "number",
                 "min": 5,
                 "max": 120,
@@ -1204,8 +1243,8 @@ class ConfigManager:
             {
                 "path": "performance.audio_buffer_size_kb",
                 "category": "performance",
-                "label": "Audio Buffer Size KB (Advisory)",
-                "description": "Reserved/advisory ukuran buffer audio streaming dalam kilobyte.",
+                "label": "Audio Buffer Size (KB)",
+                "description": "Ukuran buffer audio streaming dalam kilobyte.",
                 "type": "number",
                 "min": 16,
                 "max": 4096,
@@ -1557,12 +1596,21 @@ class ConfigManager:
             {
                 "path": "system.response_timeout_sec",
                 "category": "general",
-                "label": "Response Timeout (Advisory)",
-                "description": "Reserved/advisory batas waktu respons pemrosesan dalam detik.",
+                "label": "Response Timeout (sec)",
+                "description": "Batas waktu maksimum respons pemrosesan LLM dalam detik.",
                 "type": "number",
                 "min": 1,
                 "max": 300,
                 "default": 15,
+                "restart_required": False
+            },
+            {
+                "path": "planning.use_causal_reflection",
+                "category": "autonomous",
+                "label": "Causal Planning Reflection",
+                "description": "Aktifkan refleksi kausal saat menyusun dan mengevaluasi langkah misi otonom.",
+                "type": "toggle",
+                "default": True,
                 "restart_required": False
             },
             {

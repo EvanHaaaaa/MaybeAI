@@ -36,7 +36,8 @@
     "confidence": 60,
     "roasting_level": 55,
     "response_creativity": 80,
-    "custom_instructions": ""
+    "custom_instructions": "",
+    "dynamic_synthesis": true
   },
   "memory": {
     "enabled": true,
@@ -47,7 +48,9 @@
     "similarity_threshold": 0.7,
     "auto_extract": true,
     "embedding_provider": "auto",
-    "vector_scan_limit": 2000
+    "vector_scan_limit": 2000,
+    "ann_backend": "auto",
+    "consolidation_enabled": true
   },
   "mood": {
     "enabled": true,
@@ -205,5 +208,8 @@
     "cooldown_sec": 30.0,
     "auto_clip_vertical": false,
     "vod_summary_enabled": true
+  },
+  "planning": {
+    "use_causal_reflection": true
   }
 }

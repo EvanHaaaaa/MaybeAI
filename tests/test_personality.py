@@ -141,6 +141,48 @@ class TestPersonalityEvolution(unittest.TestCase):
         self.assertIn("kompetitif", resp.lower())
         self.assertIn("kekalahan", resp.lower())
 
+    def test_synthesize_from_reflection_bounds_and_audit_log(self):
+        """H4-05: Reflection synthesis adjusts traits within [0.05, 0.98] and logs audit trail."""
+        mood_state = {"dimensions": {"happiness": 0.85, "annoyance": 0.10, "curiosity": 0.80, "excitement": 0.70, "competitiveness": 0.85}}
+        initial_warmth = self.engine.profile.traits[TraitKey.WARMTH.value]
+
+        res = self.engine.synthesize_from_reflection(
+            "Great coop stream! Learned new strategy and felt warm support from friends.",
+            mood_state=mood_state,
+        )
+        self.assertTrue(res["applied"])
+        self.assertGreater(self.engine.profile.traits[TraitKey.WARMTH.value], initial_warmth)
+
+        log = self.engine.get_evolution_log()
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["source"], "reflection_synthesis")
+        self.assertEqual(log[0]["bounds"], [0.05, 0.98])
+
+        # Repeated extreme synthesis must remain strictly within [0.05, 0.98]
+        for _ in range(100):
+            self.engine.synthesize_from_reflection("win compete rematch proud confident warm learn", mood_state=mood_state)
+        for val in self.engine.profile.traits.values():
+            self.assertGreaterEqual(val, 0.05)
+            self.assertLessEqual(val, 0.98)
+
+        # Verify audit log persists across reload
+        reloaded = PersonalityEvolutionEngine(storage_path=self.storage_path, second_brain_path=self.sb_path)
+        self.assertGreater(len(reloaded.get_evolution_log()), 1)
+
+    def test_synthesize_from_reflection_gated_by_dynamic_synthesis(self):
+        """H4-05: dynamic_synthesis=False gates reflection-based trait adjustments."""
+        gated_engine = PersonalityEvolutionEngine(
+            storage_path=self.storage_path,
+            second_brain_path=self.sb_path,
+            dynamic_synthesis=False,
+        )
+        before = dict(gated_engine.profile.traits)
+        res = gated_engine.synthesize_from_reflection("win rematch proud warm learn")
+        self.assertFalse(res["applied"])
+        self.assertEqual(res["reason"], "dynamic_synthesis_disabled")
+        self.assertEqual(gated_engine.profile.traits, before)
+        self.assertEqual(len(gated_engine.get_evolution_log()), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

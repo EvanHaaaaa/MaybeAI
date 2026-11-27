@@ -1,18 +1,135 @@
 import re
 import uuid
 from typing import List, Dict, Any, Optional
-from core.planning.models import Goal, Subtask, GoalTier, GoalCategory, GoalStatus
+from core.planning.models import (
+    Goal,
+    Subtask,
+    GoalTier,
+    GoalCategory,
+    GoalStatus,
+    ReflectionLesson,
+    parse_reflection_lesson,
+)
+
+
+MAX_DECOMPOSER_LESSONS = 5
 
 
 class GoalDecomposer:
     """
     Intelligently breaks high-level goals into actionable, sequential subtasks.
     Contains specialized decompositions for Minecraft, Chess, Social interactions,
-    and Stream challenges, with automated recipe recognition.
+    and Stream challenges, with automated recipe recognition and reflection-guided adaptation.
     """
 
     @classmethod
-    def decompose(cls, goal_title: str, description: str = "", tier: str = GoalTier.DAILY.value, category: str = GoalCategory.GENERAL.value) -> List[Subtask]:
+    def _resolve_lessons(
+        cls,
+        reflections: Optional[List[Any]],
+        category: str,
+        max_lessons: int = MAX_DECOMPOSER_LESSONS,
+    ) -> List[ReflectionLesson]:
+        from core.planning.replanner import StrategyReplanner
+
+        cap = max(1, min(int(max_lessons), MAX_DECOMPOSER_LESSONS))
+        if not StrategyReplanner.use_causal_reflection and reflections is None:
+            return []
+
+        resolved: List[ReflectionLesson] = []
+        if reflections is not None:
+            for item in reflections:
+                parsed = parse_reflection_lesson(item)
+                if parsed is not None:
+                    resolved.append(parsed)
+        elif StrategyReplanner.use_causal_reflection:
+            resolved.extend(StrategyReplanner.get_recent_lessons(category=category, limit=cap))
+
+        return resolved[-cap:]
+
+    @classmethod
+    def build_reflection_context(
+        cls,
+        reflections: Optional[List[Any]],
+        category: str = GoalCategory.GENERAL.value,
+        max_lessons: int = MAX_DECOMPOSER_LESSONS,
+    ) -> str:
+        """Formats bounded recent reflection lessons into a concise prompt/prior summary."""
+        lessons = cls._resolve_lessons(reflections, category=category, max_lessons=max_lessons)
+        if not lessons:
+            return ""
+        lines = []
+        for idx, lesson in enumerate(lessons, 1):
+            lines.append(
+                f"{idx}. [{lesson.root_cause}] Avoid '{lesson.strategy_used or lesson.subtask_title}' "
+                f"-> Prefer '{lesson.recommended_alternative}'"
+            )
+        return "\n".join(lines)
+
+    @classmethod
+    def _apply_reflection_lessons(
+        cls,
+        subtasks: List[Subtask],
+        lessons: List[ReflectionLesson],
+        category: str,
+    ) -> List[Subtask]:
+        if not lessons:
+            return subtasks
+
+        from core.planning.replanner import StrategyReplanner
+
+        for sub in subtasks:
+            sub_strat_norm = (sub.strategy or "").strip().lower()
+            sub_title_norm = (sub.title or "").strip().lower()
+            for lesson in reversed(lessons):
+                lesson_cat = (lesson.category or "").strip().lower()
+                if lesson_cat and lesson_cat != GoalCategory.GENERAL.value and sub.category != lesson_cat and category != lesson_cat:
+                    continue
+                failed_strat_norm = (lesson.strategy_used or "").strip().lower()
+                failed_title_norm = (lesson.subtask_title or "").strip().lower()
+                strategy_matches = bool(
+                    failed_strat_norm
+                    and (failed_strat_norm == sub_strat_norm or failed_strat_norm in sub_strat_norm or sub_strat_norm in failed_strat_norm)
+                )
+                title_matches = bool(
+                    failed_title_norm
+                    and (failed_title_norm == sub_title_norm or failed_title_norm in sub_title_norm)
+                )
+                if not (strategy_matches or title_matches):
+                    continue
+
+                alt = (lesson.recommended_alternative or "").strip()
+                if not alt or alt.lower() == sub_strat_norm:
+                    chosen = StrategyReplanner.select_best_strategy(
+                        category=sub.category or category,
+                        root_cause=lesson.root_cause,
+                        failed_strategies=[sub.strategy, lesson.strategy_used],
+                        reflections=lessons,
+                        failed_subtask=sub,
+                        failure_reason=lesson.failure_reason,
+                    )
+                    alt = chosen["strategy"]
+                sub.alternative_strategy = alt
+                sub.strategy = alt
+                sub.description = f"{sub.description} [Adapted from reflection: {lesson.root_cause}]".strip()
+                break
+        return subtasks
+
+    @classmethod
+    def decompose(
+        cls,
+        goal_title: str,
+        description: str = "",
+        tier: str = GoalTier.DAILY.value,
+        category: str = GoalCategory.GENERAL.value,
+        reflections: Optional[List[Any]] = None,
+        max_lessons: int = MAX_DECOMPOSER_LESSONS,
+    ) -> List[Subtask]:
+        lessons = cls._resolve_lessons(reflections, category=category, max_lessons=max_lessons)
+        subtasks = cls._decompose_base(goal_title=goal_title, description=description, tier=tier, category=category)
+        return cls._apply_reflection_lessons(subtasks, lessons, category=category)
+
+    @classmethod
+    def _decompose_base(cls, goal_title: str, description: str = "", tier: str = GoalTier.DAILY.value, category: str = GoalCategory.GENERAL.value) -> List[Subtask]:
         lower = (goal_title + " " + description).lower()
 
         # 1. Minecraft: Membangun rumah (Build House)

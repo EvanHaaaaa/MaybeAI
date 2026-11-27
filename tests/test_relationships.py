@@ -213,6 +213,44 @@ class TestConversationAndBrainIntegration(unittest.TestCase):
         resp_trusted = self.conv.generate_mock_response("Creator", "Capek banget hari ini Eve")
         self.assertTrue(any(word in resp_trusted.lower() for word in ["istirahat", "creator", "semangat", "martabak", "teman", "tenang", "sahabat"]))
 
+    def test_synthesize_from_reflection_bounds_and_audit_log(self):
+        """H4-05: Relationship synthesis adjusts metrics within [0.05, 0.98] and records audit log."""
+        rel_engine = self.conv.relationships
+        mood_state = {"dimensions": {"happiness": 0.85, "annoyance": 0.10}}
+        before_trust = rel_engine.get_relationship("Steve").trust
+
+        res = rel_engine.synthesize_from_reflection(
+            "Steve was very kind and helpful during the Minecraft coop stream.",
+            mood_state=mood_state,
+            username="Steve",
+        )
+        self.assertTrue(res["applied"])
+        self.assertIn("Steve", res["updated_users"])
+        self.assertGreater(rel_engine.get_relationship("Steve").trust, before_trust)
+
+        log = rel_engine.get_evolution_log()
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["bounds"], [0.05, 0.98])
+
+        # Repeated synthesis must stay strictly within [0.05, 0.98]
+        for _ in range(50):
+            rel_engine.synthesize_from_reflection("trust kind friend game coop", mood_state=mood_state, username="Steve")
+        steve = rel_engine.get_relationship("Steve")
+        for metric in (steve.familiarity, steve.trust, steve.rivalry, steve.gaming_affinity, steve.affection):
+            self.assertGreaterEqual(metric, 0.05)
+            self.assertLessEqual(metric, 0.98)
+
+    def test_synthesize_from_reflection_gated_by_dynamic_synthesis(self):
+        """H4-05: dynamic_synthesis=False disables relationship synthesis."""
+        rel_engine = self.conv.relationships
+        rel_engine.dynamic_synthesis = False
+        before_trust = rel_engine.get_relationship("Steve").trust
+
+        res = rel_engine.synthesize_from_reflection("Steve was kind and helpful", username="Steve")
+        self.assertFalse(res["applied"])
+        self.assertEqual(res["reason"], "dynamic_synthesis_disabled")
+        self.assertEqual(rel_engine.get_relationship("Steve").trust, before_trust)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 import unittest
 import time
-from core.mood.engine import MoodEngine
+from core.mood.engine import MoodEngine, score_affective_memories
 from core.conversation.engine import ConversationEngine
 from core.brain import Brain
 
@@ -88,6 +88,42 @@ class TestMoodEngine(unittest.TestCase):
         self.engine.reset_to_baseline()
         self.assertAlmostEqual(self.engine.dimensions["annoyance"], 0.10, places=2)
         self.assertAlmostEqual(self.engine.dimensions["happiness"], 0.60, places=2)
+
+    def test_get_emotional_valence(self):
+        self.engine.reset_to_baseline()
+        base_v = self.engine.get_emotional_valence()
+        self.assertIn("valence", base_v)
+        self.assertIn("arousal", base_v)
+        self.assertGreaterEqual(base_v["valence"], -1.0)
+        self.assertLessEqual(base_v["valence"], 1.0)
+
+        self.engine.apply_stimulus("donation", intensity=1.5)
+        happy_v = self.engine.get_emotional_valence()
+        self.assertGreater(happy_v["valence"], base_v["valence"])
+
+        self.engine.reset_to_baseline()
+        self.engine.apply_stimulus("insult", intensity=2.0)
+        annoyed_v = self.engine.get_emotional_valence()
+        self.assertLess(annoyed_v["valence"], 0.0)
+
+    def test_score_affective_memories_reranking(self):
+        memories = [
+            {"id": "neutral", "content": "Checked inventory", "score": 0.60, "valence": 0.0},
+            {"id": "sad_angry", "content": "Lost all diamonds in lava", "score": 0.60, "valence": -0.85, "dominant_mood": "SASSY_ANNOYED"},
+            {"id": "joyful", "content": "Won the chess match!", "score": 0.60, "valence": 0.85, "dominant_mood": "HYPE_EXCITED"},
+        ]
+
+        # Under excited/happy mood, joyful high-valence memory surfaces first
+        self.engine.reset_to_baseline()
+        self.engine.apply_stimulus("donation", intensity=1.5)
+        ranked_happy = self.engine.score_affective_memories(memories)
+        self.assertEqual(ranked_happy[0]["id"], "joyful")
+
+        # Under annoyed/negative mood, negative-valence matching memory surfaces first
+        self.engine.reset_to_baseline()
+        self.engine.apply_stimulus("insult", intensity=2.0)
+        ranked_annoyed = score_affective_memories(memories, self.engine.get_emotional_valence())
+        self.assertEqual(ranked_annoyed[0]["id"], "sad_angry")
 
 
 class TestMoodConversationIntegration(unittest.TestCase):

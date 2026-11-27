@@ -984,6 +984,20 @@ async def websocket_endpoint(websocket: WebSocket):
 
     sender_task = asyncio.create_task(_outbound_sender())
 
+    async def _ws_ping_loop() -> None:
+        while True:
+            perf_cfg = config_mgr.settings.get("performance", {}) if isinstance(config_mgr.settings, dict) else {}
+            try:
+                interval = max(0.05, float(perf_cfg.get("websocket_ping_interval_sec", 30) or 30))
+            except (TypeError, ValueError):
+                interval = 30.0
+            await asyncio.sleep(interval)
+            if sender_task.done():
+                return
+            _enqueue_outbound({"type": "ping", "ts": time.time()})
+
+    ping_task = asyncio.create_task(_ws_ping_loop())
+
     def _enqueue_outbound(event: Dict[str, Any]) -> None:
         if sender_task.done():
             return
@@ -1143,13 +1157,16 @@ async def websocket_endpoint(websocket: WebSocket):
             return
         if voice_worker_task is None or voice_worker_task.done():
             voice_worker_task = asyncio.create_task(_voice_worker())
-        if voice_queue.full():
-            try:
-                voice_queue.get_nowait()
-                voice_queue.task_done()
-            except asyncio.QueueEmpty:
-                pass
-        voice_queue.put_nowait((pcm_bytes, voice_user, voice_lang))
+        chunk_limit = max(16384, int(getattr(orchestrator, "audio_buffer_size_bytes", 256 * 1024) or 256 * 1024))
+        for offset in range(0, len(pcm_bytes), chunk_limit):
+            segment = pcm_bytes[offset:offset + chunk_limit]
+            if voice_queue.full():
+                try:
+                    voice_queue.get_nowait()
+                    voice_queue.task_done()
+                except asyncio.QueueEmpty:
+                    pass
+            voice_queue.put_nowait((segment, voice_user, voice_lang))
 
     try:
         while True:
@@ -1881,6 +1898,9 @@ async def websocket_endpoint(websocket: WebSocket):
             if not voice_worker_task.done():
                 voice_worker_task.cancel()
                 await asyncio.gather(voice_worker_task, return_exceptions=True)
+        if not ping_task.done():
+            ping_task.cancel()
+            await asyncio.gather(ping_task, return_exceptions=True)
         if not sender_task.done():
             await asyncio.sleep(0)
             if not sender_task.done():

@@ -232,6 +232,20 @@ class Orchestrator:
             event_bus=self.event_bus,
         )
 
+        perf_cfg = settings.get("performance", {}) if isinstance(settings, dict) else {}
+        try:
+            self._max_concurrent_tasks: int = max(1, int(perf_cfg.get("max_concurrent_tasks", 3) or 3))
+        except (TypeError, ValueError):
+            self._max_concurrent_tasks = 3
+        self._bg_task_semaphore: asyncio.Semaphore = asyncio.Semaphore(self._max_concurrent_tasks)
+        try:
+            self.audio_buffer_size_kb: int = max(16, int(perf_cfg.get("audio_buffer_size_kb", 256) or 256))
+        except (TypeError, ValueError):
+            self.audio_buffer_size_kb = 256
+        self.audio_buffer_size_bytes: int = self.audio_buffer_size_kb * 1024
+        setattr(self.tts, "audio_buffer_size_kb", self.audio_buffer_size_kb)
+        setattr(self.voice_session, "audio_buffer_size_kb", self.audio_buffer_size_kb)
+
         self.is_running = False
         self._busy_lock = asyncio.Lock()
         self._busy_owner_task: Optional[asyncio.Task] = None
@@ -285,8 +299,16 @@ class Orchestrator:
             return await self.obs.save_replay_buffer()
         return {"success": False, "skipped": True}
 
-    def _spawn_bg_task(self, coro) -> asyncio.Task:
-        task = asyncio.create_task(coro)
+    def _spawn_bg_task(self, coro, *, bounded: bool = True) -> asyncio.Task:
+        if bounded:
+            async def _bounded_runner():
+                async with self._bg_task_semaphore:
+                    return await coro
+            coro_to_run = _bounded_runner()
+        else:
+            coro_to_run = coro
+
+        task = asyncio.create_task(coro_to_run)
         self._bg_tasks.add(task)
         self.metrics.set_gauge("bg_tasks_active", sum(1 for t in self._bg_tasks if not t.done()))
 
@@ -296,6 +318,34 @@ class Orchestrator:
 
         task.add_done_callback(_on_done)
         return task
+
+    def _get_response_timeout_sec(self) -> float:
+        settings = getattr(self.brain, "settings", {}) if isinstance(getattr(self.brain, "settings", None), dict) else {}
+        sys_cfg = settings.get("system", {}) if isinstance(settings, dict) else {}
+        try:
+            return max(0.05, float(sys_cfg.get("response_timeout_sec", 15.0) or 15.0))
+        except (TypeError, ValueError):
+            return 15.0
+
+    async def _generate_response_with_timeout(self, **gen_kwargs: Any) -> str:
+        timeout = self._get_response_timeout_sec()
+        try:
+            return await asyncio.wait_for(self.brain.generate_response(**gen_kwargs), timeout=timeout)
+        except asyncio.TimeoutError:
+            self.metrics.inc("llm_failovers")
+            conv = getattr(self.brain, "conversation", None)
+            if conv is not None and hasattr(conv, "generate_mock_response"):
+                return conv.generate_mock_response(
+                    user_name=str(gen_kwargs.get("user_name") or "User"),
+                    message=str(gen_kwargs.get("message") or ""),
+                    game_context=str(gen_kwargs.get("game_context") or ""),
+                    is_donation=bool(gen_kwargs.get("is_donation", False)),
+                    donation_amount=str(gen_kwargs.get("donation_amount") or ""),
+                    is_group_debate=bool(gen_kwargs.get("is_group_debate", False)),
+                    debate_users=gen_kwargs.get("debate_users"),
+                    is_creator=bool(gen_kwargs.get("is_creator", False)),
+                )
+            raise
 
     @staticmethod
     def _accepts_kwarg(fn: Any, kwarg: str) -> bool:
@@ -415,6 +465,8 @@ class Orchestrator:
             "bg_tasks_active",
             sum(1 for t in self._bg_tasks if not t.done()),
         )
+        self.metrics.set_gauge("audio_buffer_size_kb", float(self.audio_buffer_size_kb))
+        self.metrics.set_gauge("max_concurrent_tasks", float(self._max_concurrent_tasks))
         return self.metrics.snapshot()
 
     async def _speak_with_metrics(self, speech_text: str, **kwargs: Any) -> Any:
@@ -493,11 +545,11 @@ class Orchestrator:
             await self.missions.start_loop()
 
         # Start master processing loop
-        self._spawn_bg_task(self._process_chat_loop())
+        self._spawn_bg_task(self._process_chat_loop(), bounded=False)
         # Start spontaneous banter / idle stream thoughts loop
-        self._spawn_bg_task(self._idle_banter_loop())
+        self._spawn_bg_task(self._idle_banter_loop(), bounded=False)
         # Start visual perception / screen awareness loop
-        self._spawn_bg_task(self._visual_perception_loop())
+        self._spawn_bg_task(self._visual_perception_loop(), bounded=False)
 
     async def shutdown(self):
         """Gracefully stops background loops and closes external client sessions."""
@@ -661,7 +713,7 @@ class Orchestrator:
             gen_kwargs["is_creator"] = False
         self.metrics.inc("llm_requests")
         try:
-            raw_reply = await self.brain.generate_response(**gen_kwargs)
+            raw_reply = await self._generate_response_with_timeout(**gen_kwargs)
         except Exception:
             self.metrics.inc("llm_failovers")
             raise
@@ -876,6 +928,22 @@ class Orchestrator:
         Hot-reloads: LLM settings, TTS voice/speed/pitch/toggle, VTS connection, Twitch listener, Moderator rules.
         """
         self.brain.reload_settings(new_settings)
+
+        perf_cfg = new_settings.get("performance", {}) if isinstance(new_settings, dict) else {}
+        try:
+            new_max_tasks = max(1, int(perf_cfg.get("max_concurrent_tasks", self._max_concurrent_tasks) or self._max_concurrent_tasks))
+        except (TypeError, ValueError):
+            new_max_tasks = self._max_concurrent_tasks
+        if new_max_tasks != self._max_concurrent_tasks:
+            self._max_concurrent_tasks = new_max_tasks
+            self._bg_task_semaphore = asyncio.Semaphore(self._max_concurrent_tasks)
+        try:
+            self.audio_buffer_size_kb = max(16, int(perf_cfg.get("audio_buffer_size_kb", self.audio_buffer_size_kb) or self.audio_buffer_size_kb))
+        except (TypeError, ValueError):
+            pass
+        self.audio_buffer_size_bytes = self.audio_buffer_size_kb * 1024
+        setattr(self.tts, "audio_buffer_size_kb", self.audio_buffer_size_kb)
+        setattr(self.voice_session, "audio_buffer_size_kb", self.audio_buffer_size_kb)
 
         # 1. Update TTS
         tts_cfg = new_settings.get("tts", {})
@@ -1771,7 +1839,7 @@ class Orchestrator:
                 gen_kwargs["is_creator"] = is_creator
             self.metrics.inc("llm_requests")
             try:
-                raw_response = await self.brain.generate_response(**gen_kwargs)
+                raw_response = await self._generate_response_with_timeout(**gen_kwargs)
             except Exception:
                 self.metrics.inc("llm_failovers")
                 raise

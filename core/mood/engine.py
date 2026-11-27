@@ -1,6 +1,6 @@
 import time
 import math
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List, Union
 
 class MoodEngine:
     """
@@ -245,15 +245,59 @@ BEHAVIORAL DIRECTIVES:
         self.last_update_time = time.time()
         self.last_stimulus_name = "reset"
 
+    def get_emotional_valence(self) -> Dict[str, Any]:
+        """
+        Computes current signed emotional valence in [-1.0, 1.0] and arousal in [0.0, 1.0]
+        from the decayed affective dimensions.
+        """
+        self.update_decay()
+        h = self.dimensions["happiness"]
+        a = self.dimensions["annoyance"]
+        c = self.dimensions["curiosity"]
+        e = self.dimensions["excitement"]
+        k = self.dimensions["competitiveness"]
+
+        raw_valence = (
+            (h - 0.50) * 1.0
+            + (e - 0.40) * 0.40
+            + (c - 0.50) * 0.20
+            - (a - 0.10) * 1.20
+        )
+        valence = max(-1.0, min(1.0, raw_valence))
+        arousal = max(0.0, min(1.0, 0.40 * e + 0.30 * a + 0.20 * k + 0.10 * h))
+        mood_key, _ = self.get_dominant_mood()
+
+        return {
+            "valence": round(valence, 4),
+            "arousal": round(arousal, 4),
+            "dominant_mood": mood_key,
+            "dimensions": {dim: round(val, 4) for dim, val in self.dimensions.items()},
+        }
+
+    def score_affective_memories(
+        self,
+        memories: List[Any],
+        current_mood: Optional[Union[Dict[str, Any], "MoodEngine"]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Scores and reranks memories by affective valence congruence with current mood.
+        Defaults current_mood to this MoodEngine's current emotional valence.
+        """
+        mood_ctx = current_mood if current_mood is not None else self.get_emotional_valence()
+        return score_affective_memories(memories, mood_ctx)
+
     def get_state(self) -> Dict[str, Any]:
         """Full telemetry data for Web UI and API."""
         self.update_decay()
         mood_key, label = self.get_dominant_mood()
+        valence_info = self.get_emotional_valence()
         return {
             "dominant_mood": mood_key,
             "label": label,
             "suggested_emotion": self.get_suggested_emotion(),
             "last_stimulus": self.last_stimulus_name,
+            "emotional_valence": valence_info["valence"],
+            "arousal": valence_info["arousal"],
             "dimensions": {
                 "happiness": round(self.dimensions["happiness"], 3),
                 "annoyance": round(self.dimensions["annoyance"], 3),
@@ -263,3 +307,128 @@ BEHAVIORAL DIRECTIVES:
             },
             "baselines": dict(self.baselines)
         }
+
+
+_MOOD_VALENCE_MAP: Dict[str, float] = {
+    "HAPPY_PLAYFUL": 0.80,
+    "HYPE_EXCITED": 0.75,
+    "CURIOUS_PENSIVE": 0.30,
+    "TRYHARD_COMPETITIVE": 0.20,
+    "CHILL_NEUTRAL": 0.10,
+    "DRAMATIC_POUTY": -0.45,
+    "SASSY_ANNOYED": -0.65,
+}
+
+
+def _compute_valence_from_dimensions(dims: Dict[str, float]) -> float:
+    h = float(dims.get("happiness", 0.60))
+    a = float(dims.get("annoyance", 0.10))
+    c = float(dims.get("curiosity", 0.50))
+    e = float(dims.get("excitement", 0.40))
+    raw = (h - 0.50) * 1.0 + (e - 0.40) * 0.40 + (c - 0.50) * 0.20 - (a - 0.10) * 1.20
+    return max(-1.0, min(1.0, raw))
+
+
+def _normalize_mood_context(current_mood: Optional[Union[Dict[str, Any], MoodEngine]]) -> Dict[str, Any]:
+    if current_mood is None:
+        return {
+            "valence": 0.10,
+            "dominant_mood": "CHILL_NEUTRAL",
+            "dimensions": dict(MoodEngine.BASELINES),
+        }
+    if isinstance(current_mood, MoodEngine):
+        return current_mood.get_emotional_valence()
+    if isinstance(current_mood, dict):
+        dims = current_mood.get("dimensions")
+        if not isinstance(dims, dict) and any(k in current_mood for k in MoodEngine.BASELINES):
+            dims = {k: float(current_mood.get(k, v)) for k, v in MoodEngine.BASELINES.items()}
+        dominant = current_mood.get("dominant_mood", "")
+        if "valence" in current_mood:
+            valence = max(-1.0, min(1.0, float(current_mood["valence"])))
+        elif isinstance(dims, dict):
+            valence = _compute_valence_from_dimensions(dims)
+        elif dominant in _MOOD_VALENCE_MAP:
+            valence = _MOOD_VALENCE_MAP[dominant]
+        else:
+            valence = 0.10
+        return {
+            "valence": valence,
+            "dominant_mood": dominant,
+            "dimensions": dims if isinstance(dims, dict) else {},
+        }
+    return {"valence": 0.10, "dominant_mood": "", "dimensions": {}}
+
+
+def score_affective_memories(
+    memories: List[Any],
+    current_mood: Optional[Union[Dict[str, Any], MoodEngine]] = None,
+) -> List[Dict[str, Any]]:
+    """
+    Reranks retrieved memories by combining their base relevance score with
+    affective valence congruence against `current_mood`, so high-valence
+    memories matching the current mood surface preferentially.
+    """
+    if not memories:
+        return []
+
+    mood_ctx = _normalize_mood_context(current_mood)
+    mood_valence = float(mood_ctx["valence"])
+    mood_dominant = str(mood_ctx.get("dominant_mood", "") or "")
+    mood_dims = mood_ctx.get("dimensions") or {}
+
+    scored: List[Dict[str, Any]] = []
+    for item in memories:
+        if isinstance(item, dict):
+            entry = dict(item)
+        else:
+            entry = {"content": str(item), "raw": item}
+
+        base_score = float(
+            entry.get("score", entry.get("similarity", entry.get("relevance", entry.get("importance", 0.5))))
+        )
+
+        # Determine memory valence in [-1.0, 1.0]
+        mem_dims = entry.get("mood_dimensions") or entry.get("dimensions") or entry.get("affect")
+        mem_mood = str(entry.get("dominant_mood", entry.get("mood", "")) or "")
+        if "emotional_valence" in entry:
+            mem_valence = max(-1.0, min(1.0, float(entry["emotional_valence"])))
+        elif "valence" in entry:
+            mem_valence = max(-1.0, min(1.0, float(entry["valence"])))
+        elif isinstance(mem_dims, dict) and mem_dims:
+            mem_valence = _compute_valence_from_dimensions(mem_dims)
+        elif mem_mood in _MOOD_VALENCE_MAP:
+            mem_valence = _MOOD_VALENCE_MAP[mem_mood]
+        else:
+            mem_valence = 0.0
+
+        # Valence congruence in [0.0, 1.0]
+        valence_congruence = max(0.0, 1.0 - abs(mem_valence - mood_valence) / 2.0)
+
+        # Optional dimension-level similarity boost when both have 5D mood vectors
+        dim_congruence = 0.0
+        if isinstance(mem_dims, dict) and mem_dims and mood_dims:
+            diffs = [
+                abs(float(mem_dims.get(k, 0.5)) - float(mood_dims.get(k, 0.5)))
+                for k in MoodEngine.BASELINES
+            ]
+            dim_congruence = max(0.0, 1.0 - (sum(diffs) / len(diffs)))
+
+        mood_match = bool(mood_dominant and mem_mood and mood_dominant == mem_mood)
+        valence_magnitude = abs(mem_valence)
+
+        # High-valence memories matching current mood receive the strongest boost
+        affective_bonus = (
+            0.35 * valence_congruence
+            + 0.20 * valence_magnitude * valence_congruence
+            + 0.15 * dim_congruence
+            + (0.15 if mood_match else 0.0)
+        )
+        affective_score = round(base_score + affective_bonus, 4)
+
+        entry["affective_score"] = affective_score
+        entry["valence_match"] = round(valence_congruence, 4)
+        entry["memory_valence"] = round(mem_valence, 4)
+        scored.append(entry)
+
+    scored.sort(key=lambda m: m["affective_score"], reverse=True)
+    return scored

@@ -182,6 +182,64 @@ Eve Maybe's episodic memory logs for stream session on {day_str}.
             })
         self._write_bounded_promises(rows, max_completed_rows=max_completed_rows)
 
+    def sync_promises_bidirectional(self, db: Any, max_completed_rows: int = 20) -> Dict[str, int]:
+        """
+        Bidirectionally reconciles promises.md with SQLite promises_challenges:
+        - Markdown status updates (e.g., pending -> fulfilled) propagate into SQLite.
+        - New rows added manually to promises.md (missing/non-numeric ID) are inserted into SQLite.
+        - DB-side updates propagate back into bounded promises.md and promises_archive.md.
+        """
+        if not hasattr(db, "get_promises"):
+            return {"imported_from_md": 0, "updated_in_db": 0, "synced_to_md": 0}
+
+        promises_file = self.base_dir / "promises.md"
+        md_rows = self._read_promise_rows(promises_file)
+        db_rows = db.get_promises(limit=1000)
+        db_by_id = {str(r.get("id")): r for r in db_rows}
+
+        imported = 0
+        updated_db = 0
+
+        for md in md_rows:
+            md_id = str(md.get("id", "")).strip()
+            md_status = str(md.get("status", "pending")).strip().lower()
+            md_user = str(md.get("user", "")).strip()
+            md_desc = str(md.get("description", "")).strip()
+            md_type = str(md.get("type", "promise")).strip() or "promise"
+
+            if md_id.isdigit() and md_id in db_by_id:
+                db_item = db_by_id[md_id]
+                db_status = str(db_item.get("status", "pending")).strip().lower()
+                if db_status == "pending" and md_status in ("fulfilled", "archived", "cancelled"):
+                    if hasattr(db, "update_promise_status"):
+                        if db.update_promise_status(int(md_id), md_status):
+                            updated_db += 1
+                    elif md_status == "fulfilled" and hasattr(db, "fulfill_promise"):
+                        if db.fulfill_promise(int(md_id)):
+                            updated_db += 1
+            elif md_user and md_desc and not md_id.isdigit():
+                if hasattr(db, "add_promise_or_challenge"):
+                    new_pid = db.add_promise_or_challenge(
+                        user=md_user,
+                        text=md_desc,
+                        ptype=md_type,
+                        context="promises.md bidirectional sync",
+                    )
+                    imported += 1
+                    if md_status in ("fulfilled", "archived", "cancelled"):
+                        if hasattr(db, "update_promise_status"):
+                            db.update_promise_status(new_pid, md_status)
+                        elif md_status == "fulfilled" and hasattr(db, "fulfill_promise"):
+                            db.fulfill_promise(new_pid)
+
+        self.sync_promises_from_db(db, max_completed_rows=max_completed_rows)
+        final_rows = self._read_promise_rows(promises_file)
+        return {
+            "imported_from_md": imported,
+            "updated_in_db": updated_db,
+            "synced_to_md": len(final_rows),
+        }
+
     def _read_promise_rows(self, promises_file: Path) -> List[Dict[str, str]]:
         if not promises_file.exists():
             return []

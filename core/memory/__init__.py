@@ -4,6 +4,7 @@ from core.memory.database import MemoryDatabase
 from core.memory.markdown_sync import MarkdownBrainSync
 from core.memory.retriever import MemoryRetriever, MemoryRecallResult
 from core.memory.extractor import MemoryExtractor
+from core.memory.consolidator import MemoryConsolidator
 
 class EpisodicMemoryStore:
     """
@@ -19,6 +20,7 @@ class EpisodicMemoryStore:
         embedding_provider: str = "auto",
         embedder: Optional[EmbeddingEngine] = None,
         vector_scan_limit: int = 2000,
+        ann_backend: str = "auto",
     ):
         self.embedder = embedder if embedder is not None else EmbeddingEngine(provider=embedding_provider)
         self.db = MemoryDatabase(
@@ -26,10 +28,12 @@ class EpisodicMemoryStore:
             embedding_provider=embedding_provider,
             embedder=self.embedder,
             vector_scan_limit=vector_scan_limit,
+            ann_backend=ann_backend,
         )
         self.sync = MarkdownBrainSync(base_dir=markdown_dir)
         self.retriever = MemoryRetriever(db=self.db)
         self.extractor = MemoryExtractor(db=self.db, markdown_sync=self.sync)
+        self.consolidator = MemoryConsolidator(db=self.db, markdown_sync=self.sync)
 
     def recall(
         self,
@@ -111,7 +115,15 @@ class EpisodicMemoryStore:
 
     def sync_promises(self) -> None:
         """Bidirectionally reconciles promises.md with SQLite promises_challenges."""
-        self.sync.sync_promises_from_db(self.db)
+        self.sync.sync_promises_bidirectional(self.db)
+
+    def consolidate(self, limit: int = 500, user: Optional[str] = None, half_life_days: float = 30.0) -> Dict[str, Any]:
+        """Runs hierarchical episodic-to-semantic consolidation and decay."""
+        return self.consolidator.consolidate(limit=limit, user=user, half_life_days=half_life_days)
+
+    async def aconsolidate(self, limit: int = 500, user: Optional[str] = None, half_life_days: float = 30.0) -> Dict[str, Any]:
+        """Async hierarchical episodic-to-semantic consolidation and decay."""
+        return await self.consolidator.consolidate_async(limit=limit, user=user, half_life_days=half_life_days)
 
     def archive_old_promises(self, older_than_days: float = 30.0) -> int:
         """Archives old fulfilled promises in SQLite and syncs promises.md."""
@@ -131,5 +143,6 @@ __all__ = [
     "MarkdownBrainSync",
     "MemoryRetriever",
     "MemoryRecallResult",
-    "MemoryExtractor"
+    "MemoryExtractor",
+    "MemoryConsolidator",
 ]
