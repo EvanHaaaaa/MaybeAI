@@ -750,8 +750,20 @@ async def plan_performance_setlist(title: Optional[str] = None):
 
 @app.post("/api/performance/start")
 async def start_performance_show(song_id: Optional[str] = None, dedication_user: Optional[str] = None):
-    asyncio.create_task(orchestrator.perform_song(song_id, dedication_user))
+    orchestrator._spawn_bg_task(orchestrator.perform_song(song_id, dedication_user))
     return {"status": "started", "song_id": song_id}
+
+@app.post("/api/performance/youtube")
+async def start_youtube_performance(payload: dict):
+    url = str((payload or {}).get("url") or "").strip()
+    mode = (payload or {}).get("mode")
+    dedication_user = (payload or {}).get("dedication_user")
+    if not url:
+        return JSONResponse(status_code=400, content={"error": "Missing YouTube url"})
+    orchestrator._spawn_bg_task(
+        orchestrator.perform_youtube_song(url=url, mode=mode, dedication_user=dedication_user)
+    )
+    return {"status": "queued", "url": url, "mode": mode or "ai_cover"}
 
 @app.post("/api/performance/cheer")
 async def cheer_performance(user: str = "Chatter", cheer_type: str = "glowstick"):
@@ -1675,7 +1687,19 @@ async def websocket_endpoint(websocket: WebSocket):
                 if act == "start":
                     song_id = data.get("song_id")
                     dedication = data.get("dedication_user")
-                    asyncio.create_task(orchestrator.perform_song(song_id, dedication_user=dedication))
+                    orchestrator._spawn_bg_task(orchestrator.perform_song(song_id, dedication_user=dedication))
+                elif act == "youtube":
+                    yt_url = str(data.get("url") or "").strip()
+                    yt_mode = data.get("mode")
+                    dedication = data.get("dedication_user")
+                    if yt_url:
+                        orchestrator._spawn_bg_task(
+                            orchestrator.perform_youtube_song(
+                                url=yt_url,
+                                mode=yt_mode,
+                                dedication_user=dedication,
+                            )
+                        )
                 elif act == "stop":
                     orchestrator.singer.stop()
                     director.session.status = "idle"

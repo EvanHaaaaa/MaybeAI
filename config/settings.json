@@ -97,7 +97,10 @@
     "singing_enabled": true,
     "bgm_volume": 75,
     "vocal_volume": 100,
-    "glowsticks_enabled": true
+    "glowsticks_enabled": true,
+    "youtube_enabled": true,
+    "youtube_mode": "ai_cover",
+    "youtube_max_duration_sec": 600
   },
   "twitch": {
     "enabled": false,

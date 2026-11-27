@@ -117,7 +117,10 @@ class ConfigManager:
             "singing_enabled": True,
             "bgm_volume": 75,
             "vocal_volume": 100,
-            "glowsticks_enabled": True
+            "glowsticks_enabled": True,
+            "youtube_enabled": True,
+            "youtube_mode": "ai_cover",
+            "youtube_max_duration_sec": 600
         },
         "twitch": {
             "enabled": False,
@@ -1832,6 +1835,39 @@ class ConfigManager:
                 "description": "Menampilkan efek glowstick di panggung konser karaoke.",
                 "type": "toggle",
                 "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "karaoke.youtube_enabled",
+                "category": "karaoke",
+                "label": "YouTube Song Request Enabled",
+                "description": "Izinkan Eve memproses dan menyanyikan lagu dari link YouTube.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "karaoke.youtube_mode",
+                "category": "karaoke",
+                "label": "YouTube Karaoke Mode",
+                "description": "ai_cover (Demucs/instrumental + RVC) atau auto_karaoke (TTS + lirik caption).",
+                "type": "select",
+                "options": [
+                    {"value": "ai_cover", "label": "AI Cover (Demucs/Instrumental + RVC)"},
+                    {"value": "auto_karaoke", "label": "Auto-Karaoke (TTS + Lirik)"}
+                ],
+                "default": "ai_cover",
+                "restart_required": False
+            },
+            {
+                "path": "karaoke.youtube_max_duration_sec",
+                "category": "karaoke",
+                "label": "YouTube Max Duration (sec)",
+                "description": "Batas durasi maksimal video YouTube yang boleh diproses.",
+                "type": "number",
+                "min": 30,
+                "max": 1800,
+                "default": 600,
                 "restart_required": False
             },
             {

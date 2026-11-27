@@ -268,8 +268,9 @@ class Singer:
         self._stop_requested = False
         created_vocal_files: Set[str] = set()
 
-        bgm_file = song.get("bgm_file")
+        bgm_file = song.get("bgm_file") or song.get("bgm")
         bgm_vol = song.get("bgm_volume", 0.3)
+        vocal_track = song.get("vocal_track")
         lyrics = song.get("lyrics", [])
         use_server_audio = self.output_mode in ("server", "both")
 
@@ -287,6 +288,94 @@ class Singer:
 
             song_start_time = time.monotonic()
 
+            # 1b. Pre-separated / RVC-converted full vocal track mode (AI Cover)
+            if vocal_track and Path(vocal_track).exists():
+                vocal_path = Path(vocal_track)
+                vocal_bytes = await asyncio.to_thread(vocal_path.read_bytes)
+                if on_vocal_audio and self.output_mode in ("browser", "both") and vocal_bytes:
+                    try:
+                        cb_res = on_vocal_audio(vocal_bytes, song.get("title", song_id))
+                        if inspect.isawaitable(cb_res):
+                            await cb_res
+                    except Exception:
+                        pass
+
+                envelope: List[float] = []
+                channel = None
+                if use_server_audio:
+                    def _load_full_vocal() -> Any:
+                        snd = pygame.mixer.Sound(str(vocal_path))
+                        snd.set_volume(1.0)
+                        env, _ = extract_rms_envelope_from_sound(snd, frame_ms=50)
+                        if not env:
+                            env, _ = extract_rms_envelope_from_wav(vocal_bytes, frame_ms=50)
+                        return snd, env
+
+                    sound, envelope = await asyncio.to_thread(_load_full_vocal)
+                    channel = sound.play()
+                    self._active_channel = channel
+                else:
+                    envelope, _ = await asyncio.to_thread(extract_rms_envelope_from_wav, vocal_bytes, 50)
+
+                interval = 0.05
+                next_lyric_idx = 0
+                sorted_lyrics = sorted(
+                    lyrics,
+                    key=lambda item: float(
+                        item.get("cue_sec", item.get("timestamp_sec", item.get("start_sec", item.get("time", 0.0)))) or 0.0
+                    ),
+                )
+                est_total_sec = max(
+                    len(envelope) * interval if envelope else 0.0,
+                    float(song.get("duration_sec") or 0.0),
+                    1.0,
+                )
+                step = 0
+                while not self._stop_requested:
+                    elapsed = self._get_playback_clock_sec(song_start_time, use_server_audio)
+                    if use_server_audio:
+                        if channel is None or channel.get_busy() not in (True, 1):
+                            break
+                    elif elapsed >= est_total_sec:
+                        break
+
+                    while next_lyric_idx < len(sorted_lyrics):
+                        cue_item = sorted_lyrics[next_lyric_idx]
+                        cue_t = float(
+                            cue_item.get(
+                                "cue_sec",
+                                cue_item.get("timestamp_sec", cue_item.get("start_sec", cue_item.get("time", 0.0))),
+                            )
+                            or 0.0
+                        )
+                        if elapsed >= cue_t:
+                            if on_lyric_update:
+                                res = on_lyric_update(cue_item.get("text", ""), cue_item.get("emotion", "happy"))
+                                if inspect.isawaitable(res):
+                                    await res
+                            next_lyric_idx += 1
+                        else:
+                            break
+
+                    if on_mouth_update and envelope:
+                        env_idx = min(len(envelope) - 1, int(elapsed / interval))
+                        m_res = on_mouth_update(envelope[env_idx])
+                        if inspect.isawaitable(m_res):
+                            await m_res
+
+                    step += 1
+                    next_tick = song_start_time + (step * interval)
+                    sleep_for = next_tick - time.monotonic()
+                    if sleep_for > 0:
+                        await asyncio.sleep(sleep_for)
+
+                self._active_channel = None
+                if on_mouth_update:
+                    m_res = on_mouth_update(0.0)
+                    if inspect.isawaitable(m_res):
+                        await m_res
+                return not self._stop_requested
+
             # 2. Iterate through lyrics with audio-clock-locked scheduling
             for idx, line_data in enumerate(lyrics):
                 if self._stop_requested:
@@ -298,7 +387,7 @@ class Singer:
                 delay_before = float(line_data.get("delay_before", 0.5) or 0.0)
                 explicit_cue = line_data.get(
                     "cue_sec",
-                    line_data.get("timestamp_sec", line_data.get("start_sec")),
+                    line_data.get("timestamp_sec", line_data.get("start_sec", line_data.get("time"))),
                 )
                 emotion = line_data.get("emotion", "happy")
 

@@ -641,6 +641,14 @@ document.addEventListener("DOMContentLoaded", () => {
       spawnMusicNote();
     } else if (msg.type === "song_ended") {
       isSinging = false;
+    } else if (msg.type === "youtube_song_status") {
+      const ytStatusEl = document.getElementById("perfYtStatus");
+      if (ytStatusEl && msg.data) {
+        const stage = String(msg.data.stage || "").toUpperCase();
+        const detail = String(msg.data.detail || "");
+        ytStatusEl.textContent = stage ? `[${stage}] ${detail}` : detail;
+        ytStatusEl.style.color = msg.data.stage === "error" ? "#ff7b7b" : "";
+      }
     } else if (msg.type === "minecraft_state") {
       updateMinecraftHud(msg.data);
     } else if (msg.type === "chess_state") {
@@ -4361,6 +4369,26 @@ document.addEventListener("DOMContentLoaded", () => {
         ...payload
       }));
     }
+  }
+
+  const btnPerfYtSing = document.getElementById("btnPerfYtSing");
+  const perfYtUrl = document.getElementById("perfYtUrl");
+  const perfYtMode = document.getElementById("perfYtMode");
+  const perfYtStatus = document.getElementById("perfYtStatus");
+  if (btnPerfYtSing && perfYtUrl) {
+    btnPerfYtSing.addEventListener("click", () => {
+      const url = perfYtUrl.value.trim();
+      const mode = perfYtMode ? perfYtMode.value : "ai_cover";
+      if (!url) {
+        if (perfYtStatus) perfYtStatus.textContent = "Masukkan link YouTube terlebih dahulu.";
+        return;
+      }
+      if (perfYtStatus) {
+        perfYtStatus.style.color = "";
+        perfYtStatus.textContent = "Mengirim request lagu YouTube...";
+      }
+      sendPerformanceAction({ action: "youtube", url, mode });
+    });
   }
 
   function triggerAvatarChoreography(data) {

@@ -320,6 +320,21 @@
 
           <!-- Right Column: Concert Setlist & Audience Glowstick Arena -->
           <div class="perf-box perf-side-box">
+            <!-- YouTube Song Request -->
+            <div class="mg-box-header">
+              <span class="dt-box-title">📺 YouTube Song Request</span>
+              <small class="dt-hint">AI Cover (Demucs + RVC) atau Auto-Karaoke TTS</small>
+            </div>
+            <div class="yt-request-bar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">
+              <input type="url" id="perfYtUrl" placeholder="https://www.youtube.com/watch?v=..." style="flex:1;min-width:180px;" />
+              <select id="perfYtMode">
+                <option value="ai_cover">AI Cover (RVC)</option>
+                <option value="auto_karaoke">Auto-Karaoke (TTS)</option>
+              </select>
+              <button type="button" id="btnPerfYtSing" class="btn-primary">▶ Nyanyikan</button>
+            </div>
+            <div id="perfYtStatus" class="dt-hint" style="margin-bottom:12px;">Siap menerima link YouTube.</div>
+
             <!-- Setlist Manager -->
             <div class="mg-box-header">
               <span class="dt-box-title">📋 Urutan Setlist Konser (Concert Schedule)</span>

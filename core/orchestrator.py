@@ -1827,6 +1827,52 @@ class Orchestrator:
             finally:
                 self._busy_owner_task = None
 
+    async def perform_youtube_song(
+        self,
+        url: str,
+        mode: Optional[str] = None,
+        dedication_user: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Download/prepare a YouTube song request and perform it on stage."""
+        from core.youtube_karaoke import YouTubeKaraokeError, YouTubeKaraokeProcessor
+
+        cfg_enabled = bool(self.config.get("karaoke.youtube_enabled", True)) if getattr(self, "config", None) else True
+        if not cfg_enabled:
+            msg = "YouTube karaoke is disabled in settings."
+            await self.broadcast("youtube_song_status", {"stage": "error", "detail": msg})
+            return {"status": "error", "error": msg}
+
+        chosen_mode = mode or (
+            self.config.get("karaoke.youtube_mode", "ai_cover") if getattr(self, "config", None) else "ai_cover"
+        )
+        max_dur = int(
+            self.config.get("karaoke.youtube_max_duration_sec", 600) if getattr(self, "config", None) else 600
+        )
+
+        async def _on_status(stage: str, detail: str) -> None:
+            await self.broadcast(
+                "youtube_song_status",
+                {"stage": stage, "detail": detail, "url": url, "mode": chosen_mode},
+            )
+
+        processor = YouTubeKaraokeProcessor(
+            max_duration_sec=max_dur,
+            rvc_converter=getattr(self.singer, "_rvc", None),
+        )
+        try:
+            song_entry = await processor.prepare_song(url=url, mode=chosen_mode, on_status=_on_status)
+        except YouTubeKaraokeError as exc:
+            await self.broadcast("youtube_song_status", {"stage": "error", "detail": str(exc), "url": url})
+            return {"status": "error", "error": str(exc)}
+        except Exception as exc:
+            await self.broadcast("youtube_song_status", {"stage": "error", "detail": str(exc), "url": url})
+            return {"status": "error", "error": str(exc)}
+
+        song_id = song_entry["id"]
+        self.singer.songs[song_id] = song_entry
+        await self.perform_song(song_id=song_id, dedication_user=dedication_user)
+        return {"status": "started", "song_id": song_id, "title": song_entry.get("title", song_id)}
+
     async def _perform_song_unlocked(self, song_id: Optional[str] = None, dedication_user: Optional[str] = None):
         dominant_mood, _ = self.brain.mood.get_dominant_mood()
         director = self.brain.performance
