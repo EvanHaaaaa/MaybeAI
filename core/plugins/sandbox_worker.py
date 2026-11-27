@@ -7,15 +7,192 @@ Usage:
 
 import argparse
 import asyncio
+import builtins
 import importlib.util
 import inspect
+import io
 import json
+import os
+import socket
 import sys
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, Iterable, List, Optional, Set, Type
 
 from core.plugins.sdk import MaybeAIPlugin, PluginContext, PluginManifest
+
+
+_BOUNDARY_GUARD_INSTALLED = False
+
+
+def apply_os_resource_limits() -> Dict[str, Any]:
+    """
+    Applies OS-level resource limits inside the worker where supported (POSIX/Linux).
+    Returns diagnostic metadata describing applied limits.
+    """
+    if os.name == "nt":
+        # On Windows, memory/process limits are enforced by the host via Job Objects.
+        return {"applied": False, "detail": "host_managed_windows"}
+
+    try:
+        import resource  # type: ignore
+    except ImportError:
+        return {"applied": False, "detail": "resource_module_unavailable"}
+
+    applied: List[str] = []
+    mem_bytes = 512 * 1024 * 1024
+    for limit_name in ("RLIMIT_AS", "RLIMIT_DATA"):
+        limit_const = getattr(resource, limit_name, None)
+        if limit_const is None:
+            continue
+        try:
+            soft, hard = resource.getrlimit(limit_const)
+            target = mem_bytes if hard in (-1, getattr(resource, "RLIM_INFINITY", -1)) else min(mem_bytes, hard)
+            if soft == getattr(resource, "RLIM_INFINITY", -1) or soft > target:
+                resource.setrlimit(limit_const, (target, hard))
+            applied.append(limit_name.lower())
+            break
+        except (OSError, ValueError):
+            continue
+
+    nofile_const = getattr(resource, "RLIMIT_NOFILE", None)
+    if nofile_const is not None:
+        try:
+            soft, hard = resource.getrlimit(nofile_const)
+            target = 128 if hard in (-1, getattr(resource, "RLIM_INFINITY", -1)) else min(128, hard)
+            if soft == getattr(resource, "RLIM_INFINITY", -1) or soft > target:
+                resource.setrlimit(nofile_const, (target, hard))
+            applied.append("rlimit_nofile")
+        except (OSError, ValueError):
+            pass
+
+    return {
+        "applied": bool(applied),
+        "detail": ",".join(applied) if applied else "rlimit_unavailable",
+    }
+
+
+def _resolve_safe_path(raw_path: Any) -> Path:
+    if isinstance(raw_path, bytes):
+        raw_path = os.fsdecode(raw_path)
+    p = Path(os.fspath(raw_path))
+    try:
+        return p.resolve()
+    except Exception:
+        return Path(os.path.abspath(str(p)))
+
+
+def _is_under_dir(target: Path, parent: Path) -> bool:
+    return target == parent or parent in target.parents
+
+
+def install_boundary_guards(
+    scratch_dir: Path,
+    repo_root: Path,
+    permissions: Iterable[str] = (),
+) -> None:
+    """
+    Installs worker-side filesystem and network boundary guards before importing plugin code.
+    Blocks reading `.env`, `config/settings.json` (`config/`), `data/`, writes outside `scratch_dir`,
+    and unauthorized outbound sockets unless explicitly permitted by host-approved capabilities.
+    """
+    global _BOUNDARY_GUARD_INSTALLED
+    if _BOUNDARY_GUARD_INSTALLED:
+        return
+    _BOUNDARY_GUARD_INSTALLED = True
+
+    granted: Set[str] = {str(p).strip() for p in permissions if str(p).strip()}
+    allow_fs_read = "fs:read" in granted
+    allow_fs_write = "fs:write" in granted
+    allow_net_outbound = "net:outbound" in granted or "network:outbound" in granted
+
+    resolved_scratch = _resolve_safe_path(scratch_dir)
+    resolved_repo = _resolve_safe_path(repo_root)
+    blocked_config_dir = _resolve_safe_path(resolved_repo / "config")
+    blocked_data_dir = _resolve_safe_path(resolved_repo / "data")
+
+    def _check_fs_access(file_arg: Any, is_write: bool) -> None:
+        if isinstance(file_arg, int):
+            return
+        resolved = _resolve_safe_path(file_arg)
+        name_lower = resolved.name.lower()
+        parts_lower = [part.lower() for part in resolved.parts]
+
+        # Always block .env files unless fs:read is explicitly granted
+        is_env_file = name_lower == ".env" or name_lower.startswith(".env.")
+        is_config_target = _is_under_dir(resolved, blocked_config_dir) or (
+            len(parts_lower) >= 2 and parts_lower[-2] == "config" and name_lower == "settings.json"
+        )
+        is_data_target = _is_under_dir(resolved, blocked_data_dir) or (
+            "data" in parts_lower and not _is_under_dir(resolved, resolved_scratch)
+        )
+
+        if not allow_fs_read and (is_env_file or is_config_target or is_data_target):
+            raise PermissionError(
+                f"Sandbox boundary: access to '{file_arg}' denied (requires host-approved capability)"
+            )
+
+        if is_write and not allow_fs_write and not _is_under_dir(resolved, resolved_scratch):
+            raise PermissionError(
+                f"Sandbox boundary: write access outside scratch dir '{file_arg}' denied"
+            )
+
+    orig_open = builtins.open
+    orig_os_open = os.open
+
+    def _guarded_open(file, mode="r", *args, **kwargs):
+        mode_str = str(mode or "r")
+        is_write = any(ch in mode_str for ch in ("w", "a", "x", "+"))
+        _check_fs_access(file, is_write=is_write)
+        return orig_open(file, mode, *args, **kwargs)
+
+    def _guarded_os_open(path, flags, *args, **kwargs):
+        write_mask = getattr(os, "O_WRONLY", 1) | getattr(os, "O_RDWR", 2) | getattr(os, "O_CREAT", 0) | getattr(os, "O_APPEND", 0)
+        is_write = bool(flags & write_mask)
+        _check_fs_access(path, is_write=is_write)
+        return orig_os_open(path, flags, *args, **kwargs)
+
+    builtins.open = _guarded_open  # type: ignore[assignment]
+    io.open = _guarded_open  # type: ignore[assignment]
+    os.open = _guarded_os_open  # type: ignore[assignment]
+
+    if not allow_net_outbound:
+        orig_connect = socket.socket.connect
+        orig_connect_ex = socket.socket.connect_ex
+        orig_create_connection = socket.create_connection
+        orig_socketpair = socket.socketpair
+        _pair_state = threading.local()
+
+        def _guarded_socketpair(*args, **kwargs):
+            _pair_state.active = True
+            try:
+                return orig_socketpair(*args, **kwargs)
+            finally:
+                _pair_state.active = False
+
+        def _deny_connect(self, address):
+            if getattr(_pair_state, "active", False):
+                return orig_connect(self, address)
+            raise PermissionError(
+                "Sandbox boundary: outbound socket connection denied (requires 'net:outbound' capability)"
+            )
+
+        def _deny_connect_ex(self, address):
+            if getattr(_pair_state, "active", False):
+                return orig_connect_ex(self, address)
+            raise PermissionError(
+                "Sandbox boundary: outbound socket connection denied (requires 'net:outbound' capability)"
+            )
+
+        def _deny_create_connection(address, *args, **kwargs):  # noqa: ARG001
+            raise PermissionError(
+                "Sandbox boundary: outbound socket connection denied (requires 'net:outbound' capability)"
+            )
+
+        socket.socketpair = _guarded_socketpair  # type: ignore[assignment]
+        socket.socket.connect = _deny_connect  # type: ignore[method-assign]
+        socket.socket.connect_ex = _deny_connect_ex  # type: ignore[method-assign]
+        socket.create_connection = _deny_create_connection  # type: ignore[assignment]
 
 
 class _SandboxedEventBusProxy:
@@ -254,7 +431,33 @@ class SandboxWorker:
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="MaybeAI sandboxed plugin JSON-RPC 2.0 worker")
     parser.add_argument("plugin_path", help="Path to external MaybeAI plugin .py file")
+    parser.add_argument("--scratch-dir", default="", help="Isolated per-plugin scratch working directory")
+    parser.add_argument("--repo-root", default="", help="Host repository root for boundary checks")
+    parser.add_argument("--permissions", default="", help="Comma-separated host-approved capabilities")
+    parser.add_argument("--bwrap-active", action="store_true", help="Indicates host launched worker inside bwrap")
     args = parser.parse_args(argv)
+
+    scratch_dir = Path(args.scratch_dir).resolve() if args.scratch_dir else Path.cwd().resolve()
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chdir(str(scratch_dir))
+    except OSError:
+        pass
+
+    repo_root = (
+        Path(args.repo_root).resolve()
+        if args.repo_root
+        else Path(__file__).resolve().parents[2]
+    )
+    granted_perms = [p.strip() for p in str(args.permissions or "").split(",") if p.strip()]
+
+    # Apply OS resource limits and boundary guards BEFORE importing any plugin code.
+    _limit_info = apply_os_resource_limits()
+    install_boundary_guards(
+        scratch_dir=scratch_dir,
+        repo_root=repo_root,
+        permissions=granted_perms,
+    )
 
     # Preserve real stdout for JSON-RPC 2.0 frames; redirect plugin print() calls to stderr.
     rpc_out = sys.stdout

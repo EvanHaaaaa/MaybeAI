@@ -1,19 +1,153 @@
+import ast
 import asyncio
+import ctypes
 import importlib
 import importlib.util
 import inspect
 import json
 import os
+import re
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Type
 
-from core.plugins.sdk import MaybeAIPlugin, PluginContext, PluginManifest
+from core.plugins.sdk import (
+    ALLOWED_PLUGIN_PERMISSIONS,
+    DEFAULT_PLUGIN_PERMISSIONS,
+    MaybeAIPlugin,
+    PluginContext,
+    PluginManifest,
+)
 
 
 BUILTIN_MODULES: Tuple[str, ...] = ("core.plugins.word_chain",)
 REPO_ROOT: Path = Path(__file__).resolve().parents[2]
 VALID_SANDBOX_MODES: Tuple[str, ...] = ("subprocess", "inprocess")
+
+SANDBOX_LEVEL_OS_ISOLATED = "os_isolated"
+SANDBOX_LEVEL_SUBPROCESS_RESTRICTED = "subprocess_restricted"
+SANDBOX_LEVEL_BLOCKED = "blocked"
+SANDBOX_LEVEL_BUILTIN = "builtin"
+
+
+class _WindowsJobObject:
+    """Best-effort Windows Job Object wrapper enforcing memory, process-count, and kill-on-close limits."""
+
+    def __init__(self, handle: Any) -> None:
+        self._handle = handle
+        self._kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+
+    @classmethod
+    def attach(
+        cls,
+        pid: int,
+        memory_limit_mb: int = 512,
+        max_processes: int = 2,
+    ) -> Tuple[Optional["_WindowsJobObject"], str]:
+        if os.name != "nt":
+            return None, "not_windows"
+        try:
+            from ctypes import wintypes
+
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+
+            class JOBOBJECT_BASIC_LIMIT_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("PerProcessUserTimeLimit", ctypes.c_int64),
+                    ("PerJobUserTimeLimit", ctypes.c_int64),
+                    ("LimitFlags", wintypes.DWORD),
+                    ("MinimumWorkingSetSize", ctypes.c_size_t),
+                    ("MaximumWorkingSetSize", ctypes.c_size_t),
+                    ("ActiveProcessLimit", wintypes.DWORD),
+                    ("Affinity", ctypes.c_size_t),
+                    ("PriorityClass", wintypes.DWORD),
+                    ("SchedulingClass", wintypes.DWORD),
+                ]
+
+            class IO_COUNTERS(ctypes.Structure):
+                _fields_ = [
+                    ("ReadOperationCount", ctypes.c_uint64),
+                    ("WriteOperationCount", ctypes.c_uint64),
+                    ("OtherOperationCount", ctypes.c_uint64),
+                    ("ReadTransferCount", ctypes.c_uint64),
+                    ("WriteTransferCount", ctypes.c_uint64),
+                    ("OtherTransferCount", ctypes.c_uint64),
+                ]
+
+            class JOBOBJECT_EXTENDED_LIMIT_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("BasicLimitInformation", JOBOBJECT_BASIC_LIMIT_INFORMATION),
+                    ("IoInfo", IO_COUNTERS),
+                    ("ProcessMemoryLimit", ctypes.c_size_t),
+                    ("JobMemoryLimit", ctypes.c_size_t),
+                    ("PeakProcessMemoryUsed", ctypes.c_size_t),
+                    ("PeakJobMemoryUsed", ctypes.c_size_t),
+                ]
+
+            JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
+            JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+            JobObjectExtendedLimitInformation = 9
+            PROCESS_SET_QUOTA = 0x0100
+            PROCESS_TERMINATE = 0x0001
+
+            kernel32.CreateJobObjectW.restype = wintypes.HANDLE
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+
+            job_handle = kernel32.CreateJobObjectW(None, None)
+            if not job_handle:
+                return None, "windows_job_create_failed"
+
+            info = JOBOBJECT_EXTENDED_LIMIT_INFORMATION()
+            info.BasicLimitInformation.LimitFlags = (
+                JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                | JOB_OBJECT_LIMIT_PROCESS_MEMORY
+                | JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+            )
+            info.BasicLimitInformation.ActiveProcessLimit = max_processes
+            info.ProcessMemoryLimit = memory_limit_mb * 1024 * 1024
+
+            ok_set = kernel32.SetInformationJobObject(
+                job_handle,
+                JobObjectExtendedLimitInformation,
+                ctypes.byref(info),
+                ctypes.sizeof(info),
+            )
+            if not ok_set:
+                kernel32.CloseHandle(job_handle)
+                return None, "windows_job_setinfo_failed"
+
+            proc_handle = kernel32.OpenProcess(
+                PROCESS_SET_QUOTA | PROCESS_TERMINATE,
+                False,
+                int(pid),
+            )
+            if not proc_handle:
+                kernel32.CloseHandle(job_handle)
+                return None, "windows_open_process_failed"
+
+            try:
+                ok_assign = kernel32.AssignProcessToJobObject(job_handle, proc_handle)
+            finally:
+                kernel32.CloseHandle(proc_handle)
+
+            if not ok_assign:
+                kernel32.CloseHandle(job_handle)
+                return None, "windows_job_assign_failed"
+
+            return cls(job_handle), "windows_job_object"
+        except Exception as exc:
+            return None, f"windows_job_error:{type(exc).__name__}"
+
+    def close(self) -> None:
+        if self._handle:
+            try:
+                self._kernel32.CloseHandle(self._handle)
+            except Exception:
+                pass
+            self._handle = None
 
 
 class _SandboxRPCError(RuntimeError):
@@ -34,12 +168,18 @@ class _SandboxPluginClient:
         source_path: Path,
         env: Dict[str, str],
         permission_provider: Callable[[], List[str]],
+        scratch_dir: Optional[Path] = None,
         speak_cb: Optional[Callable[[str, str], Awaitable[Any]]] = None,
         broadcast_cb: Optional[Callable[[str, Dict[str, Any]], Awaitable[Any]]] = None,
         event_bus_provider: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.plugin_id = plugin_id
         self.source_path = Path(source_path).resolve()
+        if scratch_dir is not None:
+            self.scratch_dir = Path(scratch_dir).resolve()
+        else:
+            safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(plugin_id or "plugin")).strip("_") or "plugin"
+            self.scratch_dir = (Path(tempfile.gettempdir()) / "maybeai_plugin_sandbox" / safe_id).resolve()
         self.env = dict(env)
         self._permission_provider = permission_provider
         self._speak_cb = speak_cb
@@ -47,11 +187,15 @@ class _SandboxPluginClient:
         self._event_bus_provider = event_bus_provider
 
         self.proc: Optional[asyncio.subprocess.Process] = None
+        self._win_job: Optional[_WindowsJobObject] = None
+        self.sandbox_level: str = SANDBOX_LEVEL_SUBPROCESS_RESTRICTED
+        self.os_isolation_detail: str = "pending"
         self._pending: Dict[str, asyncio.Future] = {}
         self._req_seq = 0
         self._write_lock = asyncio.Lock()
         self._reader_task: Optional[asyncio.Task] = None
         self._stderr_task: Optional[asyncio.Task] = None
+        self._last_stderr: List[str] = []
 
     @property
     def is_running(self) -> bool:
@@ -60,17 +204,83 @@ class _SandboxPluginClient:
     async def start(self) -> None:
         if self.is_running:
             return
-        self.proc = await asyncio.create_subprocess_exec(
+        self.scratch_dir.mkdir(parents=True, exist_ok=True)
+        perms = [str(p).strip() for p in (self._permission_provider() or []) if str(p).strip()]
+        worker_cmd: List[str] = [
             sys.executable,
             "-m",
             "core.plugins.sandbox_worker",
             str(self.source_path),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=self.env,
-            cwd=str(REPO_ROOT),
-        )
+            f"--scratch-dir={self.scratch_dir}",
+            f"--repo-root={REPO_ROOT}",
+            f"--permissions={','.join(perms)}",
+        ]
+
+        launch_cmd = list(worker_cmd)
+        used_bwrap = False
+        if os.name != "nt":
+            bwrap_bin = shutil.which("bwrap")
+            if bwrap_bin:
+                bwrap_cmd: List[str] = [
+                    bwrap_bin,
+                    "--die-with-parent",
+                    "--new-session",
+                ]
+                if "net:outbound" not in perms and "network:outbound" not in perms:
+                    bwrap_cmd.append("--unshare-net")
+                for ro_path in ("/usr", "/lib", "/lib64", "/bin", "/etc/alternatives"):
+                    if Path(ro_path).exists():
+                        bwrap_cmd.extend(["--ro-bind", ro_path, ro_path])
+                bwrap_cmd.extend(["--ro-bind", str(REPO_ROOT / "core" / "plugins"), str(REPO_ROOT / "core" / "plugins")])
+                bwrap_cmd.extend(["--ro-bind", str(self.source_path), str(self.source_path)])
+                bwrap_cmd.extend(["--bind", str(self.scratch_dir), str(self.scratch_dir)])
+                bwrap_cmd.extend(["--chdir", str(self.scratch_dir)])
+                bwrap_cmd.extend(worker_cmd)
+                bwrap_cmd.append("--bwrap-active")
+                launch_cmd = bwrap_cmd
+                used_bwrap = True
+
+        try:
+            self.proc = await asyncio.create_subprocess_exec(
+                *launch_cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self.env,
+                cwd=str(self.scratch_dir),
+            )
+        except OSError:
+            if not used_bwrap:
+                raise
+            used_bwrap = False
+            self.proc = await asyncio.create_subprocess_exec(
+                *worker_cmd,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self.env,
+                cwd=str(self.scratch_dir),
+            )
+
+        if os.name == "nt":
+            job, detail = _WindowsJobObject.attach(self.proc.pid)
+            self._win_job = job
+            self.os_isolation_detail = detail
+            self.sandbox_level = (
+                SANDBOX_LEVEL_OS_ISOLATED
+                if job is not None
+                else SANDBOX_LEVEL_SUBPROCESS_RESTRICTED
+            )
+        elif used_bwrap:
+            self.sandbox_level = SANDBOX_LEVEL_OS_ISOLATED
+            self.os_isolation_detail = "linux_bwrap"
+        elif sys.platform.startswith("linux"):
+            self.sandbox_level = SANDBOX_LEVEL_OS_ISOLATED
+            self.os_isolation_detail = "linux_rlimit"
+        else:
+            self.sandbox_level = SANDBOX_LEVEL_SUBPROCESS_RESTRICTED
+            self.os_isolation_detail = "posix_boundary_guard"
+
         self._reader_task = asyncio.create_task(self._stdout_reader_loop())
         self._stderr_task = asyncio.create_task(self._stderr_drain_loop())
 
@@ -149,9 +359,11 @@ class _SandboxPluginClient:
                 if not fut.done():
                     fut.set_exception(exc)
         finally:
+            stderr_tail = " | ".join(self._last_stderr[-5:])
+            err_msg = f"Sandbox worker '{self.plugin_id}' exited" + (f": {stderr_tail}" if stderr_tail else "")
             for fut in list(self._pending.values()):
                 if not fut.done():
-                    fut.set_exception(EOFError(f"Sandbox worker '{self.plugin_id}' exited"))
+                    fut.set_exception(EOFError(err_msg))
             self._pending.clear()
 
     async def _stderr_drain_loop(self) -> None:
@@ -161,6 +373,11 @@ class _SandboxPluginClient:
                 line = await self.proc.stderr.readline()
                 if not line:
                     break
+                text = line.decode("utf-8", errors="replace").strip()
+                if text:
+                    self._last_stderr.append(text)
+                    if len(self._last_stderr) > 20:
+                        self._last_stderr = self._last_stderr[-20:]
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -308,6 +525,9 @@ class _SandboxPluginClient:
         self._reader_task = None
         self._stderr_task = None
         self.proc = None
+        if self._win_job is not None:
+            self._win_job.close()
+            self._win_job = None
 
     async def graceful_shutdown(self, timeout: float = 2.0) -> None:
         if self.is_running:
@@ -334,6 +554,7 @@ class PluginRegistry:
         startup_timeout_sec: float = 5.0,
         enabled: bool = True,
         sandbox_mode: str = "subprocess",
+        granted_permissions: Optional[Dict[str, List[str]]] = None,
         event_bus: Optional[Any] = None,
         speak_cb: Optional[Callable[[str, str], Awaitable[Any]]] = None,
         broadcast_cb: Optional[Callable[[str, Dict[str, Any]], Awaitable[Any]]] = None,
@@ -347,12 +568,13 @@ class PluginRegistry:
         self.hook_timeout_sec: float = max(0.1, float(hook_timeout_sec or 5.0))
         self.startup_timeout_sec: float = max(0.5, float(startup_timeout_sec or 5.0))
         self.sandbox_mode: str = self._normalize_sandbox_mode(sandbox_mode)
+        self.granted_permissions: Dict[str, List[str]] = self._normalize_granted_permissions(
+            granted_permissions
+        )
+        self._sandbox_root: Path = Path(tempfile.gettempdir()) / "maybeai_plugin_sandbox"
         self.event_bus = event_bus
         self._speak_cb = speak_cb
         self._broadcast_cb = broadcast_cb
-
-        if settings:
-            self.update_config(settings)
 
         self._plugins: Dict[str, MaybeAIPlugin] = {}
         self._manifests: Dict[str, PluginManifest] = {}
@@ -363,6 +585,53 @@ class PluginRegistry:
         self._sources: Dict[str, Dict[str, Any]] = {}
         self._command_map: Dict[str, str] = {}
         self._bus_attached: bool = False
+
+        if settings:
+            self.update_config(settings)
+
+    @staticmethod
+    def _normalize_granted_permissions(raw: Any) -> Dict[str, List[str]]:
+        if not isinstance(raw, dict):
+            return {}
+        normalized: Dict[str, List[str]] = {}
+        for pid, perms in raw.items():
+            key = str(pid or "").strip()
+            if not key or not isinstance(perms, (list, tuple, set)):
+                continue
+            clean: List[str] = []
+            for p in perms:
+                ps = str(p or "").strip()
+                if ps and ps not in clean:
+                    clean.append(ps)
+            normalized[key] = clean
+        return normalized
+
+    def _get_scratch_dir(self, plugin_id: str) -> Path:
+        safe_id = re.sub(r"[^a-zA-Z0-9_.-]+", "_", str(plugin_id or "plugin")).strip("_") or "plugin"
+        return (self._sandbox_root / safe_id).resolve()
+
+    def _get_effective_permissions(self, plugin_id: str) -> List[str]:
+        manifest = self._manifests.get(plugin_id)
+        if manifest is None:
+            return []
+        src = self._sources.get(plugin_id, {})
+        if src.get("builtin") or (not src.get("sandboxed") and not src.get("source_path")):
+            return list(manifest.permissions)
+        approved = set(self.granted_permissions.get(plugin_id, [])) | set(
+            self.granted_permissions.get("*", [])
+        )
+        return [p for p in manifest.permissions if p in approved]
+
+    def _refresh_permission_metadata(self, plugin_id: str) -> None:
+        manifest = self._manifests.get(plugin_id)
+        meta = self._metadata.get(plugin_id)
+        if manifest is None or meta is None:
+            return
+        effective = self._get_effective_permissions(plugin_id)
+        meta["requested_permissions"] = list(manifest.permissions)
+        meta["granted_permissions"] = list(effective)
+        meta["denied_permissions"] = [p for p in manifest.permissions if p not in effective]
+        meta["permissions"] = list(effective)
 
     @staticmethod
     def _normalize_sandbox_mode(mode: Any) -> str:
@@ -400,6 +669,10 @@ class PluginRegistry:
             self.startup_timeout_sec = max(0.5, float(cfg.get("startup_timeout_sec", 5.0) or 5.0))
         if "sandbox_mode" in cfg and cfg.get("sandbox_mode") is not None:
             self.sandbox_mode = self._normalize_sandbox_mode(cfg.get("sandbox_mode"))
+        if "granted_permissions" in cfg:
+            self.granted_permissions = self._normalize_granted_permissions(cfg.get("granted_permissions"))
+            for pid in list(self._metadata.keys()):
+                self._refresh_permission_metadata(pid)
 
     def _build_context(self, plugin_id: str) -> PluginContext:
         state_store = self._plugin_states.setdefault(plugin_id, {})
@@ -444,16 +717,124 @@ class PluginRegistry:
                 classes.append(obj)
         return classes
 
+    @staticmethod
+    def _eval_ast_value(node: ast.AST) -> Any:
+        if isinstance(node, ast.Name):
+            if node.id == "ALLOWED_PLUGIN_PERMISSIONS":
+                return list(ALLOWED_PLUGIN_PERMISSIONS)
+            if node.id == "DEFAULT_PLUGIN_PERMISSIONS":
+                return list(DEFAULT_PLUGIN_PERMISSIONS)
+            raise ValueError(f"Unsupported AST name: {node.id}")
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id in ("list", "tuple") and len(node.args) == 1 and not node.keywords:
+                inner = PluginRegistry._eval_ast_value(node.args[0])
+                return list(inner) if node.func.id == "list" else tuple(inner)
+            raise ValueError("Unsupported AST call")
+        return ast.literal_eval(node)
+
+    @classmethod
+    def _extract_manifest_from_ast(cls, file_path: Path) -> Optional[PluginManifest]:
+        """
+        Extracts a PluginManifest via static AST inspection without executing module code.
+        Returns None if the manifest cannot be statically resolved.
+        """
+        try:
+            source = file_path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=str(file_path))
+        except Exception:
+            return None
+
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            manifest_call: Optional[ast.Call] = None
+            for stmt in node.body:
+                val = None
+                if isinstance(stmt, ast.Assign):
+                    if any(isinstance(t, ast.Name) and t.id == "manifest" for t in stmt.targets):
+                        val = stmt.value
+                elif isinstance(stmt, ast.AnnAssign):
+                    if isinstance(stmt.target, ast.Name) and stmt.target.id == "manifest":
+                        val = stmt.value
+                if isinstance(val, ast.Call) and (
+                    (isinstance(val.func, ast.Name) and val.func.id == "PluginManifest")
+                    or (isinstance(val.func, ast.Attribute) and val.func.attr == "PluginManifest")
+                ):
+                    manifest_call = val
+                    break
+
+            if manifest_call is None:
+                continue
+
+            try:
+                pos_args = [cls._eval_ast_value(a) for a in manifest_call.args]
+                kw_args = {
+                    kw.arg: cls._eval_ast_value(kw.value)
+                    for kw in manifest_call.keywords
+                    if kw.arg is not None
+                }
+                manifest = PluginManifest(*pos_args, **kw_args)
+            except Exception:
+                return None
+
+            # Mirror MaybeAIPlugin._index_decorated_methods() for @plugin_command / @plugin_event
+            for stmt in node.body:
+                if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                for dec in stmt.decorator_list:
+                    if not isinstance(dec, ast.Call):
+                        continue
+                    dec_name = (
+                        dec.func.id
+                        if isinstance(dec.func, ast.Name)
+                        else (dec.func.attr if isinstance(dec.func, ast.Attribute) else "")
+                    )
+                    if dec_name == "plugin_command":
+                        try:
+                            c_args = [cls._eval_ast_value(a) for a in dec.args]
+                            c_kw = {
+                                kw.arg: cls._eval_ast_value(kw.value)
+                                for kw in dec.keywords
+                                if kw.arg is not None
+                            }
+                            raw_cmd = c_args[0] if c_args else c_kw.get("name", "")
+                            creator_only = bool(c_args[1] if len(c_args) > 1 else c_kw.get("creator_only", False))
+                            norm_cmd = PluginManifest._norm_cmd(str(raw_cmd))
+                            if norm_cmd and norm_cmd not in manifest.commands:
+                                manifest.commands.append(norm_cmd)
+                            if creator_only and norm_cmd and norm_cmd not in manifest.creator_only_commands:
+                                manifest.creator_only_commands.append(norm_cmd)
+                        except Exception:
+                            return None
+                    elif dec_name == "plugin_event":
+                        try:
+                            e_args = [cls._eval_ast_value(a) for a in dec.args]
+                            e_kw = {
+                                kw.arg: cls._eval_ast_value(kw.value)
+                                for kw in dec.keywords
+                                if kw.arg is not None
+                            }
+                            ev = str(e_args[0] if e_args else e_kw.get("event_name", "")).strip()
+                            if ev and ev not in manifest.events:
+                                manifest.events.append(ev)
+                        except Exception:
+                            return None
+
+            try:
+                manifest.validate()
+                return manifest
+            except Exception:
+                return None
+
+        return None
+
     def _create_sandbox_client(self, plugin_id: str, source_path: Path) -> _SandboxPluginClient:
         return _SandboxPluginClient(
             plugin_id=plugin_id,
             source_path=source_path,
+            scratch_dir=self._get_scratch_dir(plugin_id),
             env=self._build_sandbox_env(),
-            permission_provider=lambda: list(
-                self._manifests.get(plugin_id).permissions
-                if plugin_id in self._manifests
-                else ()
-            ),
+            permission_provider=lambda: self._get_effective_permissions(plugin_id),
             speak_cb=self._speak_cb,
             broadcast_cb=self._broadcast_cb,
             event_bus_provider=lambda: self.event_bus,
@@ -464,6 +845,8 @@ class PluginRegistry:
         manifest: PluginManifest,
         source_path: str,
         auto_enable: Optional[bool] = None,
+        sandbox_level: str = SANDBOX_LEVEL_SUBPROCESS_RESTRICTED,
+        os_isolation_detail: str = "pending",
     ) -> str:
         manifest.validate()
         plugin_id = manifest.id
@@ -476,22 +859,65 @@ class PluginRegistry:
             self.enabled_plugins.append(plugin_id)
 
         self._manifests[plugin_id] = manifest
-        self._metadata[plugin_id] = {
-            **manifest.to_dict(),
-            "enabled": is_enabled,
-            "loaded": False,
-            "builtin": False,
-            "sandboxed": True,
-            "source_path": source_path,
-            "error_count": 0,
-            "last_error": None,
-        }
         self._sources[plugin_id] = {
             "builtin": False,
             "sandboxed": True,
             "module_name": None,
             "class_name": None,
             "source_path": source_path,
+        }
+        effective_perms = self._get_effective_permissions(plugin_id)
+        self._metadata[plugin_id] = {
+            **manifest.to_dict(),
+            "permissions": list(effective_perms),
+            "requested_permissions": list(manifest.permissions),
+            "granted_permissions": list(effective_perms),
+            "denied_permissions": [p for p in manifest.permissions if p not in effective_perms],
+            "enabled": is_enabled,
+            "loaded": False,
+            "builtin": False,
+            "sandboxed": True,
+            "sandbox_level": sandbox_level,
+            "os_isolation_detail": os_isolation_detail,
+            "scratch_dir": str(self._get_scratch_dir(plugin_id)),
+            "source_path": source_path,
+            "error_count": 0,
+            "last_error": None,
+        }
+        return plugin_id
+
+    def _record_blocked_plugin(self, file_path: Path, error: Exception) -> str:
+        plugin_id = file_path.stem
+        self._sources[plugin_id] = {
+            "builtin": False,
+            "sandboxed": True,
+            "module_name": None,
+            "class_name": None,
+            "source_path": str(file_path),
+        }
+        self._metadata[plugin_id] = {
+            "id": plugin_id,
+            "name": plugin_id,
+            "version": "0.0.0",
+            "author": "unknown",
+            "description": "",
+            "commands": [],
+            "events": [],
+            "creator_only_commands": [],
+            "permissions": [],
+            "requested_permissions": [],
+            "granted_permissions": [],
+            "denied_permissions": [],
+            "enabled": False,
+            "loaded": False,
+            "builtin": False,
+            "sandboxed": True,
+            "sandbox_level": SANDBOX_LEVEL_BLOCKED,
+            "os_isolation_detail": "blocked",
+            "scratch_dir": str(self._get_scratch_dir(plugin_id)),
+            "source_path": str(file_path),
+            "error_count": 1,
+            "last_error": f"{type(error).__name__}: {error}",
         }
         return plugin_id
 
@@ -522,22 +948,29 @@ class PluginRegistry:
 
         self._plugins[plugin_id] = plugin
         self._manifests[plugin_id] = manifest
-        self._metadata[plugin_id] = {
-            **manifest.to_dict(),
-            "enabled": is_enabled,
-            "loaded": False,
-            "builtin": builtin,
-            "sandboxed": False,
-            "source_path": source_path,
-            "error_count": 0,
-            "last_error": None,
-        }
         self._sources[plugin_id] = {
             "builtin": builtin,
             "sandboxed": False,
             "module_name": module_name or plugin.__class__.__module__,
             "class_name": plugin.__class__.__name__,
             "source_path": source_path,
+        }
+        effective_perms = self._get_effective_permissions(plugin_id)
+        self._metadata[plugin_id] = {
+            **manifest.to_dict(),
+            "permissions": list(effective_perms),
+            "requested_permissions": list(manifest.permissions),
+            "granted_permissions": list(effective_perms),
+            "denied_permissions": [p for p in manifest.permissions if p not in effective_perms],
+            "enabled": is_enabled,
+            "loaded": False,
+            "builtin": builtin,
+            "sandboxed": False,
+            "sandbox_level": SANDBOX_LEVEL_BUILTIN if builtin else "inprocess",
+            "os_isolation_detail": "builtin_trusted" if builtin else "inprocess_legacy",
+            "source_path": source_path,
+            "error_count": 0,
+            "last_error": None,
         }
         self._build_context(plugin_id)
         return plugin_id
@@ -587,6 +1020,9 @@ class PluginRegistry:
                 self._subprocesses[plugin_id] = client
             try:
                 await client.start()
+                meta["sandbox_level"] = client.sandbox_level
+                meta["os_isolation_detail"] = client.os_isolation_detail
+                meta["scratch_dir"] = str(client.scratch_dir)
                 state = self._plugin_states.setdefault(plugin_id, {})
                 res = await asyncio.wait_for(
                     client.call("on_load", {"state": state}),
@@ -603,6 +1039,7 @@ class PluginRegistry:
                 await client.kill_and_cleanup()
                 self._subprocesses.pop(plugin_id, None)
                 meta["loaded"] = False
+                meta["sandbox_level"] = SANDBOX_LEVEL_BLOCKED
                 meta["error_count"] = int(meta.get("error_count", 0)) + 1
                 err_name = getattr(exc, "error_type", type(exc).__name__)
                 meta["last_error"] = f"{err_name}: {exc}"
@@ -700,11 +1137,22 @@ class PluginRegistry:
                 if file_path.name.startswith("_"):
                     continue
                 if self.sandbox_mode == "subprocess":
+                    # Prefer static AST manifest extraction to avoid import-time code execution during discovery.
+                    ast_manifest = self._extract_manifest_from_ast(file_path)
+                    if ast_manifest is not None:
+                        pid = self._register_sandbox_manifest(
+                            ast_manifest,
+                            source_path=str(file_path),
+                        )
+                        discovered_ids.append(pid)
+                        continue
                     try:
                         manifest, client = await self._probe_sandbox_manifest(file_path)
                         pid = self._register_sandbox_manifest(
                             manifest,
                             source_path=str(file_path),
+                            sandbox_level=client.sandbox_level,
+                            os_isolation_detail=client.os_isolation_detail,
                         )
                         discovered_ids.append(pid)
                         if self.enabled and self._metadata[pid].get("enabled"):
@@ -712,8 +1160,26 @@ class PluginRegistry:
                         else:
                             await client.graceful_shutdown(timeout=min(self.hook_timeout_sec, 2.0))
                     except Exception as exc:
-                        print(f"[PluginRegistry] Failed discovering sandboxed plugin '{file_path}': {exc}")
+                        # Never silently fall back to inprocess; mark external plugin as blocked.
+                        blocked_pid = self._record_blocked_plugin(file_path, exc)
+                        discovered_ids.append(blocked_pid)
+                        print(f"[PluginRegistry] Blocked sandboxed plugin '{file_path}': {exc}")
                 else:
+                    ast_manifest = self._extract_manifest_from_ast(file_path)
+                    if ast_manifest is not None and (
+                        not self.enabled or ast_manifest.id not in self.enabled_plugins
+                    ):
+                        pid = self._register_sandbox_manifest(
+                            ast_manifest,
+                            source_path=str(file_path),
+                            auto_enable=False,
+                            sandbox_level="inprocess",
+                            os_isolation_detail="inprocess_deferred",
+                        )
+                        self._metadata[pid]["sandboxed"] = False
+                        self._sources[pid]["sandboxed"] = False
+                        discovered_ids.append(pid)
+                        continue
                     mod_name = f"maybeai_ext_plugin_{file_path.stem}"
                     try:
                         spec = importlib.util.spec_from_file_location(mod_name, str(file_path))
@@ -778,16 +1244,26 @@ class PluginRegistry:
         try:
             if src.get("sandboxed") and src.get("source_path"):
                 file_path = Path(src["source_path"])
-                manifest, client = await self._probe_sandbox_manifest(file_path)
-                self._register_sandbox_manifest(
-                    manifest,
-                    source_path=str(file_path),
-                    auto_enable=was_enabled,
-                )
-                if was_enabled and self.enabled:
-                    self._subprocesses[plugin_id] = client
+                ast_manifest = self._extract_manifest_from_ast(file_path)
+                if ast_manifest is not None:
+                    self._register_sandbox_manifest(
+                        ast_manifest,
+                        source_path=str(file_path),
+                        auto_enable=was_enabled,
+                    )
                 else:
-                    await client.graceful_shutdown(timeout=min(self.hook_timeout_sec, 2.0))
+                    manifest, client = await self._probe_sandbox_manifest(file_path)
+                    self._register_sandbox_manifest(
+                        manifest,
+                        source_path=str(file_path),
+                        auto_enable=was_enabled,
+                        sandbox_level=client.sandbox_level,
+                        os_isolation_detail=client.os_isolation_detail,
+                    )
+                    if was_enabled and self.enabled:
+                        self._subprocesses[plugin_id] = client
+                    else:
+                        await client.graceful_shutdown(timeout=min(self.hook_timeout_sec, 2.0))
             elif src.get("source_path"):
                 file_path = Path(src["source_path"])
                 mod_name = src["module_name"]
@@ -825,6 +1301,8 @@ class PluginRegistry:
                     auto_enable=was_enabled,
                 )
         except Exception as exc:
+            if src.get("sandboxed"):
+                meta["sandbox_level"] = SANDBOX_LEVEL_BLOCKED
             meta["error_count"] = int(meta.get("error_count", 0)) + 1
             meta["last_error"] = f"{type(exc).__name__}: {exc}"
             return {"success": False, "error": meta["last_error"], "plugin": dict(meta)}
@@ -957,7 +1435,7 @@ class PluginRegistry:
             manifest = self._manifests.get(plugin_id)
             if manifest is None or not meta.get("loaded") or not meta.get("enabled"):
                 continue
-            if "event:sub" not in manifest.permissions:
+            if "event:sub" not in self._get_effective_permissions(plugin_id):
                 continue
             declared = manifest.events
             if event_name not in declared and "*" not in declared:

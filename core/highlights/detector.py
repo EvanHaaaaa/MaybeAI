@@ -19,6 +19,8 @@ from core.event_bus import (
 GOAL_COMPLETED = "goal.completed"
 PERFORMANCE_UPDATED = "performance.updated"
 HIGHLIGHT_MARKED = "highlight.marked"
+STORY_MILESTONE = "story.milestone"
+GAME_MOMENT = "game.moment"
 
 
 @dataclass
@@ -84,6 +86,8 @@ class HighlightDetector:
         event_bus.subscribe(GOAL_COMPLETED, self._on_goal_completed)
         event_bus.subscribe(MOOD_UPDATED, self._on_mood_updated)
         event_bus.subscribe(PERFORMANCE_UPDATED, self._on_performance_updated)
+        event_bus.subscribe(STORY_MILESTONE, self._on_story_milestone)
+        event_bus.subscribe(GAME_MOMENT, self._on_game_moment)
         self._subscribed = True
 
     def _in_cooldown(self, now: float) -> bool:
@@ -274,6 +278,87 @@ class HighlightDetector:
             user="Eve",
             details=dict(payload),
         )
+
+    def _on_story_milestone(self, _event_name: str, payload: Dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        reason = str(payload.get("reason") or payload.get("title") or payload.get("milestone") or "Story milestone")
+        user = str(payload.get("user") or "Eve")
+        self._record_marker(
+            reason=reason,
+            category=str(payload.get("category") or "story_milestone"),
+            source=str(payload.get("source") or "storytelling"),
+            user=user,
+            details=dict(payload),
+        )
+
+    def _on_game_moment(self, _event_name: str, payload: Dict[str, Any]) -> None:
+        if not self.enabled:
+            return
+        is_highlight = bool(payload.get("is_highlight") or payload.get("highlight"))
+        exc_raw = payload.get("excitement")
+        high_exc = False
+        if exc_raw is not None:
+            try:
+                high_exc = float(exc_raw) >= self.excitement_threshold
+            except (TypeError, ValueError):
+                high_exc = False
+        if not (is_highlight or high_exc):
+            return
+        reason = str(payload.get("reason") or payload.get("moment") or "High-excitement game moment")
+        user = str(payload.get("user") or "Eve")
+        self._record_marker(
+            reason=reason,
+            category=str(payload.get("category") or "game_moment"),
+            source=str(payload.get("source") or "game"),
+            user=user,
+            details=dict(payload),
+        )
+
+    def mark_showrunner_moment(
+        self,
+        reason: str,
+        category: str = "story_milestone",
+        source: str = "storytelling",
+        user: str = "Eve",
+        excitement: Optional[float] = None,
+        details: Optional[Dict[str, Any]] = None,
+        bypass_cooldown: bool = False,
+    ) -> Optional[HighlightMarker]:
+        """
+        Showrunner helper to emit a highlight marker for storytelling milestones
+        or high-excitement RPG/game moments.
+        """
+        if excitement is not None and not bypass_cooldown:
+            try:
+                if float(excitement) < self.excitement_threshold:
+                    return None
+            except (TypeError, ValueError):
+                pass
+        merged_details = dict(details or {})
+        if excitement is not None:
+            merged_details.setdefault("excitement", float(excitement))
+        return self._record_marker(
+            reason=str(reason or "Showrunner highlight"),
+            category=str(category or "story_milestone"),
+            source=str(source or "storytelling"),
+            user=str(user or "Eve"),
+            details=merged_details,
+            is_manual=bool(bypass_cooldown),
+        )
+
+    def get_showrunner_summary(self, limit: int = 5) -> Dict[str, Any]:
+        """Returns a compact showrunner summary of recorded highlight markers."""
+        counts: Dict[str, int] = {}
+        for marker in self._markers:
+            counts[marker.category] = counts.get(marker.category, 0) + 1
+        recent = self.get_highlights(limit=limit)
+        return {
+            "total_highlights": len(self._markers),
+            "categories_count": counts,
+            "last_highlight": recent[-1] if recent else None,
+            "recent_highlights": recent,
+        }
 
     def mark_manual(
         self,

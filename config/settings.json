@@ -185,7 +185,8 @@
       "word_chain"
     ],
     "hook_timeout_sec": 5.0,
-    "sandbox_mode": "subprocess"
+    "sandbox_mode": "subprocess",
+    "granted_permissions": {}
   },
   "obs": {
     "enabled": false,

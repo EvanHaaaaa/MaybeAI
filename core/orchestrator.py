@@ -183,11 +183,14 @@ class Orchestrator:
             self_name="EveMaybe",
         )
         self.collab.set_reply_callback(self._on_collab_reply_needed)
-        self.collab.set_action_callbacks(
-            on_duet_sync=self._on_collab_duet_sync,
-            on_emote_sync=self._on_collab_emote_sync,
-            on_game_move=self._on_collab_game_move,
-        )
+        collab_action_cbs: Dict[str, Any] = {
+            "on_duet_sync": self._on_collab_duet_sync,
+            "on_emote_sync": self._on_collab_emote_sync,
+            "on_game_move": self._on_collab_game_move,
+        }
+        if "on_hello" in inspect.signature(self.collab.set_action_callbacks).parameters:
+            collab_action_cbs["on_hello"] = self._on_collab_hello
+        self.collab.set_action_callbacks(**collab_action_cbs)
 
         # Sync Vision VLM settings
         vision_cfg = settings.get("vision", {}) if isinstance(settings, dict) else {}
@@ -678,10 +681,36 @@ class Orchestrator:
             topic=env.topic,
         )
 
+    async def _on_collab_hello(self, env: CollabEnvelope) -> None:
+        peer_name = env.sender_name or env.sender_id or self.collab.peer_name or "Peer"
+        capabilities = env.payload.get("capabilities") if isinstance(env.payload, dict) else None
+        payload: Dict[str, Any] = {
+            **self.collab.get_status(),
+            "hello_peer": peer_name,
+        }
+        if capabilities is not None:
+            payload["peer_capabilities"] = capabilities
+        await self.broadcast("collab_state", payload)
+
     async def _on_collab_duet_sync(self, env: CollabEnvelope) -> None:
         song_id = str(env.payload.get("song_id") or env.topic or "").strip() or None
+        lyric_index = int(env.payload.get("lyric_index", 0) or 0)
+        timestamp = float(env.payload.get("timestamp", 0.0) or 0.0)
+        track = str(env.payload.get("track") or "")
         dedication = env.sender_name or env.sender_id or None
-        if not self._busy_lock.locked():
+
+        await self.broadcast(
+            "collab_duet_sync",
+            {
+                "song_id": song_id or "",
+                "lyric_index": lyric_index,
+                "timestamp": timestamp,
+                "track": track,
+                "peer_name": dedication or self.collab.peer_name,
+            },
+        )
+
+        if not self._busy_lock.locked() and (song_id or lyric_index == 0):
             async with self._busy_lock:
                 self._busy_owner_task = asyncio.current_task()
                 try:
@@ -691,14 +720,26 @@ class Orchestrator:
 
     async def _on_collab_emote_sync(self, env: CollabEnvelope) -> None:
         emotion = str(env.emotion or env.payload.get("emotion") or "happy").strip() or "happy"
+        action = str(env.payload.get("action") or "").strip()
         self._current_emotion = emotion
         vts_params = await self._apply_vts_mood_rig(emotion)
+        if action and self.vts.connected:
+            try:
+                await self.vts.trigger_expression(action)
+            except Exception:
+                pass
+        extra = {"action": action} if action else {}
         await self.broadcast(
             "avatar_state",
-            self._build_avatar_state(0.0, emotion, vts_params),
+            self._build_avatar_state(0.0, emotion, vts_params, **extra),
         )
 
     async def _on_collab_game_move(self, env: CollabEnvelope) -> None:
+        if not getattr(self.chess, "is_active", False):
+            return
+        game = str(env.payload.get("game") or "").strip().lower()
+        if game and game != "chess":
+            return
         move_str = str(
             env.payload.get("move")
             or env.payload.get("uci")

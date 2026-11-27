@@ -1,5 +1,7 @@
 import chess
+import chess.engine
 import random
+import shutil
 import time
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -90,13 +92,91 @@ class ChessEngine:
     - Move evaluation and game status analysis
     """
 
-    def __init__(self, elo: int = 1200):
+    def __init__(
+        self,
+        elo: int = 1200,
+        use_stockfish: bool = True,
+        stockfish_path: Optional[str] = None,
+        stockfish_time_limit: float = 0.15,
+    ):
         self.board = chess.Board()
         self.elo = elo
         self.move_history: List[str] = []
+        self.use_stockfish = bool(use_stockfish)
+        self.stockfish_path: Optional[str] = (
+            stockfish_path if stockfish_path is not None else (shutil.which("stockfish") if self.use_stockfish else None)
+        )
+        self.stockfish_time_limit = max(0.02, float(stockfish_time_limit))
+        self._stockfish_engine: Optional[Any] = None
+        self._stockfish_failed: bool = False
+
+    @property
+    def backend(self) -> str:
+        """Returns the active search backend: 'stockfish' or 'alpha_beta'."""
+        return "stockfish" if self.is_stockfish_available() else "alpha_beta"
+
+    def is_stockfish_available(self) -> bool:
+        """Returns True when Stockfish is enabled, located, and not marked failed."""
+        return bool(self.use_stockfish and self.stockfish_path and not self._stockfish_failed)
+
+    def _configure_stockfish_elo(self, engine: Any) -> None:
+        try:
+            options = getattr(engine, "options", {}) or {}
+            config: Dict[str, Any] = {}
+            if "UCI_LimitStrength" in options:
+                config["UCI_LimitStrength"] = True
+            if "UCI_Elo" in options:
+                elo_opt = options["UCI_Elo"]
+                min_elo = getattr(elo_opt, "min", 1320) or 1320
+                max_elo = getattr(elo_opt, "max", 3190) or 3190
+                config["UCI_Elo"] = max(int(min_elo), min(int(max_elo), int(self.elo)))
+            if config:
+                engine.configure(config)
+        except Exception:
+            pass
+
+    def _ensure_stockfish(self) -> Optional[Any]:
+        if not self.is_stockfish_available():
+            return None
+        if self._stockfish_engine is not None:
+            return self._stockfish_engine
+        try:
+            engine = chess.engine.SimpleEngine.popen_uci(self.stockfish_path)
+            self._configure_stockfish_elo(engine)
+            self._stockfish_engine = engine
+            return engine
+        except Exception:
+            self._stockfish_failed = True
+            self._stockfish_engine = None
+            return None
+
+    def _choose_move_stockfish(self, search_board: chess.Board) -> Optional[chess.Move]:
+        engine = self._ensure_stockfish()
+        if engine is None:
+            return None
+        try:
+            result = engine.play(search_board, chess.engine.Limit(time=self.stockfish_time_limit))
+            move = getattr(result, "move", None)
+            if move is not None and move in search_board.legal_moves:
+                return move
+        except Exception:
+            self._stockfish_failed = True
+            self.close()
+        return None
+
+    def close(self) -> None:
+        """Cleanly shuts down the Stockfish UCI process if running."""
+        if self._stockfish_engine is not None:
+            try:
+                self._stockfish_engine.quit()
+            except Exception:
+                pass
+            self._stockfish_engine = None
 
     def set_elo(self, elo: int):
         self.elo = max(400, min(2600, int(elo)))
+        if self._stockfish_engine is not None:
+            self._configure_stockfish_elo(self._stockfish_engine)
 
     def reset(self, fen: Optional[str] = None):
         if fen:
@@ -216,11 +296,16 @@ class ChessEngine:
             return min_eval, best_move
 
     def choose_move(self, board: Optional[chess.Board] = None) -> Optional[chess.Move]:
-        """Selects move according to current ELO settings on a cloned board."""
+        """Selects move using Stockfish UCI if available, with automatic fallback to alpha_beta."""
         search_board = board.copy() if board is not None else self.board.copy()
         legal_moves = list(search_board.legal_moves)
         if not legal_moves:
             return None
+
+        if self.is_stockfish_available():
+            sf_move = self._choose_move_stockfish(search_board)
+            if sf_move is not None:
+                return sf_move
 
         depth, blunder_chance = self.get_search_depth_and_blunder_chance()
 
@@ -285,6 +370,7 @@ class ChessEngine:
             "is_game_over": is_over,
             "result": result_desc,
             "elo": self.elo,
+            "backend": self.backend,
             "move_count": len(self.move_history),
             "move_history": self.move_history,
             "eval": self.evaluate_board(),

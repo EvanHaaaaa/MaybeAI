@@ -151,6 +151,7 @@ class TestSandboxedPluginExecution(unittest.IsolatedAsyncioTestCase):
         reg = PluginRegistry(
             plugins_dir=str(self.plugins_dir),
             enabled_plugins=["no_perms", "with_perms"],
+            granted_permissions={"with_perms": ["chat:read", "tts:speak", "event:sub", "event:pub"]},
             sandbox_mode="subprocess",
             event_bus=bus,
             speak_cb=speak_cb,
@@ -199,7 +200,7 @@ class TestSandboxedPluginExecution(unittest.IsolatedAsyncioTestCase):
         reg = PluginRegistry(
             plugins_dir=str(self.plugins_dir),
             enabled_plugins=["hang_plugin"],
-            hook_timeout_sec=0.3,
+            hook_timeout_sec=5.0,
             sandbox_mode="subprocess",
         )
         try:
@@ -209,6 +210,7 @@ class TestSandboxedPluginExecution(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(proc)
             self.assertIsNone(proc.returncode)
 
+            reg.hook_timeout_sec = 0.3
             handled, resp = await asyncio.wait_for(reg.dispatch_command("!hang"), timeout=3.0)
             self.assertTrue(handled)
             self.assertIsNone(resp)

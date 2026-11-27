@@ -13,6 +13,8 @@ import aiohttp
 import edge_tts
 import numpy as np
 
+from core.security_net import validate_outbound_url
+
 
 EMOTION_PROSODY_OFFSETS: Dict[str, Tuple[int, int]] = {
     "neutral": (0, 0),
@@ -286,12 +288,16 @@ class KokoroTTSProvider(_PersistentSessionMixin, BaseTTSProvider):
         lang_code: str = "a",
         default_voice: str = "af_heart",
         timeout: float = 15.0,
+        allow_private: bool = True,
+        url_allowlist: Optional[List[str]] = None,
         **kwargs: Any,
     ):
         self.kokoro_url = str(kokoro_url or "").strip()
         self.lang_code = lang_code
         self.default_voice = default_voice
         self.timeout = float(timeout)
+        self.allow_private = bool(allow_private)
+        self.url_allowlist = list(url_allowlist) if url_allowlist else None
         self._session: Optional[aiohttp.ClientSession] = None
         self._local_pipeline: Any = None
         self._local_backend: Optional[str] = None
@@ -363,7 +369,12 @@ class KokoroTTSProvider(_PersistentSessionMixin, BaseTTSProvider):
     ) -> bytes:
         speed = _rate_to_speed_multiplier(rate)
         if self.kokoro_url:
-            endpoint = self._resolve_endpoint()
+            endpoint = validate_outbound_url(
+                self._resolve_endpoint(),
+                allowed_schemes=("http", "https"),
+                allow_private=self.allow_private,
+                allowlist=self.url_allowlist,
+            )
             target_voice = kwargs.get("kokoro_voice") or (
                 voice if (voice and "-" not in voice) else self.default_voice
             )
@@ -489,12 +500,16 @@ class CustomNeuralTTSProvider(_PersistentSessionMixin, BaseTTSProvider):
         custom_tts_url: str = "",
         backend: str = "gpt_sovits",
         timeout: float = 20.0,
+        allow_private: bool = True,
+        url_allowlist: Optional[List[str]] = None,
         **kwargs: Any,
     ):
         self.custom_tts_url = str(custom_tts_url or "").strip()
         self.backend = str(backend or "gpt_sovits").strip().lower()
         self.name = self.backend if self.backend in ("gpt_sovits", "fish_speech") else "custom"
         self.timeout = float(timeout)
+        self.allow_private = bool(allow_private)
+        self.url_allowlist = list(url_allowlist) if url_allowlist else None
         self._session: Optional[aiohttp.ClientSession] = None
 
     async def synthesize(
@@ -509,6 +524,12 @@ class CustomNeuralTTSProvider(_PersistentSessionMixin, BaseTTSProvider):
         url = str(kwargs.get("custom_tts_url") or self.custom_tts_url).strip()
         if not url:
             raise RuntimeError(f"custom_tts_url is not configured for {self.backend}.")
+        url = validate_outbound_url(
+            url,
+            allowed_schemes=("http", "https"),
+            allow_private=self.allow_private,
+            allowlist=self.url_allowlist,
+        )
 
         payload = {
             "text": text,
@@ -538,6 +559,54 @@ class CustomNeuralTTSProvider(_PersistentSessionMixin, BaseTTSProvider):
         }
 
 
+class FishSpeechProvider(CustomNeuralTTSProvider):
+    """HTTP neural TTS provider for Fish Speech."""
+
+    name: str = "fish_speech"
+
+    def __init__(
+        self,
+        custom_tts_url: str = "",
+        timeout: float = 20.0,
+        allow_private: bool = True,
+        url_allowlist: Optional[List[str]] = None,
+        **kwargs: Any,
+    ):
+        kwargs.pop("backend", None)
+        super().__init__(
+            custom_tts_url=custom_tts_url,
+            backend="fish_speech",
+            timeout=timeout,
+            allow_private=allow_private,
+            url_allowlist=url_allowlist,
+            **kwargs,
+        )
+
+
+class GPTSoVITSProvider(CustomNeuralTTSProvider):
+    """HTTP neural TTS provider for GPT-SoVITS."""
+
+    name: str = "gpt_sovits"
+
+    def __init__(
+        self,
+        custom_tts_url: str = "",
+        timeout: float = 20.0,
+        allow_private: bool = True,
+        url_allowlist: Optional[List[str]] = None,
+        **kwargs: Any,
+    ):
+        kwargs.pop("backend", None)
+        super().__init__(
+            custom_tts_url=custom_tts_url,
+            backend="gpt_sovits",
+            timeout=timeout,
+            allow_private=allow_private,
+            url_allowlist=url_allowlist,
+            **kwargs,
+        )
+
+
 def create_tts_provider(provider_name: str = "edge-tts", **kwargs: Any) -> BaseTTSProvider:
     """Factory returning a configured BaseTTSProvider instance."""
     normalized = str(provider_name or "edge-tts").strip().lower()
@@ -547,7 +616,11 @@ def create_tts_provider(provider_name: str = "edge-tts", **kwargs: Any) -> BaseT
         return KokoroTTSProvider(**kwargs)
     if normalized in ("elevenlabs", "eleven-labs", "eleven_labs"):
         return ElevenLabsTTSProvider(**kwargs)
-    if normalized in ("gpt_sovits", "gpt-sovits", "fish_speech", "fish-speech", "custom", "custom_neural"):
+    if normalized in ("gpt_sovits", "gpt-sovits"):
+        return GPTSoVITSProvider(**kwargs)
+    if normalized in ("fish_speech", "fish-speech"):
+        return FishSpeechProvider(**kwargs)
+    if normalized in ("custom", "custom_neural"):
         backend = normalized.replace("-", "_")
         return CustomNeuralTTSProvider(backend=backend, **kwargs)
     raise ValueError(f"Unsupported TTS provider: {provider_name}")
@@ -566,11 +639,15 @@ class RVCVoiceConverter(_PersistentSessionMixin):
         rvc_url: str = "",
         pitch_shift: int = 0,
         timeout: float = 20.0,
+        allow_private: bool = True,
+        url_allowlist: Optional[List[str]] = None,
     ):
         self.enabled = bool(enabled)
         self.rvc_url = str(rvc_url or "").strip()
         self.pitch_shift = int(pitch_shift)
         self.timeout = float(timeout)
+        self.allow_private = bool(allow_private)
+        self.url_allowlist = list(url_allowlist) if url_allowlist else None
         self._session: Optional[aiohttp.ClientSession] = None
         self.last_error: Optional[str] = None
 
@@ -598,8 +675,14 @@ class RVCVoiceConverter(_PersistentSessionMixin):
         form.add_field("pitch_shift", str(shift))
 
         try:
+            validated_url = validate_outbound_url(
+                self.rvc_url,
+                allowed_schemes=("http", "https"),
+                allow_private=self.allow_private,
+                allowlist=self.url_allowlist,
+            )
             session = self._get_session()
-            async with session.post(self.rvc_url, data=form) as resp:
+            async with session.post(validated_url, data=form) as resp:
                 if resp.status != 200:
                     err_text = await resp.text()
                     self.last_error = f"RVC HTTP {resp.status}: {err_text[:200]}"

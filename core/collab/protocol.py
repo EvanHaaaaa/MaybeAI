@@ -21,6 +21,22 @@ VALID_COLLAB_EVENT_TYPES: Tuple[str, ...] = (
     "bye",
 )
 
+DEFAULT_COLLAB_CAPABILITIES: Tuple[str, ...] = (
+    "turn_utterance",
+    "turn_yield",
+    "duet_sync",
+    "emote_sync",
+    "game_move",
+)
+
+NON_UTTERANCE_EVENT_TYPES: Tuple[str, ...] = (
+    "hello",
+    "duet_sync",
+    "emote_sync",
+    "game_move",
+    "ping",
+)
+
 
 @dataclass
 class CollabEnvelope:

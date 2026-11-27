@@ -127,18 +127,39 @@ def _is_origin_request_allowed(origin: Optional[str]) -> bool:
     return _is_allowed_origin(origin)
 
 
+def _extract_bearer_token(headers: Any) -> str:
+    auth_header = headers.get("authorization", "") if headers else ""
+    if isinstance(auth_header, str) and auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return ""
+
+
+def _extract_ws_subprotocol_secret(websocket: WebSocket, prefix: str) -> tuple[str, Optional[str]]:
+    """Extracts a credential from Sec-WebSocket-Protocol matching `<prefix><value>`."""
+    candidates: list[str] = []
+    scope_protos = websocket.scope.get("subprotocols") if hasattr(websocket, "scope") else None
+    if isinstance(scope_protos, (list, tuple)):
+        candidates.extend(str(p).strip() for p in scope_protos if p)
+    header_protos = websocket.headers.get("sec-websocket-protocol", "")
+    if header_protos:
+        candidates.extend(p.strip() for p in header_protos.split(",") if p.strip())
+    for proto in candidates:
+        if proto.startswith(prefix):
+            return proto[len(prefix):].strip(), proto
+    return "", None
+
+
 def _is_ws_creator_authorized(websocket: WebSocket) -> bool:
     configured_token = _get_configured_creator_token()
     if configured_token:
+        proto_token, _ = _extract_ws_subprotocol_secret(websocket, "maybeai.token.")
         provided_token = (
-            websocket.headers.get("x-creator-token")
+            _extract_bearer_token(websocket.headers)
+            or websocket.headers.get("x-creator-token")
+            or proto_token
             or websocket.query_params.get("token", "")
             or ""
         ).strip()
-        if not provided_token:
-            auth_header = websocket.headers.get("authorization", "")
-            if auth_header.lower().startswith("bearer "):
-                provided_token = auth_header[7:].strip()
         if not provided_token:
             return False
         return hmac.compare_digest(
@@ -919,8 +940,12 @@ async def websocket_endpoint(websocket: WebSocket):
         return
 
     ws_creator_authorized = _is_ws_creator_authorized(websocket)
+    _, selected_subprotocol = _extract_ws_subprotocol_secret(websocket, "maybeai.token.")
 
-    await websocket.accept()
+    if selected_subprotocol:
+        await websocket.accept(subprotocol=selected_subprotocol)
+    else:
+        await websocket.accept()
     _active_ws_clients.add(websocket)
 
     async def listener(event: dict):
@@ -1810,18 +1835,17 @@ async def collab_websocket_endpoint(websocket: WebSocket):
     client_host = websocket.client.host if websocket.client else None
     is_loopback = client_host in _LOOPBACK_HOSTS
     secret = _get_collab_secret()
+    proto_secret, selected_subprotocol = _extract_ws_subprotocol_secret(websocket, "maybeai.collab.")
 
     if secret:
         provided_secret = (
-            websocket.query_params.get("secret")
-            or websocket.query_params.get("token")
+            _extract_bearer_token(websocket.headers)
             or websocket.headers.get("x-collab-secret")
+            or proto_secret
+            or websocket.query_params.get("secret")
+            or websocket.query_params.get("token")
             or ""
         ).strip()
-        if not provided_secret:
-            auth_header = websocket.headers.get("authorization", "")
-            if auth_header.lower().startswith("bearer "):
-                provided_secret = auth_header[7:].strip()
         if not provided_secret or not hmac.compare_digest(
             provided_secret.encode("utf-8"),
             secret.encode("utf-8"),
@@ -1832,7 +1856,10 @@ async def collab_websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=1008)
         return
 
-    await websocket.accept()
+    if selected_subprotocol:
+        await websocket.accept(subprotocol=selected_subprotocol)
+    else:
+        await websocket.accept()
     _active_collab_ws_clients.add(websocket)
 
     async def send_to_peer(envelope_dict: Dict[str, Any]):

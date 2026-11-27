@@ -3,7 +3,7 @@ import random
 import re
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Callable
 
 from core.storytelling.models import (
     StoryGenre,
@@ -34,7 +34,8 @@ class StoryEngine:
         self,
         storage_path: Optional[str] = None,
         second_brain_dir: str = "data/second_brain",
-        data_dir: Optional[str] = None
+        data_dir: Optional[str] = None,
+        on_highlight: Optional[Callable[[Dict[str, Any]], Any]] = None,
     ):
         if storage_path is None:
             if data_dir:
@@ -52,9 +53,61 @@ class StoryEngine:
 
         self.session: CampaignSession = CampaignSession()
         self.campaigns_history: List[Dict[str, Any]] = []
+        self._on_highlight: Optional[Callable[[Dict[str, Any]], Any]] = on_highlight
+        self._emitted_highlights: List[Dict[str, Any]] = []
 
         self._load_or_seed()
         self.sync_to_second_brain()
+
+    def set_highlight_hook(self, callback: Optional[Callable[[Dict[str, Any]], Any]]) -> None:
+        """Registers a showrunner highlight callback invoked on storytelling milestones."""
+        self._on_highlight = callback
+
+    def emit_highlight_marker(
+        self,
+        milestone: str,
+        summary: str,
+        category: str = "story_milestone",
+        excitement: float = 0.9,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Emits a structured showrunner highlight payload for storytelling/RPG milestones."""
+        payload: Dict[str, Any] = {
+            "milestone": milestone,
+            "reason": summary,
+            "category": category,
+            "source": "storytelling",
+            "campaign_title": self.session.title,
+            "genre": self.session.genre,
+            "excitement": float(excitement),
+            "party_hp": self.session.party.hp,
+            "party_gold": self.session.party.gold,
+            "details": dict(details or {}),
+            "timestamp": time.time(),
+        }
+        self._emitted_highlights.append(payload)
+        if len(self._emitted_highlights) > 50:
+            self._emitted_highlights.pop(0)
+        if self._on_highlight is not None and callable(self._on_highlight):
+            try:
+                self._on_highlight(payload)
+            except Exception as exc:
+                print(f"[StoryEngine] Highlight hook error: {exc}")
+        return payload
+
+    def get_showrunner_summary(self) -> Dict[str, Any]:
+        """Returns a compact showrunner summary of the current/last RPG campaign."""
+        return {
+            "title": self.session.title,
+            "genre": self.session.genre,
+            "status": self.session.status,
+            "current_scene_title": self.session.current_scene.title if self.session.current_scene else None,
+            "party_hp": self.session.party.hp,
+            "party_gold": self.session.party.gold,
+            "scenes_completed": len(self.session.scenes_history),
+            "recent_memories": list(self.session.key_memories[-3:]),
+            "recent_highlights": list(self._emitted_highlights[-5:]),
+        }
 
     def _load_or_seed(self):
         if self.storage_path.exists():
@@ -195,6 +248,12 @@ class StoryEngine:
 
         self.save()
         self.sync_to_second_brain()
+        self.emit_highlight_marker(
+            milestone="campaign_started",
+            summary=f"RPG Campaign started: {title}",
+            excitement=0.85,
+            details={"eve_role": role, "genre": g},
+        )
         return self.session, speech
 
     # --- Chat Input Processing ---
@@ -378,6 +437,15 @@ class StoryEngine:
         self.session.updated_at = time.time()
         self.save()
 
+        if is_crit_succ or is_crit_fail:
+            self.emit_highlight_marker(
+                milestone="critical_dice_roll",
+                summary=f"{roller} rolled {'NAT 20' if is_crit_succ else 'NAT 1'} in {self.session.title}!",
+                category="rpg_dice_crit",
+                excitement=1.0 if is_crit_succ else 0.9,
+                details={"roller": roller, "d20": d20, "total": total, "dc": dc},
+            )
+
         return res, speech
 
     # --- Scene Progression ---
@@ -461,6 +529,12 @@ class StoryEngine:
 
         self.save()
         self.sync_to_second_brain()
+        self.emit_highlight_marker(
+            milestone="scene_advanced",
+            summary=f"Story milestone: {next_title}",
+            excitement=0.85,
+            details={"scene_idx": scene_idx, "location": self.session.party.current_location},
+        )
         return new_scene, speech
 
     def _generate_next_story_beat(self, scene_idx: int, prev_choice: Optional[StoryChoice]) -> Tuple[str, str]:
@@ -601,6 +675,12 @@ class StoryEngine:
 
         self.save()
         self.sync_to_second_brain()
+        self.emit_highlight_marker(
+            milestone="campaign_completed",
+            summary=f"RPG Campaign completed: {self.session.title}",
+            excitement=0.95,
+            details={"final_hp": self.session.party.hp, "final_gold": self.session.party.gold},
+        )
         return self.session, speech
 
     # --- Second Brain Markdown Sync ---

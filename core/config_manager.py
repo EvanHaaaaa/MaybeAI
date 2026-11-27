@@ -203,7 +203,8 @@ class ConfigManager:
             "plugins_dir": "plugins",
             "enabled_plugins": ["word_chain"],
             "hook_timeout_sec": 5.0,
-            "sandbox_mode": "subprocess"
+            "sandbox_mode": "subprocess",
+            "granted_permissions": {}
         },
         "obs": {
             "enabled": False,
@@ -1412,6 +1413,15 @@ class ConfigManager:
                 "default": "subprocess",
                 "restart_required": False
             },
+            {
+                "path": "plugins.granted_permissions",
+                "category": "plugins",
+                "label": "Host-Approved Plugin Permissions",
+                "description": "Peta izin per plugin_id yang disetujui host (misal: {'my_plugin': ['tts:speak', 'event:pub']}).",
+                "type": "dict",
+                "default": {},
+                "restart_required": False
+            },
 
             # 18. OBS Showrunner
             {
@@ -2017,6 +2027,9 @@ class ConfigManager:
             elif ctrl_type == "list":
                 if not isinstance(val, list) or not all(isinstance(item, str) for item in val):
                     errors.append(f"Field '{path}' must be a list of strings.")
+            elif ctrl_type == "dict":
+                if not isinstance(val, dict):
+                    errors.append(f"Field '{path}' must be a dictionary.")
 
         return len(errors) == 0, errors
 

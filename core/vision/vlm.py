@@ -1,4 +1,5 @@
 import os
+import time
 import aiohttp
 import random
 from typing import Optional, Dict, Any, List
@@ -6,11 +7,93 @@ from typing import Optional, Dict, Any, List
 from core.vision.models import VisualSceneType, VisualObservation
 
 
+_SCENE_ACTIVITY_MAP: Dict[str, str] = {
+    VisualSceneType.MINECRAFT_PLAYING.value: "gaming_minecraft",
+    VisualSceneType.MINECRAFT_DEFEAT.value: "gaming_minecraft_defeat",
+    VisualSceneType.MINECRAFT_DIAMOND.value: "gaming_minecraft_diamond",
+    VisualSceneType.CHESS_MATCH.value: "playing_chess",
+    VisualSceneType.CHESS_GAMEOVER.value: "playing_chess_gameover",
+    VisualSceneType.VIDEO_WATCHING.value: "watching_video",
+    VisualSceneType.DESKTOP_GENERAL.value: "coding_desktop",
+    VisualSceneType.UNKNOWN.value: "unknown",
+}
+
+
 class MultimodalVisionModel:
     """
     Connects Vision Observations to Multimodal Vision-Language Models (Gemini / OpenAI / Ollama)
     and provides personality-rich offline streamer commentary grounded in what Eve sees on screen.
     """
+
+    DEFAULT_COOLDOWN_SEC: float = 8.0
+    _last_commentary_at: float = 0.0
+    _last_api_call_at: float = 0.0
+
+    @classmethod
+    def reset_cooldown(cls) -> None:
+        """Resets VLM commentary and API rate-limit timestamps."""
+        cls._last_commentary_at = 0.0
+        cls._last_api_call_at = 0.0
+
+    @classmethod
+    def can_emit_commentary(
+        cls,
+        cooldown_sec: Optional[float] = None,
+        now: Optional[float] = None,
+    ) -> bool:
+        """Returns True if enough time has elapsed since the last VLM commentary."""
+        cd = cls.DEFAULT_COOLDOWN_SEC if cooldown_sec is None else max(0.0, float(cooldown_sec))
+        if cd <= 0.0 or cls._last_commentary_at <= 0.0:
+            return True
+        ts = float(now if now is not None else time.monotonic())
+        return (ts - cls._last_commentary_at) >= cd
+
+    @classmethod
+    def build_structured_output(
+        cls,
+        observation: VisualObservation,
+        commentary: Optional[str] = None,
+        vlm_summary: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Builds a structured scene/activity payload from a VisualObservation."""
+        scene_type = str(observation.scene_type or VisualSceneType.UNKNOWN.value)
+        activity = _SCENE_ACTIVITY_MAP.get(scene_type, "unknown")
+        return {
+            "scene_type": scene_type,
+            "scene_label": observation.scene_label,
+            "activity": activity,
+            "is_event": bool(observation.is_event),
+            "event_type": observation.event_type,
+            "confidence": round(float(observation.confidence), 2),
+            "summary": vlm_summary or observation.summary,
+            "commentary": commentary,
+            "timestamp": observation.timestamp,
+        }
+
+    @classmethod
+    def generate_periodic_commentary(
+        cls,
+        observation: VisualObservation,
+        mood_directive: str = "",
+        dominant_mood: str = "CHILL_NEUTRAL",
+        cooldown_sec: Optional[float] = None,
+        force: bool = False,
+        now: Optional[float] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Rate-limited periodic VLM commentary generator.
+        Returns a structured scene/activity dict when allowed, or None while in cooldown.
+        """
+        ts = float(now if now is not None else time.monotonic())
+        if not force and not cls.can_emit_commentary(cooldown_sec=cooldown_sec, now=ts):
+            return None
+        cls._last_commentary_at = ts
+        commentary = cls.generate_commentary(
+            observation=observation,
+            mood_directive=mood_directive,
+            dominant_mood=dominant_mood,
+        )
+        return cls.build_structured_output(observation=observation, commentary=commentary)
 
     @classmethod
     def generate_commentary(
@@ -98,12 +181,21 @@ class MultimodalVisionModel:
         gemini_api_key: Optional[str] = None,
         openai_api_key: Optional[str] = None,
         timeout_sec: float = 12.0,
+        cooldown_sec: float = 0.0,
+        now: Optional[float] = None,
     ) -> Optional[str]:
         """
         Multimodal VLM invocation (Gemini 2.5 / OpenAI GPT-4o) when API keys are available.
+        Supports optional cooldown_sec rate-limiting.
         """
         if not image_base64:
             return None
+
+        cd = max(0.0, float(cooldown_sec))
+        ts = float(now if now is not None else time.monotonic())
+        if cd > 0.0 and cls._last_api_call_at > 0.0 and (ts - cls._last_api_call_at) < cd:
+            return None
+        cls._last_api_call_at = ts
 
         # Clean base64 header if present
         raw_b64 = image_base64
