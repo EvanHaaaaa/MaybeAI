@@ -12,7 +12,7 @@
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.12-blue.svg" alt="Python 3.12" />
   <img src="https://img.shields.io/badge/FastAPI-0.115+-009688.svg" alt="FastAPI" />
-  <img src="https://img.shields.io/badge/Tests-315%20Passed%20(100%25)-success.svg" alt="Tests" />
+  <img src="https://img.shields.io/badge/Tests-381%20(380%20Passed%2C%201%20Skipped)-success.svg" alt="Tests" />
   <img src="https://img.shields.io/badge/UI-Cyberpunk%20Futuristic-8b5cf6.svg" alt="UI" />
   <img src="https://img.shields.io/badge/Live2D-VTube%20Studio%20API-ff69b4.svg" alt="VTS" />
   <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License" />
@@ -62,7 +62,15 @@
 
 **MaybeAI** adalah platform kecerdasan buatan modular yang dirancang untuk menggerakkan **Eve Maybe**, seorang AI VTuber otonom. Terinspirasi dari konsep legendaris *Neuro-sama* (karya Vedal987), Eve bukan sekadar chatbot yang berbicara teks, melainkan entitas virtual yang memiliki kepribadian kaya (cerdas, humoris, sedikit sarkas, dan kompetitif), mampu mengamati layar, memainkan game secara mandiri, berinteraksi sosial dengan audiens, menyanyi karaoke, hingga berevolusi karakternya berdasarkan pengalaman nyata selama livestreaming.
 
-Eve terintegrasi secara *full-duplex* dengan browser Web Canvas, VTube Studio (Live2D), Twitch IRC, server Minecraft, dan sistem operasi desktop.
+Eve terintegrasi secara *full-duplex* dengan browser Web Canvas/3D VRM, VTube Studio (Live2D), Twitch IRC, server Minecraft, dan sistem operasi desktop.
+
+### 🏆 Progress & Milestone Summary
+- **CTO Audit & Master Plan (`audit/`, `strategy/`, `research/`):** Audit arsitektur, keamanan, audio real-time, kognisi, UX, QA, serta rencana pengembangan multi-horizon selesai terdokumentasi.
+- **Horizon 0 (`4c4e473`) — Security & Concurrency Hardening:** Pengetatan Origin + Creator token (`Authorization: Bearer` / `Sec-WebSocket-Protocol`), gating `GET /api/*` & `/api/metrics`, `EventBus` concurrent dispatch dengan bounded queues, serta hardening replay/skew pada `/ws/collab`.
+- **Horizon 1 (`36ba58e`) — Real-Time Audio & Cognitive Loop:** Non-blocking STT offload, RMS audio-envelope lip-sync + arbitrasi `AnalyserNode` browser, perbaikan `CancelledError` pada `TTSEngine.speak_stream()`, penghentian BGM saat barge-in, shared `EmbeddingEngine` dengan proteksi *dimension-mismatch*, dan `ContextBudgetManager`.
+- **Horizon 2 (`a08e435`) — Companion Intelligence, Observability & Offline VRM:** Cross-provider LLM failover (`ProviderCircuitBreaker`), `MetricsCollector` + endpoint `GET /api/metrics`, serta aset 3D VRM & font lokal di `web/vendor/` (tanpa ketergantungan CDN).
+- **Horizon 3 (`1953889`) — Ecosystem, Sandbox, Collab & E2E:** `validate_outbound_url` SSRF guard (`core/security_net.py`), `plugins.granted_permissions` default-deny + isolasi sandbox worker, protokol kolaborasi dua arah (`hello`, `duet_sync`, `emote_sync`, `game_move`), clock-locked karaoke, dukungan opsional Stockfish UCI, dan suite E2E browser (`tests/test_e2e_browser.py`).
+- **YouTube Song Request & AI Cover / Auto-Karaoke (`83298fa`):** Pipeline `core/youtube_karaoke.py` (URL tervalidasi SSRF, `yt-dlp` + `ffmpeg`/`demucs` + `RVCVoiceConverter`, parser lirik VTT/SRT, `data/karaoke_cache/`, `POST /api/performance/youtube`, WS `performance_action` `"youtube"`, dan kontrol bar di Dashboard UI).
 
 ---
 
@@ -120,7 +128,8 @@ flowchart TD
 ### 1. Autonomous Brain & Multi-Provider LLM (with Streaming)
 - **Multi-Provider Architecture:** Mendukung **Google Gemini** (default: `gemini-3-flash-preview` via `config/settings.json`, otomatis *fallback* ke Mock Mode jika `GEMINI_API_KEY` belum diisi), **OpenAI** (GPT-4o / GPT-4o-mini), **Local Ollama** (Llama 3.2 / Mistral / DeepSeek), serta **Mock Mode** bawaan (bisa langsung dijalankan tanpa internet dan tanpa API key). Provider dapat di-override via `MAYBEAI_LLM_PROVIDER` atau flag `--provider`.
 - **Streaming Brain-to-TTS (`llm.streaming_enabled: true`):** `Brain.generate_response_stream()` mengalirkan token secara real-time melalui Gemini SSE (`streamGenerateContent?alt=sse`), OpenAI SSE (`stream: true`), Ollama NDJSON, maupun Mock chunking sehingga Eve mulai berbicara segera setelah kalimat pertama selesai dibentuk.
-- **Fallback Otomatis:** Jika API provider utama tidak memiliki API key, kehabisan kuota, atau mengalami timeout, sistem otomatis beralih ke respons persona cadangan (`mock`) tanpa memutus siaran.
+- **Fallback Otomatis & Cross-Provider Failover (`ProviderCircuitBreaker`):** Mendukung `failover_enabled` dan `failover_timeout_sec` untuk berpindah otomatis antar provider LLM yang terkonfigurasi (`llm_failovers` metric) sebelum jatuh ke respons persona cadangan (`mock`) tanpa memutus siaran.
+- **Context Budgeting (`ContextBudgetManager`):** Mengatur alokasi token prompt secara dinamis agar konteks percakapan, memori episodik, dan status game tetap muat dalam batas model.
 - **Dynamic Emotion & Action Tags:** Brain secara cerdas membubuhkan tag ekspresi (seperti `[emotion: neutral]`, `[emotion: happy]`, `[emotion: smug]`, `[emotion: angry]`, `[emotion: blush]`, `[emotion: surprised]`, `[emotion: confused]`) dan tag aksi (`[action: giggle]`, `[action: sigh]`, `[action: wink]`) yang diparsing oleh `ActionParser` (`core/actions.py`) untuk menggerakkan ekspresi avatar secara presisi.
 - **Token & Temperature Hot-Reload:** Parameter kreativitas (*temperature*) dan panjang respons (*max_tokens*) dapat diubah langsung dari Configuration Center tanpa me-restart aplikasi.
 
@@ -128,18 +137,18 @@ flowchart TD
 - **Multi-Provider Neural TTS (`core/tts_providers.py`, `core/tts.py`):** Mendukung **Edge-TTS** (dengan modulasi prosodi berbasis emosi untuk `happy`, `excited`, `smug`, `angry`, `annoyed`, `sad`, `blush`, `whisper`), **Kokoro-82M** (lokal via `kokoro`/`kokoro_onnx` atau HTTP `kokoro_url`), **ElevenLabs** (streaming REST), dan **Custom Neural TTS** (`gpt_sovits` / `fish_speech` via `custom_tts_url`), lengkap dengan *fallback* otomatis ke Edge-TTS.
 - **RVC Voice Conversion (`RVCVoiceConverter`, `core/singer.py`):** Post-processing suara bicara maupun vokal karaoke melalui server RVC (`rvc_enabled`, `rvc_url`, `rvc_pitch_shift`) dengan *fallback* bersih ke audio asli jika server offline.
 - **Pipelined Sentence-Chunked Streaming (`SentenceChunker` + `TTSEngine.speak_stream()`):** Memecah aliran teks LLM per kalimat (`.`, `!`, `?`, `\n`, `~`) sambil menjaga tag `[emotion:]`/`[action:]`, singkatan, dan angka desimal tetap utuh. Kalimat $N+1$ disintesis secara konkuren saat kalimat $N$ sedang diputar, dengan pembersihan file sementara `speech_*.mp3` yang terjamin.
-- **Real-Time Lip-Sync Calculation:** Menghitung amplitudo vokal dan pergerakan fonem mulut secara proporsional (`mouth_open` 0.0 – 1.0) untuk menganimasikan bibir avatar sinkron dengan audio.
+- **Real-Time Lip-Sync Calculation & `AnalyserNode` Arbitration:** Menghitung amplitudo RMS audio-envelope dan pergerakan fonem mulut secara proporsional (`mouth_open` 0.0 – 1.0) dengan arbitrasi `AnalyserNode` di browser agar animasi bibir avatar tetap sinkron tanpa konflik.
 
 ### 3. Dual/3D Avatar Rendering, Dedicated OBS Overlay & Stream Deck (`/deck`)
 - **Dedicated Transparent OBS Overlay (`/overlay`):** Halaman khusus tanpa kontrol studio di `http://localhost:7860/overlay` (`web/overlay.html`, `overlay.css`, `overlay.js`) dengan latar belakang transparan, Canvas 2D / **3D VRM** (`?renderer=vrm&vrm_url=...`), subtitle melayang (*glassmorphic*), dan banner notifikasi Donasi/SuperChat real-time—siap pakai sebagai *Browser Source* OBS Studio.
-- **3D VRM Avatar & Multi-Param VTS Rigging (`web/vrm-avatar.js`, `core/vts_client.py`):** Mendukung toggle `2D Canvas | 3D VRM` di Studio maupun Overlay, serta `VTSClient.apply_mood_rig()` / `set_parameters()` yang menggerakkan `FaceAngleX/Y/Z`, `EyeOpenLeft/Right`, `BrowLeftY/RightY`, dan `MouthForm` secara batch di VTube Studio.
+- **3D VRM Avatar Offline (`web/vendor/`, `web/vrm-avatar.js`) & Multi-Param VTS Rigging (`core/vts_client.py`):** Mendukung toggle `2D Canvas | 3D VRM` di Studio maupun Overlay dengan aset Three.js, `@pixiv/three-vrm`, dan `fonts.css` yang sudah di-vendor secara lokal di `web/vendor/` (berjalan offline tanpa CDN), `web/shared-client.js` untuk utilitas klien bersama, serta `VTSClient.apply_mood_rig()` / `set_parameters()` untuk VTube Studio.
 - **Mobile/Tablet Creator Stream Deck (`/deck`):** Antarmuka kontrol sentuh di `http://localhost:7860/deck` (`web/deck.html`, `web/deck.js`) dengan 9 pad satu sentuhan (Barge-In, Mic AudioWorklet, Mute, Mission Step/Loop, Sing, Improv, Collab Topic, Stop Speech) dan otentikasi token.
 - **AudioWorklet 16 kHz STT (`web/audio-worklet-processor.js`):** Menangkap audio mikrofon melalui `MaybeAIPCMProcessor` (16 kHz mono Int16 PCM) dengan emisi event `stt_partial` & `stt_final` secara real-time.
 - **Modular 4-Tab Studio Workspace (`/`):** Dashboard utama (`http://localhost:7860`) tertata dalam 4 tab workspace (*sticky nav* dengan persistensi `localStorage`): **🎤 Live Stage**, **🎮 Gaming**, **🎲 RPG & Mini-Games**, dan **🧠 Brain & Memory**, dilengkapi tombol pintas **📺 OBS Overlay** dan **🎛️ Deck**.
 
 ### 4. Centralized Cyberpunk Configuration Center
 - **Dedicated GUI URL:** Halaman khusus di `http://localhost:7860/settings` dengan tema estetika Cyberpunk / Futuristic AI (aksen neon, glow cards, toggle switch, slider nilai interaktif).
-- **19 Kategori Pengaturan Lengkap:** Meliputi General, Brain (`streaming_enabled`), Personality, Memory (`embedding_provider`), Mood, Voice/TTS (`interruptible`), Speech-to-Text (`stt` + `vad_enabled`, `vad_energy_threshold`, `barge_in_enabled`), Avatar/VTS, Karaoke, Twitch, YouTube Live (`youtube`), Discord (`discord`), Moderation, Security (`security`), Minecraft, Autonomous Agent (`closed_loop_missions`, `mission_tick_interval_sec`), **AI Collab Protocol (`collab`)**, **Plugins & SDK (`plugins`)**, dan Performance.
+- **24 Kategori Pengaturan Lengkap (`ConfigManager.DEFAULT_SETTINGS`):** Meliputi `system` (General), `llm` (termasuk `streaming_enabled`, `failover_*`), `personality`, `memory` (`embedding_provider`), `mood`, `tts` (`interruptible`), `stt` (`vad_enabled`, `vad_energy_threshold`, `barge_in_enabled`), `vts`, `avatar`, `karaoke` (termasuk pengaturan YouTube karaoke), `performance`, `twitch`, `youtube`, `discord`, `tiktok`, `moderator`, `security`, `minecraft`, `autonomous_agent` (`closed_loop_missions`, `mission_tick_interval_sec`), `collab`, `plugins` (`granted_permissions`, `enabled_plugins`), `vision`, `obs`, dan `highlights`.
 - **Secret Protection:** Token OAuth Twitch (`twitch.oauth_token`), YouTube API Key (`youtube.api_key`), Discord Bot Token (`discord.bot_token`), Creator Access Token (`security.creator_token`), dan Collab HMAC Shared Secret (`collab.shared_secret`) **tidak pernah diekspos dalam bentuk plaintext** via HTTP GET (`"********"` masking) dan tidak akan terhapus jika form disimpan tanpa mengubah token.
 - **Atomic Persistence:** Menggunakan mekanisme *temp-write* (`.settings.json.tmp`) dan atomic `os.replace()` untuk mencegah korupsi file saat listrik mati atau crash.
 - **Live Hot-Reload:** Perubahan diterapkan seketika ke seluruh modul aktif di runtime tanpa perlu restart server.
@@ -147,7 +156,8 @@ flowchart TD
 
 ### 5. Dynamic Performance Director & Karaoke Engine
 - **Otonomi Konser Musik:** Eve dapat bertindak sebagai penampil profesional yang mengatur penampilannya sendiri: memilih lagu berdasarkan mood, membawakan monolog intro (*MC speech*), mengatur ekspresi per bait lirik, dan memberikan epilog selebrasi setelah bernyanyi.
-- **Playback Multi-Track:** Memutar file instrumen BGM otomatis bersamaan dengan vokal ritmik terstruktur, sinkronisasi lirik per baris (*lyric delay*), dan semburan animasi glowstick penonton di layar avatar.
+- **Playback Multi-Track & Clock-Locked Karaoke:** Memutar file instrumen BGM otomatis bersamaan dengan vokal ritmik terstruktur, sinkronisasi lirik berbasis jam (*clock-locked*), dan semburan animasi glowstick penonton di layar avatar.
+- **YouTube Song Request & AI Cover / Auto-Karaoke (`core/youtube_karaoke.py`):** Mendukung permintaan lagu langsung dari URL YouTube yang tervalidasi SSRF (`validate_outbound_url`), mengunduh audio & subtitle VTT/SRT via `yt-dlp`, memisahkan vokal/instrumen dengan `ffmpeg` / `demucs` serta konversi suara opsional melalui `RVCVoiceConverter`, menyimpan cache di `data/karaoke_cache/`, dan memutar via `POST /api/performance/youtube`, WebSocket `performance_action` `"youtube"`, maupun bar kontrol di Dashboard UI.
 - **Katalog Lagu Kustom:** Mudah menambahkan lagu baru melalui `config/songs.json` dan folder `assets/songs/`.
 
 ### 6. Minecraft Dual-Mode Engine & Portable Bridge
@@ -196,7 +206,7 @@ flowchart TD
 - **Inventory & Story Chronicles:** Inventaris party disimpan dan kronik cerita dicatat ke `data/second_brain/storytelling/campaigns.md`.
 
 ### 13. Chess Engine & Streamer Commentary
-- **Integrasi Papan Catur FICS/Stockfish:** Eve dapat bermain catur dengan validasi langkah legal, pembacaan notasi FEN/PGN, dan level kesulitan ELO yang dapat diatur dari 800 (pemula) hingga 2000 (ahli).
+- **Integrasi Papan Catur FICS / Stockfish UCI & Alpha-Beta Fallback:** Eve dapat bermain catur dengan validasi langkah legal, pembacaan notasi FEN/PGN, level kesulitan ELO (800–2000), serta dukungan opsional binary **Stockfish UCI** (otomatis *fallback* ke engine `alpha_beta` bawaan bila binary `stockfish` tidak terpasang).
 - **Komentar Catur Cerdas:** Eve mengomentari blunder pemain lawan, memamerkan taktik cerdiknya (*smug banter*), dan memberikan evaluasi posisi pasca-permainan.
 
 ### 14. Goal Planning & Closed-Loop Autonomous Missions
@@ -234,12 +244,12 @@ flowchart TD
 - **Strict Permission Guardrails:** Perintah krusial sistem (peluncuran aplikasi Desktop Companion `!desktop`, pergantian mode gameplay/server Minecraft `!mc mode/server`, dan reset/pengaturan ELO catur `!chess elo/new`) diproteksi penuh dan hanya dapat dijalankan oleh Creator. Jika penonton mencoba mengeksekusinya, Eve akan menolak dengan nada sarkas khasnya tanpa mengeksekusi aksi fisik pada sistem.
 
 ### 20. AI-to-AI Collab Protocol (`/ws/collab`)
-- **Signed Wire Envelope (`core/collab/protocol.py`):** `CollabEnvelope` (`protocol_version: "1.0"`) mendukung event `hello`, `turn_utterance`, `turn_yield`, `duet_sync`, `game_move`, `emote_sync`, `ping`, dan `bye` dengan penandatanganan HMAC-SHA256 serta verifikasi constant-time (`hmac.compare_digest`).
-- **Turn-Taking Floor & Anti-Loop (`core/collab/manager.py`):** `CollabManager` mengelola *floor state machine* (`idle`, `speaking`, `yielding`, `listening`, `cooldown`), membatasi percakapan beruntun via `max_collab_turns` (default `6`) dan `turn_cooldown_sec` (default `2.5s`) untuk mencegah infinite loop antar-AI, serta menyediakan sinkronisasi duet karaoke (`send_duet_sync`) dan ekspresi (`send_emote_sync`).
+- **Signed Wire Envelope & Replay Protection (`core/collab/protocol.py`):** `CollabEnvelope` (`protocol_version: "1.0"`) mendukung event `hello` (capability handshake), `turn_utterance`, `turn_yield`, `duet_sync`, `game_move`, `emote_sync`, `ping`, dan `bye` dengan penandatanganan HMAC-SHA256, verifikasi constant-time (`hmac.compare_digest`), cache *nonce replay*, serta pemeriksaan *timestamp skew*.
+- **Bidirectional Orchestrator Sync (`core/collab/manager.py`):** `CollabManager` mengelola *floor state machine* (`idle`, `speaking`, `yielding`, `listening`, `cooldown`), pemulihan cooldown, pembatasan `max_collab_turns` & per-type rate limits, serta menghubungkan `duet_sync`/`emote_sync`/`game_move` dua arah langsung ke `Orchestrator` (`Singer`, `VTSClient`, `ChessController`).
 - **Studio Controls & Peer WebSocket (`run.py`, `web/index.html`):** Mendukung koneksi outbound ke peer maupun inbound pada `/ws/collab` dengan panel **AI Collab** (`#collabCard`) di tab **🎤 Live Stage**.
 
 ### 21. Community Plugin SDK, Subprocess Sandbox & `maybeai plugin` CLI
-- **Out-of-Process Subprocess Sandbox (`core/plugins/sdk.py`, `core/plugins/sandbox_worker.py`, `core/plugins/registry.py`):** Plugin eksternal di `plugins/*.py` dijalankan secara default (`sandbox_mode="subprocess"`) sebagai proses terpisah melalui JSON-RPC 2.0 stdio (`python -m core.plugins.sandbox_worker`) dengan **stripped `os.environ`** (rahasia host seperti `GEMINI_API_KEY` dan `MAYBEAI_CREATOR_TOKEN` tidak pernah diwariskan ke worker), penegakan izin kapabilitas (`chat:read`, `tts:speak`, `event:sub`, `event:pub`), serta `proc.kill()` paksa bila hook melewati `hook_timeout_sec`.
+- **Out-of-Process Subprocess Sandbox & Default-Deny Permissions (`core/plugins/sdk.py`, `core/plugins/sandbox_worker.py`, `core/plugins/registry.py`):** Plugin eksternal di `plugins/*.py` diekstrak manifest-nya secara statis via AST dan dijalankan secara terisolasi di proses terpisah melalui JSON-RPC 2.0 stdio (`python -m core.plugins.sandbox_worker`) tanpa fallback `inprocess` untuk plugin eksternal. Worker berjalan di direktori terisolasi dengan **stripped `os.environ`** (rahasia host tidak diwariskan), kebijakan **default-deny** melalui `plugins.granted_permissions`, serta `proc.kill()` paksa bila hook melewati `hook_timeout_sec`.
 - **Plugin Developer CLI (`core/plugins/cli.py`, `pyproject.toml`):** Tersedia perintah `maybeai plugin init <name>`, `maybeai plugin test <path>`, dan `maybeai plugin pack <path>` (juga via `python -m core.plugins.cli`).
 - **Built-in Word Chain (`!sambungkata` / `!wc`):** Plugin komunitas interaktif (`core/plugins/word_chain.py`) di mana penonton dan creator bermain sambung huruf terakhir (`!wc start`, `!wc <kata>`, `!wc score`, `!wc stop`) lengkap dengan papan skor dan pencegahan pengulangan kata.
 
@@ -260,30 +270,34 @@ MaybeAI/
 ├── assets/
 │   └── songs/
 │       └── digital_world_bgm.wav  # Instrumen BGM karaoke
+├── audit/                         # Laporan CTO Audit (00..11 & FINAL_AUDIT_REPORT.md)
 ├── config/
-│   ├── settings.json              # Konfigurasi master (General, LLM, TTS, STT, Security, dll)
+│   ├── settings.json              # Konfigurasi master (24 section: General, LLM, TTS, STT, Security, dll)
 │   ├── character.json             # Persona, latar belakang, lore, & gaya bicara Eve
 │   ├── filter_words.json          # Blacklist kata & aturan moderasi regex
 │   ├── songs.json                 # Katalog lagu karaoke, lirik, & delay timing
 │   └── minecraft_servers.json     # Daftar server Minecraft tersimpan
 ├── core/
 │   ├── actions.py                 # Parser tag [emotion: x] dan [action: x]
-│   ├── brain.py                   # Otak LLM Streaming (Gemini, OpenAI, Ollama, Mock)
-│   ├── event_bus.py               # Typed Async Pub/Sub EventBus & Event History
-│   ├── tts.py                     # Pipelined Streaming TTS & Lip-Sync Engine
+│   ├── brain.py                   # Otak LLM Streaming, ContextBudgetManager, & ProviderCircuitBreaker
+│   ├── event_bus.py               # Typed Async Pub/Sub EventBus (concurrent dispatch & bounded queues)
+│   ├── metrics.py                 # MetricsCollector & telemetri runtime (/api/metrics)
+│   ├── security_net.py            # Guard SSRF & DNS-rebinding (validate_outbound_url)
+│   ├── tts.py                     # Pipelined Streaming TTS & RMS Lip-Sync Engine
 │   ├── tts_providers.py           # Neural TTS Providers (Edge, Kokoro, ElevenLabs, Custom) & RVC
 │   ├── vts_client.py              # Client WebSocket VTube Studio API (Multi-Param Rigging)
+│   ├── youtube_karaoke.py         # Pipeline YouTube Song Request & AI Cover / Auto-Karaoke
 │   ├── chat_receiver.py           # Ingestion Twitch IRC (TLS/IRCv3), Web Chat, & Multi-Platform Registry
-│   ├── collab/                    # AI-to-AI Collab Protocol (CollabEnvelope HMAC & CollabManager)
+│   ├── collab/                    # AI-to-AI Collab Protocol (CollabEnvelope HMAC, Replay Cache, & Manager)
 │   ├── platforms/                 # Adapter Live Chat (YouTube Live, Discord Gateway, TikTok Live)
 │   ├── highlights/                # HighlightDetector, ClipPipeline (9:16 ffmpeg), & VODSummarizer
-│   ├── plugins/                   # Community Plugin SDK, Subprocess Sandbox Worker, CLI, & WordChainPlugin (!wc)
+│   ├── plugins/                   # Community Plugin SDK, Isolated Sandbox Worker, CLI, & WordChainPlugin (!wc)
 │   ├── moderator.py               # Filter keamanan, spam, & prompt injection
-│   ├── singer.py                  # Player BGM Karaoke & sinkronisasi lirik
-│   ├── stt.py                     # Full-Duplex EnergyVAD, StreamingSTTSession, & Whisper STT
+│   ├── singer.py                  # Player BGM Karaoke & sinkronisasi lirik clock-locked
+│   ├── stt.py                     # Full-Duplex EnergyVAD, StreamingSTTSession, & Non-Blocking STT
 │   ├── orchestrator.py            # Event loop pusat, barge-in, missions, collab, plugins, & EventBus
-│   ├── config_manager.py          # Centralized Config Engine, Atomic Save, & Diagnostics
-│   ├── chess/                     # Modul logika catur, ELO scaling, & komentar
+│   ├── config_manager.py          # Centralized Config Engine, Atomic Save, Masking, & Diagnostics
+│   ├── chess/                     # Modul logika catur, Stockfish UCI / alpha-beta fallback, & komentar
 │   ├── conversation/              # Manajemen konteks percakapan & memory window
 │   ├── desktop/                   # Desktop Companion, App launcher, & Permission gate
 │   ├── memory/                    # Semantic Embeddings, Episodic memory, & Second Brain sync
@@ -301,10 +315,11 @@ MaybeAI/
 │   ├── memory.db                  # Database SQLite memori percakapan
 │   ├── desktop/permissions.json   # Log izin dan riwayat aksi sistem desktop
 │   ├── goals/agenda.md            # Markdown agenda misi streaming otonom
+│   ├── karaoke_cache/             # Cache audio/stem/lirik hasil YouTube Karaoke pipeline
 │   ├── minigames/leaderboard.json # Papan skor mini-game
 │   ├── personality/evolution.json # Data level, EXP, & sifat kepribadian
 │   ├── relationships/             # JSON data relasi user
-│   └── second_brain/              # Direktori catatan Markdown otomatis (Dossier, Setlist, dll)
+│   └── second_brain/              # Direktori catatan Markdown otomatis (Dossier, Setlist, Streams, dll)
 ├── minecraft/
 │   ├── bot.js                     # Entrypoint bot Mineflayer
 │   ├── casual.js                  # Modul perilaku casual & sosial Minecraft
@@ -314,25 +329,29 @@ MaybeAI/
 │   ├── package.json               # Dependensi Node.js Mineflayer
 │   ├── node/                      # Runtime Node.js portabel (Windows)
 │   └── node_modules/              # Paket Node.js terbundel
+├── research/                      # Proposal arsitektur, eksperimen, & technology radar
+├── strategy/                      # Master Plan pengembangan, Roadmap, & Risk Register
 ├── web/
-│   ├── index.html                 # Tabbed Web Studio Dashboard & 2D Canvas Avatar
+│   ├── index.html                 # Tabbed Web Studio Dashboard & 2D Canvas / 3D VRM Avatar
 │   ├── style.css                  # Styling Cyberpunk dashboard, workspace tabs, & HUD
-│   ├── app.js                     # Logika Web client, workspace tabs, rendering avatar, & WebSocket
+│   ├── app.js                     # Logika Web client, workspace tabs, AnalyserNode, & WebSocket
+│   ├── shared-client.js           # Utilitas klien bersama (auth header/subprotocol, escapeHtml, dll)
 │   ├── overlay.html               # Dedicated Transparent OBS Browser Source Overlay (/overlay)
 │   ├── overlay.css                # Styling transparan OBS, floating subtitles, & donation alert
 │   ├── overlay.js                 # Renderer avatar & subtitle real-time untuk OBS Overlay
 │   ├── settings.html              # Antarmuka Cyberpunk Configuration Center
 │   ├── settings.css               # Styling khusus Configuration Center
-│   ├── settings.js                # Form engine, secret protection, & test runner
+│   ├── settings.js                # Form engine (XSS-escaped), secret protection, & test runner
 │   ├── deck.html                  # Mobile/Tablet Creator Stream Deck (/deck)
 │   ├── deck.css                   # Styling Creator Stream Deck
 │   ├── deck.js                    # Logika Stream Deck & AudioWorklet mic
 │   ├── audio-worklet-processor.js # AudioWorklet 16 kHz PCM16 processor
-│   └── vrm-avatar.js              # Renderer 3D VRM Avatar (Three.js + @pixiv/three-vrm)
+│   ├── vrm-avatar.js              # Renderer 3D VRM Avatar (Three.js + @pixiv/three-vrm)
+│   └── vendor/                    # Aset lokal offline (three.module.js, three-vrm.module.js, GLTFLoader.js, BufferGeometryUtils.js, fonts.css)
 ├── tests/
 │   ├── __init__.py                # Menetapkan MAYBEAI_LLM_PROVIDER=mock saat test berjalan
 │   ├── test_guard_runner.js       # Uji unit guard mode Minecraft (Node.js)
-│   └── test_*.py                  # 35 modul pengujian unit & integrasi Python (315 tests)
+│   └── test_*.py                  # 43 modul pengujian unit, integrasi, & E2E Python (381 tests)
 ├── Dockerfile                     # Image headless Python 3.12-slim + ffmpeg & /api/health
 ├── docker-compose.yml             # Orkestrasi layanan MaybeAI & volume persisten
 ├── pyproject.toml                 # Metadata proyek, CLI entry point (`maybeai`), & extras (`[obs]`, `[tts-local]`, `[tiktok]`, dll)
@@ -349,10 +368,21 @@ MaybeAI/
 
 ## 💻 Panduan Instalasi & Menjalankan
 
-### 1. Prasyarat Sistem
-- **Sistem Operasi:** Windows 10 / 11 (64-bit).
+### 1. Prasyarat Sistem & Dependensi Opsional
+- **Sistem Operasi:** Windows 10 / 11 (64-bit) atau Linux (untuk Docker headless).
 - **Python:** Python versi **3.11** atau **3.12**.
-- **Koneksi Internet:** Diperlukan untuk mendownload library dan menggunakan provider online (Gemini/OpenAI/Edge-TTS).
+- **Koneksi Internet:** Diperlukan untuk mengunduh library dan menggunakan provider online (Gemini / OpenAI / Edge-TTS). Mode `mock` dan aset 3D VRM lokal (`web/vendor/`) dapat berjalan offline.
+- **Binary & Paket Opsional (dengan *Graceful Fallback*):**
+  | Komponen Opsional | Fungsi | Fallback jika Tidak Terpasang |
+  |---|---|---|
+  | `yt-dlp`, `ffmpeg`, `demucs` | Unduh YouTube Karaoke, pemisahan stem vokal/BGM, dan pemotongan klip vertikal 9:16 (`ClipPipeline`) | Pemutaran katalog lokal (`assets/songs/`); klip video & stem separation YouTube dilewati dengan pesan diagnostik bersih |
+  | `stockfish` (binary UCI) | Engine catur kompetitif berbasis UCI | Otomatis *fallback* ke engine `alpha_beta` bawaan |
+  | `playwright` | Pengujian E2E browser otomatis (`tests/test_e2e_browser.py`) | Test E2E browser otomatis di-*skip* (`1 skipped`) tanpa menggagalkan suite unit |
+  | `obsws-python` | Kontrol scene & replay buffer OBS Studio v5 | `OBSWebSocketClient` berjalan dalam mode offline aman |
+  | `faster-whisper` | Transkripsi STT lokal berkecepatan tinggi | *Fallback* ke Whisper API atau mode `mock` |
+  | `sentence-transformers` | Semantic embedding lokal di `EmbeddingEngine` | *Fallback* ke Gemini/OpenAI embedding atau *sublinear-TF hash* offline |
+  | `kokoro` | Sintesis Neural TTS lokal Kokoro-82M | *Fallback* ke Edge-TTS |
+  | **Layanan Eksternal:** RVC Server, VTube Studio, OBS Studio | Konversi suara AI cover/TTS, Live2D rigging, & live scene switching | Sistem tetap berjalan normal menggunakan audio asli & Canvas/VRM browser |
 
 ### 2. Setup Virtual Environment & Dependensi
 Buka terminal PowerShell pada direktori proyek:
@@ -437,9 +467,9 @@ Akses halaman kontrol konfigurasi di: 👉 **`http://localhost:7860/settings`**
 *(Atau klik tombol **⚙️ Configuration Center** di bagian atas Web Dashboard utama).*
 
 ### Fitur Utama Configuration Center:
-1. **Navigasi Sidebar Responsif:** 21 kategori pengaturan (termasuk `obs`, `highlights`, `stt`, `security`, `youtube`, `discord`, `tiktok`, `avatar`, `collab`, dan `plugins`) plus tampilan *System Diagnostics* dengan ikon khas cyberpunk.
-2. **Pencarian Real-Time (*Search Box*):** Menemukan pengaturan apapun hanya dengan mengetikkan kata kunci (contoh: *temperature*, *streaming*, *embedding*, *youtube*, *discord*, *token*, *stt*, *vad*, *barge*, *collab*, *plugins*).
-3. **Perlindungan Token & Masking:** Secret sensitif seperti `twitch.oauth_token`, `youtube.api_key`, `discord.bot_token`, `security.creator_token`, dan `collab.shared_secret` disamarkan menjadi `********` dan dipertahankan saat penyimpanan atomik bila tidak diubah.
+1. **Navigasi Sidebar Responsif:** **24 kategori** pengaturan tingkat atas (sesuai `ConfigManager.DEFAULT_SETTINGS`, termasuk `obs`, `highlights`, `stt`, `security`, `youtube`, `discord`, `tiktok`, `avatar`, `collab`, dan `plugins`) plus tampilan *System Diagnostics* dengan ikon khas cyberpunk.
+2. **Pencarian Real-Time (*Search Box*):** Menemukan pengaturan apapun hanya dengan mengetikkan kata kunci (contoh: *temperature*, *streaming*, *failover*, *embedding*, *youtube*, *discord*, *token*, *stt*, *vad*, *barge*, *collab*, *plugins*).
+3. **Perlindungan Token, Masking & XSS Escaping:** Secret sensitif seperti `llm.*_api_key`, `twitch.oauth_token`, `youtube.api_key`, `discord.bot_token`, `security.creator_token`, `obs.password`, dan `collab.shared_secret` disamarkan menjadi `********` dan dipertahankan saat penyimpanan atomik bila tidak diubah. Seluruh input/label pada `/settings` di-escape (`escapeHtml`) untuk mencegah DOM XSS.
 4. **Live Slider & Toggle:** Setiap slider menampilkan nilai numerik secara *real-time*, ditambah editor list interaktif untuk `security.allowed_origins` dan `plugins.enabled_plugins`.
 5. **Indikator Unsaved Changes:** Memunculkan banner konfirmasi di bawah layar saat terdapat perubahan yang belum disimpan.
 6. **Shortcut Keyboard:** Tekan **`Ctrl + S`** di halaman settings untuk menyimpan secara instan.
@@ -453,15 +483,18 @@ Akses halaman kontrol konfigurasi di: 👉 **`http://localhost:7860/settings`**
 MaybeAI menerapkan kontrol akses ketat untuk melindungi endpoint kontrol dan eksekusi lokal:
 
 - **Validasi Origin (`Origin` Check):**
-  - Seluruh endpoint mutasi `/api/*` (`PUT`, `POST`, `PATCH`, `DELETE`) dan koneksi WebSocket `/ws` memeriksa header `Origin` jika disertakan oleh browser/klien.
+  - Seluruh endpoint `/api/*` (termasuk `GET /api/*` dan `GET /api/metrics` bila token dikonfigurasi) serta koneksi WebSocket `/ws` dan `/ws/collab` memeriksa header `Origin` jika disertakan oleh browser/klien.
   - Secara default hanya origin localhost (`http://127.0.0.1:<port>`, `http://localhost:<port>`, `http://[::1]:<port>`, atau `https://`) serta entri yang didaftarkan di `security.allowed_origins` (`config/settings.json` / `/settings`) yang diizinkan.
   - Origin asing ditolak dengan **HTTP `403`** pada `/api/*` dan penutupan WebSocket kode **`1008`** pada `/ws`.
-- **Otentikasi Creator Token (`?token=` & `MAYBEAI_CREATOR_TOKEN`):**
+- **Otentikasi Creator Token (`Authorization: Bearer` / `Sec-WebSocket-Protocol` & `MAYBEAI_CREATOR_TOKEN`):**
   - Klien WebSocket tidak lagi dipercaya berdasarkan `is_creator` dari payload JSON atau nama user.
   - Hak Creator hanya diberikan jika koneksi berasal dari alamat loopback (`127.0.0.1`, `::1`, `localhost`, `::ffff:127.0.0.1`).
-  - Jika token dikonfigurasi melalui environment variable `MAYBEAI_CREATOR_TOKEN` (prioritas utama) atau `security.creator_token` di `config/settings.json`, klien wajib menyertakan `?token=<token>` saat membuka `/ws` (diverifikasi menggunakan `secrets.compare_digest`). Tanpa token yang valid, `is_creator` dipaksa `False` dan source `"creator"`/`"mic"` diturunkan menjadi `"web"`.
-  - Di Web Dashboard (`web/app.js`), token dibaca otomatis dari parameter URL `?token=` atau `localStorage.maybeai_creator_token` lalu dilampirkan ke URL WebSocket `/ws`.
+  - Jika token dikonfigurasi melalui environment variable `MAYBEAI_CREATOR_TOKEN` (prioritas utama) atau `security.creator_token` di `config/settings.json`, endpoint `/api/*` dan WebSocket `/ws` memverifikasi token secara non-query melalui header **`Authorization: Bearer <token>`** atau subprotocol **`Sec-WebSocket-Protocol`** (menggunakan `secrets.compare_digest`), sehingga token tidak bocor ke log URL query string. Tanpa token yang valid, akses `/api/*` ditolak (`401`/`403`) dan pada `/ws` `is_creator` dipaksa `False` dengan source `"creator"`/`"mic"` diturunkan menjadi `"web"`.
+  - Di Web Dashboard (`web/shared-client.js`, `web/app.js`), token disimpan di `localStorage.maybeai_creator_token` (atau diinput via UI `/settings`) dan dikirim otomatis lewat `Authorization: Bearer` serta `Sec-WebSocket-Protocol`.
   - Jika tidak ada token yang dikonfigurasi, klien loopback tetap mendapatkan akses Creator secara default agar dashboard lokal langsung berfungsi.
+- **Guard SSRF (`core/security_net.py`) & Plugin Default-Deny (`plugins.granted_permissions`):**
+  - URL outbound (seperti YouTube Song Request dan webhook/peer eksternal) divalidasi oleh `validate_outbound_url()` untuk memblokir IP privat/loopback/link-local serta mencegah serangan DNS rebinding.
+  - Plugin eksternal menerapkan kebijakan **default-deny** melalui `plugins.granted_permissions` dan dijalankan di worker proses terpisah dengan direktori terisolasi serta environment bersih.
 - **Override Provider LLM (`MAYBEAI_LLM_PROVIDER`):**
   - Menetapkan `MAYBEAI_LLM_PROVIDER` (misal `mock`, `gemini`, `openai`, `ollama`) akan menimpa `llm.provider` dari `config/settings.json` secara langsung (sangat berguna untuk pengujian otomatis maupun isolasi offline).
 - **Kategori Baru & Pengaturan Fase 2 di `/settings` (`tts`, `twitch`, `discord`, `tiktok`, `vision`, `avatar`, `stt`, `security`, `collab`, `plugins`):**
@@ -534,6 +567,7 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
   - `POST /api/config/reset`: Mereset pengaturan ke default.
   - `POST /api/config/test/{feature}`: Menjalankan probe diagnostik fitur (`llm`, `tts`, `vts`, `twitch`, `moderator`, `memory`).
   - `GET /api/system/diagnostics`: Mengambil laporan diagnostik kesehatan seluruh subsistem.
+  - `GET /api/metrics`: Telemetri runtime terstruktur (`MetricsCollector`, termasuk `llm_failovers`, latency, & counter subsistem; terproteksi Creator gate).
   - `GET /api/status`: Informasi status umum orchestrator.
 - **Memory, Mood, Goals, & Relationships:**
   - `GET /api/memory/stats`: Statistik memori episodik & Second Brain.
@@ -561,6 +595,7 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
   - `GET /api/performance/state`: Status Performance Director & setlist.
   - `POST /api/performance/plan`: Menyusun setlist konser.
   - `POST /api/performance/start`: Memulai penampilan lagu (`song_id`, `dedication_user`).
+  - `POST /api/performance/youtube`: Mengunduh, memproses (opsional RVC/demucs), dan memutar permintaan lagu YouTube Karaoke (`url`, `ai_cover`).
   - `POST /api/performance/cheer`: Mencatat sorakan/glowstick audiens.
   - `GET /api/personality/state`: Status evolusi kepribadian, level, & EXP Eve.
   - `POST /api/personality/experience`: Mencatat event pengalaman kepribadian.
@@ -587,7 +622,7 @@ Aplikasi menyediakan REST API dan WebSocket server terpadu pada `run.py`:
   - `barge_in` / `voice_audio_chunk` *(Creator-only)*: Menginterupsi ucapan aktif Eve atau mengirim potongan audio PCM16 (`audio_b64`) ke `EnergyVAD` & `StreamingSTTSession`.
   - `mission_action` *(Creator-only)*: Mengontrol loop misi (`step`, `approve`, `reject`, `toggle`, `start`, `pause`, `status`).
   - `collab_action` & `plugin_action` *(mutasi Creator-only)*: Mengontrol sesi kolaborasi AI dan lifecycle plugin.
-  - `*_action`: Event aksi subsistem (`minecraft_action`, `chess_action`, `memory_action`, `mood_action`, `goal_action`, `relationship_action`, `vision_action`, `multiplayer_action`, `desktop_action`, `minigame_action`, `story_action`, `performance_action`, `personality_action`, `config_action`).
+  - `*_action`: Event aksi subsistem (`minecraft_action`, `chess_action`, `memory_action`, `mood_action`, `goal_action`, `relationship_action`, `vision_action`, `multiplayer_action`, `desktop_action`, `minigame_action`, `story_action`, `performance_action` termasuk aksi `"youtube"`, `personality_action`, `config_action`).
 - **Server $\rightarrow$ Client (`/ws`):**
   - `ai_chunk`: `{"type": "ai_chunk", "data": {"user": "Eve", "chunk": "...", "emotion": "happy"}}` (potongan kalimat streaming real-time).
   - `ai_response`: `{"type": "ai_response", "data": {"user": "Eve", "raw": "...", "speech": "...", "emotions": ["happy"], "actions": ["wink"], "streamed": true}}`
@@ -622,20 +657,24 @@ MaybeAI memiliki rangkaian unit dan integration test yang ketat (secara otomatis
 
 ```powershell
 # Jalankan seluruh test suite Python otomatis
-.\.venv\Scripts\python.exe -m unittest discover tests
+.\.venv\Scripts\python.exe -W default -m unittest discover tests
 
 # Jalankan uji unit Guard Mode Mineflayer (Node.js)
 node tests/test_guard_runner.js
+
+# Validasi sintaks JavaScript frontend
+node --check web/app.js
 ```
 
 ### Hasil Verifikasi:
 ```text
-Ran 315 tests
-OK
+Ran 381 tests in 34.132s
+
+OK (skipped=1)
 ```
-- **Total Test Cases:** 315 Python unit/integration tests + `test_guard_runner.js` (Node.js)
-- **Success Rate:** **100% PASS (0 Failures, 0 Errors)**
-- **Modul Teruji:** `test_audioworklet_deck`, `test_autonomous_missions`, `test_avatar_vts_and_telemetry`, `test_brain`, `test_chat_receiver`, `test_chess`, `test_collab_and_plugins`, `test_configuration`, `test_desktop_companion`, `test_event_bus`, `test_fase1_hardening`, `test_goals`, `test_guard_mode`, `test_highlights_and_vod`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_neural_tts_rvc`, `test_obs_showrunner`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_platforms_v2`, `test_relationships`, `test_sandbox_plugins_cli`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_voice_duplex`, `test_vts_client`, `test_websocket_security`, dan `test_guard_runner.js`.
+- **Total Test Cases:** **381 tests** (`380 passed, 1 skipped: playwright not installed`) across **43** `tests/test_*.py` files + `node tests/test_guard_runner.js` + `node --check`
+- **Catatan Lingkungan:** 1 test pada `tests/test_e2e_browser.py` di-*skip* secara bersih karena `playwright` belum terpasang di lingkungan lokal.
+- **Modul Teruji (43 Modul Python + Node.js):** `test_audioworklet_deck`, `test_autonomous_missions`, `test_avatar_vts_and_telemetry`, `test_brain`, `test_chat_receiver`, `test_chess`, `test_collab_and_plugins`, `test_configuration`, `test_desktop_companion`, `test_e2e_browser`, `test_event_bus`, `test_fase1_hardening`, `test_goals`, `test_guard_mode`, `test_highlights_and_vod`, `test_horizon0_hardening`, `test_horizon1_upgrade`, `test_horizon2_companion`, `test_horizon3_collab_ssrf`, `test_horizon3_ecosystem`, `test_memory`, `test_minigames`, `test_mood`, `test_multiplayer_social`, `test_neural_tts_rvc`, `test_obs_showrunner`, `test_overlay_route`, `test_performance`, `test_personality`, `test_platforms`, `test_platforms_v2`, `test_relationships`, `test_sandbox_plugins_cli`, `test_semantic_memory`, `test_storytelling`, `test_streaming_tts`, `test_system_integrity`, `test_tts`, `test_vision`, `test_voice_duplex`, `test_vts_client`, `test_websocket_security`, `test_youtube_karaoke`, serta `test_guard_runner.js`.
 
 ---
 
