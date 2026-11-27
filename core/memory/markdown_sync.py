@@ -105,12 +105,139 @@ Eve Maybe's episodic memory logs for stream session on {day_str}.
         with open(user_file, "a", encoding="utf-8") as f:
             f.write(f"- **[{date_str}] {title}:** {content}\n")
 
-    def sync_promise(self, promise_id: int, user: str, text: str, ptype: str, status: str):
+    def sync_promise(
+        self,
+        promise_id: int,
+        user: str,
+        text: str,
+        ptype: str,
+        status: str,
+        created_at: Optional[float] = None,
+        max_completed_rows: int = 20,
+    ):
+        """Upserts a promise/challenge row in promises.md and archives overflow completed rows."""
         promises_file = self.base_dir / "promises.md"
-        today = time.strftime("%Y-%m-%d", time.localtime())
-        row = f"| {promise_id} | {user} | {ptype} | {status} | {today} | {text} |\n"
-        with open(promises_file, "a", encoding="utf-8") as f:
-            f.write(row)
+        created_str = time.strftime(
+            "%Y-%m-%d",
+            time.localtime(created_at if created_at is not None else time.time()),
+        )
+        clean_text = " ".join(str(text).replace("|", "/").splitlines()).strip()
+        clean_user = str(user).replace("|", "/").strip()
+        clean_ptype = str(ptype).replace("|", "/").strip()
+        clean_status = str(status).replace("|", "/").strip().lower()
+
+        rows = self._read_promise_rows(promises_file)
+        updated = False
+        for row in rows:
+            if row["id"] == str(promise_id):
+                row["user"] = clean_user
+                row["type"] = clean_ptype
+                row["status"] = clean_status
+                row["description"] = clean_text
+                updated = True
+                break
+        if not updated:
+            rows.append({
+                "id": str(promise_id),
+                "user": clean_user,
+                "type": clean_ptype,
+                "status": clean_status,
+                "created": created_str,
+                "description": clean_text,
+            })
+
+        self._write_bounded_promises(rows, max_completed_rows=max_completed_rows)
+
+    def fulfill_promise(self, promise_id: int, max_completed_rows: int = 20) -> bool:
+        """Marks an existing promise row as fulfilled in promises.md and archives overflow."""
+        promises_file = self.base_dir / "promises.md"
+        rows = self._read_promise_rows(promises_file)
+        found = False
+        for row in rows:
+            if row["id"] == str(promise_id):
+                row["status"] = "fulfilled"
+                found = True
+                break
+        if found:
+            self._write_bounded_promises(rows, max_completed_rows=max_completed_rows)
+        return found
+
+    def sync_promises_from_db(self, db: Any, max_completed_rows: int = 20) -> None:
+        """Synchronizes promises.md and promises_archive.md from SQLite promises_challenges."""
+        if not hasattr(db, "get_promises"):
+            return
+        db_rows = db.get_promises(limit=500)
+        rows: List[Dict[str, str]] = []
+        for item in db_rows:
+            created_ts = item.get("created_at") or time.time()
+            created_str = time.strftime("%Y-%m-%d", time.localtime(created_ts))
+            clean_text = " ".join(str(item.get("text", "")).replace("|", "/").splitlines()).strip()
+            rows.append({
+                "id": str(item.get("id", "")),
+                "user": str(item.get("user", "")).replace("|", "/").strip(),
+                "type": str(item.get("type", "promise")).replace("|", "/").strip(),
+                "status": str(item.get("status", "pending")).replace("|", "/").strip().lower(),
+                "created": created_str,
+                "description": clean_text,
+            })
+        self._write_bounded_promises(rows, max_completed_rows=max_completed_rows)
+
+    def _read_promise_rows(self, promises_file: Path) -> List[Dict[str, str]]:
+        if not promises_file.exists():
+            return []
+        rows: List[Dict[str, str]] = []
+        for line in promises_file.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped.startswith("|") or stripped.startswith("| ID |") or stripped.startswith("|---"):
+                continue
+            parts = [p.strip() for p in stripped.strip("|").split("|")]
+            if len(parts) >= 6:
+                rows.append({
+                    "id": parts[0],
+                    "user": parts[1],
+                    "type": parts[2],
+                    "status": parts[3].lower(),
+                    "created": parts[4],
+                    "description": " | ".join(parts[5:]),
+                })
+        return rows
+
+    def _write_bounded_promises(self, rows: List[Dict[str, str]], max_completed_rows: int = 20) -> None:
+        promises_file = self.base_dir / "promises.md"
+        archive_file = self.base_dir / "promises_archive.md"
+
+        active_rows = [r for r in rows if r.get("status") == "pending"]
+        completed_rows = [r for r in rows if r.get("status") != "pending"]
+
+        cap = max(0, int(max_completed_rows))
+        overflow_rows: List[Dict[str, str]] = []
+        if len(completed_rows) > cap:
+            overflow_count = len(completed_rows) - cap
+            overflow_rows = completed_rows[:overflow_count]
+            completed_rows = completed_rows[overflow_count:]
+
+        if overflow_rows:
+            if not archive_file.exists():
+                archive_file.write_text(
+                    "# 📦 Eve's Archived Promises & Challenges\n\n"
+                    "| ID | User | Type | Status | Created | Description |\n"
+                    "|---|---|---|---|---|---|\n",
+                    encoding="utf-8",
+                )
+            with open(archive_file, "a", encoding="utf-8") as af:
+                for r in overflow_rows:
+                    af.write(f"| {r['id']} | {r['user']} | {r['type']} | {r['status']} | {r['created']} | {r['description']} |\n")
+
+        header = (
+            "# 🤝 Eve's Promises & Challenges Board\n\n"
+            "| ID | User | Type | Status | Created | Description |\n"
+            "|---|---|---|---|---|---|\n"
+        )
+        body_lines = [
+            f"| {r['id']} | {r['user']} | {r['type']} | {r['status']} | {r['created']} | {r['description']} |\n"
+            for r in (active_rows + completed_rows)
+        ]
+        promises_file.write_text(header + "".join(body_lines), encoding="utf-8")
 
     def _update_master_index(self, title: str, user: str, ep_type: str, date_str: str):
         index_file = self.base_dir / "MEMORY_INDEX.md"

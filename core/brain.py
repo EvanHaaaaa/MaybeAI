@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import asyncio
 import random
 import tempfile
@@ -8,6 +9,89 @@ import aiohttp
 from pathlib import Path
 from typing import List, Dict, Any, Optional, AsyncIterator, Tuple
 from core.conversation.engine import ConversationEngine
+
+
+class ProviderCircuitBreaker:
+    """
+    Per-provider circuit breaker tracking consecutive failures and HTTP 429 rate limits.
+    States: closed -> open (for cooldown_sec) -> half_open (single probe) -> closed/open.
+    """
+
+    def __init__(self, failure_threshold: int = 3, cooldown_sec: float = 30.0):
+        self.failure_threshold = max(1, int(failure_threshold))
+        self.cooldown_sec = max(0.01, float(cooldown_sec))
+        self._providers: Dict[str, Dict[str, Any]] = {}
+
+    def _entry(self, provider: str) -> Dict[str, Any]:
+        key = (provider or "mock").strip().lower()
+        if key not in self._providers:
+            self._providers[key] = {
+                "state": "closed",
+                "failures": 0,
+                "opened_at": None,
+                "half_open_in_flight": False,
+                "last_error": None,
+                "total_failures": 0,
+                "total_successes": 0,
+            }
+        return self._providers[key]
+
+    def allow_request(self, provider: str) -> bool:
+        key = (provider or "mock").strip().lower()
+        if key == "mock":
+            return True
+        entry = self._entry(key)
+        state = entry["state"]
+        if state == "closed":
+            return True
+        if state == "open":
+            opened_at = entry["opened_at"] or 0.0
+            if (time.monotonic() - opened_at) >= self.cooldown_sec:
+                entry["state"] = "half_open"
+                entry["half_open_in_flight"] = True
+                return True
+            return False
+        # half_open: allow one probe at a time
+        if not entry["half_open_in_flight"]:
+            entry["half_open_in_flight"] = True
+            return True
+        return False
+
+    def record_success(self, provider: str) -> None:
+        key = (provider or "mock").strip().lower()
+        if key == "mock":
+            return
+        entry = self._entry(key)
+        entry["state"] = "closed"
+        entry["failures"] = 0
+        entry["opened_at"] = None
+        entry["half_open_in_flight"] = False
+        entry["last_error"] = None
+        entry["total_successes"] += 1
+
+    def record_failure(
+        self,
+        provider: str,
+        reason: str = "",
+        status_code: Optional[int] = None,
+    ) -> None:
+        key = (provider or "mock").strip().lower()
+        if key == "mock":
+            return
+        entry = self._entry(key)
+        entry["failures"] += 1
+        entry["total_failures"] += 1
+        entry["last_error"] = reason or (f"HTTP {status_code}" if status_code else "unknown error")
+        if entry["state"] == "half_open" or entry["failures"] >= self.failure_threshold:
+            entry["state"] = "open"
+            entry["opened_at"] = time.monotonic()
+            entry["half_open_in_flight"] = False
+
+    def get_state(self, provider: Optional[str] = None) -> Dict[str, Any]:
+        if provider is not None:
+            key = provider.strip().lower()
+            return dict(self._entry(key))
+        return {k: dict(v) for k, v in self._providers.items()}
 
 
 class ContextBudgetManager:
@@ -176,7 +260,64 @@ class Brain:
         self.conversation = ConversationEngine(self.character)
         self.system_prompt = self.conversation.build_system_prompt("Chat")
         self.budget_manager = ContextBudgetManager(self.settings)
+        self.circuit_breaker = self._init_circuit_breaker()
         self._session: Optional[aiohttp.ClientSession] = None
+
+    def _init_circuit_breaker(self) -> ProviderCircuitBreaker:
+        llm_cfg = self.settings.get("llm", {}) if isinstance(self.settings, dict) else {}
+        threshold = int(llm_cfg.get("circuit_breaker_failure_threshold", 3))
+        cooldown = float(llm_cfg.get("circuit_breaker_cooldown_sec", 30.0))
+        return ProviderCircuitBreaker(failure_threshold=threshold, cooldown_sec=cooldown)
+
+    def _get_effective_temperature(self) -> float:
+        """Computes LLM sampling temperature modulated by MoodEngine, clamped to [0.2, 1.2]."""
+        llm_cfg = self.settings.get("llm", {}) if isinstance(self.settings, dict) else {}
+        base_temp = float(llm_cfg.get("temperature", 0.85))
+        modifier = 0.0
+        if self.mood is not None and hasattr(self.mood, "get_temperature_modifier"):
+            try:
+                modifier = float(self.mood.get_temperature_modifier())
+            except Exception:
+                modifier = 0.0
+        return round(max(0.2, min(1.2, base_temp + modifier)), 4)
+
+    def _get_failover_timeout_sec(self) -> float:
+        llm_cfg = self.settings.get("llm", {}) if isinstance(self.settings, dict) else {}
+        return max(0.1, float(llm_cfg.get("failover_timeout_sec", 1.8)))
+
+    def _is_provider_configured(self, provider: str) -> bool:
+        prov = (provider or "mock").strip().lower()
+        if prov == "gemini":
+            return bool(os.getenv("GEMINI_API_KEY", "").strip())
+        if prov == "openai":
+            return bool(os.getenv("OPENAI_API_KEY", "").strip())
+        return prov in ("ollama", "mock")
+
+    def _get_failover_chain(self, primary: str) -> List[str]:
+        prov = (primary or "mock").strip().lower()
+        if prov == "mock":
+            return ["mock"]
+        llm_cfg = self.settings.get("llm", {}) if isinstance(self.settings, dict) else {}
+        if not bool(llm_cfg.get("failover_enabled", True)):
+            return [prov, "mock"]
+
+        chain: List[str] = []
+        if prov in ("gemini", "openai", "ollama"):
+            chain.append(prov)
+        if prov == "gemini" and "openai" not in chain:
+            chain.append("openai")
+        elif prov == "openai" and "gemini" not in chain:
+            chain.append("gemini")
+
+        fallback_cfg = str(llm_cfg.get("fallback_provider", "mock") or "mock").strip().lower()
+        if fallback_cfg in ("gemini", "openai", "ollama") and fallback_cfg not in chain:
+            chain.append(fallback_cfg)
+
+        if "ollama" not in chain:
+            chain.append("ollama")
+        if "mock" not in chain:
+            chain.append("mock")
+        return chain
 
     @property
     def history(self) -> List[Dict[str, Any]]:
@@ -289,6 +430,7 @@ class Brain:
     def reload_settings(self, new_settings: Dict[str, Any]):
         self.settings = new_settings
         self.budget_manager = ContextBudgetManager(self.settings)
+        self.circuit_breaker = self._init_circuit_breaker()
 
     def set_provider(self, provider: str) -> str:
         prov = provider.lower().strip()
@@ -368,13 +510,37 @@ class Brain:
             is_creator=is_creator
         )
 
-        if provider == "openai":
-            response = await self._generate_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
-        elif provider == "ollama":
-            response = await self._generate_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
-        elif provider == "gemini":
-            response = await self._generate_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
-        else:
+        response: Optional[str] = None
+        chain = self._get_failover_chain(provider)
+        for candidate in chain:
+            if candidate == "mock":
+                response = self.conversation.generate_mock_response(
+                    user_name=user_name,
+                    message=message,
+                    game_context=game_context,
+                    is_donation=is_donation,
+                    donation_amount=donation_amount,
+                    is_group_debate=is_group_debate,
+                    debate_users=debate_users,
+                    is_creator=is_creator
+                )
+                break
+            if not self._is_provider_configured(candidate):
+                continue
+            if not self.circuit_breaker.allow_request(candidate):
+                continue
+
+            text, status_code, err = await self._call_provider_once(
+                candidate, system_prompt, user_name, message,
+                is_donation, donation_amount, image_base64
+            )
+            if text:
+                self.circuit_breaker.record_success(candidate)
+                response = text
+                break
+            self.circuit_breaker.record_failure(candidate, reason=err or "", status_code=status_code)
+
+        if response is None:
             response = self.conversation.generate_mock_response(
                 user_name=user_name,
                 message=message,
@@ -425,20 +591,39 @@ class Brain:
             is_creator=is_creator
         )
 
-        if provider == "openai":
-            stream = self._stream_openai(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
-        elif provider == "ollama":
-            stream = self._stream_ollama(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
-        elif provider == "gemini":
-            stream = self._stream_gemini(system_prompt, user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, image_base64, is_creator=is_creator)
-        else:
-            stream = self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
-
         accumulated: List[str] = []
-        async for chunk in stream:
-            if chunk:
-                accumulated.append(chunk)
-                yield chunk
+        chain = self._get_failover_chain(provider)
+        for candidate in chain:
+            if candidate == "mock":
+                async for chunk in self._stream_mock(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator):
+                    if chunk:
+                        accumulated.append(chunk)
+                        yield chunk
+                break
+            if not self._is_provider_configured(candidate):
+                continue
+            if not self.circuit_breaker.allow_request(candidate):
+                continue
+
+            yielded_candidate = False
+            try:
+                async for chunk in self._stream_provider_once(
+                    candidate, system_prompt, user_name, message,
+                    is_donation, donation_amount, image_base64
+                ):
+                    if chunk:
+                        yielded_candidate = True
+                        accumulated.append(chunk)
+                        yield chunk
+                if yielded_candidate:
+                    self.circuit_breaker.record_success(candidate)
+                    break
+                self.circuit_breaker.record_failure(candidate, reason="empty stream")
+            except Exception as e:
+                status_code = getattr(e, "status", None)
+                self.circuit_breaker.record_failure(candidate, reason=str(e), status_code=status_code)
+                if yielded_candidate:
+                    break
 
         full_response = "".join(accumulated).strip()
         if full_response:
@@ -539,7 +724,7 @@ class Brain:
         stream: bool = False
     ) -> Dict[str, Any]:
         model = self.settings.get("llm", {}).get("model", "gpt-4o-mini")
-        temperature = float(self.settings.get("llm", {}).get("temperature", 0.85))
+        temperature = self._get_effective_temperature()
         max_tokens = int(self.settings.get("llm", {}).get("max_tokens", 800))
 
         user_prefix = f"[Donation: {donation_amount}] {user_name}" if is_donation else user_name
@@ -575,34 +760,114 @@ class Brain:
             payload["stream"] = True
         return payload
 
-    async def _generate_openai(
-        self, system_prompt: str, user_name: str, message: str, game_context: str,
-        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
-        image_base64: Optional[str] = None, is_creator: bool = False
-    ) -> str:
+    async def _call_provider_once(
+        self, provider: str, system_prompt: str, user_name: str, message: str,
+        is_donation: bool, donation_amount: str, image_base64: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+        if provider == "openai":
+            return await self._try_openai(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        if provider == "ollama":
+            return await self._try_ollama(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        if provider == "gemini":
+            return await self._try_gemini(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        return None, None, f"unknown provider: {provider}"
+
+    async def _stream_provider_once(
+        self, provider: str, system_prompt: str, user_name: str, message: str,
+        is_donation: bool, donation_amount: str, image_base64: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        if provider == "openai":
+            stream = self._try_stream_openai(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        elif provider == "ollama":
+            stream = self._try_stream_ollama(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        elif provider == "gemini":
+            stream = self._try_stream_gemini(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        else:
+            return
+        async for chunk in stream:
+            yield chunk
+
+    async def _try_openai(
+        self, system_prompt: str, user_name: str, message: str,
+        is_donation: bool, donation_amount: str, image_base64: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
-
+            return None, None, "missing OPENAI_API_KEY"
         url = "https://api.openai.com/v1/chat/completions"
         headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json"
         }
         payload = self._build_openai_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64, stream=False)
-
+        timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
         try:
             session = await self._get_session()
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=12)) as resp:
+            async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    return data["choices"][0]["message"]["content"].strip()
-                else:
-                    print(f"[Brain Warning] OpenAI status {resp.status}. Using persona fallback.")
-                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
+                    text = data["choices"][0]["message"]["content"].strip()
+                    if text:
+                        return text, 200, None
+                    return None, 200, "empty response"
+                print(f"[Brain Warning] OpenAI status {resp.status}. Using fallback.")
+                return None, resp.status, f"HTTP {resp.status}"
         except Exception as e:
             print(f"[Brain Error] OpenAI connection error: {e}")
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
+            return None, None, str(e)
+
+    async def _try_stream_openai(
+        self, system_prompt: str, user_name: str, message: str,
+        is_donation: bool, donation_amount: str, image_base64: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            return
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+        payload = self._build_openai_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64, stream=True)
+        timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
+        session = await self._get_session()
+        async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
+            if resp.status != 200:
+                print(f"[Brain Warning] OpenAI stream status {resp.status}. Using fallback.")
+                raise aiohttp.ClientResponseError(
+                    request_info=resp.request_info,
+                    history=resp.history,
+                    status=resp.status,
+                    message=f"OpenAI stream status {resp.status}",
+                )
+            async for line in self._iter_lines(resp.content):
+                if not line or not line.startswith("data:"):
+                    continue
+                data_str = line[5:].strip()
+                if not data_str or data_str == "[DONE]":
+                    if data_str == "[DONE]":
+                        break
+                    continue
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                choices = data.get("choices", [])
+                if choices:
+                    delta = choices[0].get("delta", {})
+                    content = delta.get("content")
+                    if content:
+                        yield content
+
+    async def _generate_openai(
+        self, system_prompt: str, user_name: str, message: str, game_context: str,
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
+        image_base64: Optional[str] = None, is_creator: bool = False
+    ) -> str:
+        text, _, _ = await self._try_openai(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        if text:
+            return text
+        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
     async def _stream_openai(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
@@ -683,27 +948,71 @@ class Brain:
         return {
             "model": model,
             "messages": messages,
+            "options": {"temperature": self._get_effective_temperature()},
             "stream": stream
         }
+
+    async def _try_ollama(
+        self, system_prompt: str, user_name: str, message: str,
+        is_donation: bool, donation_amount: str, image_base64: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+        base_url = os.getenv("OLLAMA_BASE_URL") or self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
+        url = f"{base_url}/api/chat"
+        payload = self._build_ollama_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64, stream=False)
+        timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
+        try:
+            session = await self._get_session()
+            async with session.post(url, json=payload, timeout=timeout) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    text = data.get("message", {}).get("content", "").strip()
+                    if text:
+                        return text, 200, None
+                    return None, 200, "empty response"
+                return None, resp.status, f"HTTP {resp.status}"
+        except Exception as e:
+            return None, None, str(e)
+
+    async def _try_stream_ollama(
+        self, system_prompt: str, user_name: str, message: str,
+        is_donation: bool, donation_amount: str, image_base64: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        base_url = os.getenv("OLLAMA_BASE_URL") or self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
+        url = f"{base_url}/api/chat"
+        payload = self._build_ollama_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64, stream=True)
+        timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
+        session = await self._get_session()
+        async with session.post(url, json=payload, timeout=timeout) as resp:
+            if resp.status != 200:
+                raise aiohttp.ClientResponseError(
+                    request_info=resp.request_info,
+                    history=resp.history,
+                    status=resp.status,
+                    message=f"Ollama stream status {resp.status}",
+                )
+            async for line in self._iter_lines(resp.content):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    data = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                content = data.get("message", {}).get("content")
+                if content:
+                    yield content
+                if data.get("done"):
+                    break
 
     async def _generate_ollama(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
         is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
         image_base64: Optional[str] = None, is_creator: bool = False
     ) -> str:
-        base_url = os.getenv("OLLAMA_BASE_URL") or self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
-        url = f"{base_url}/api/chat"
-        payload = self._build_ollama_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64, stream=False)
-
-        try:
-            session = await self._get_session()
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("message", {}).get("content", "").strip()
-                return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
-        except Exception:
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
+        text, _, _ = await self._try_ollama(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        if text:
+            return text
+        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
     async def _stream_ollama(
         self, system_prompt: str, user_name: str, message: str, game_context: str,
@@ -770,7 +1079,7 @@ class Brain:
             })
         contents.append({"role": "user", "parts": user_parts})
 
-        cfg_temp = float(self.settings.get("llm", {}).get("temperature", 0.85))
+        cfg_temp = self._get_effective_temperature()
         cfg_max_tokens = int(self.settings.get("llm", {}).get("max_tokens", 800))
         return {
             "systemInstruction": {"parts": [{"text": bounded_prompt}]},
@@ -782,14 +1091,13 @@ class Brain:
             }
         }
 
-    async def _generate_gemini(
-        self, system_prompt: str, user_name: str, message: str, game_context: str,
-        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
-        image_base64: Optional[str] = None, is_creator: bool = False
-    ) -> str:
+    async def _try_gemini(
+        self, system_prompt: str, user_name: str, message: str,
+        is_donation: bool, donation_amount: str, image_base64: Optional[str] = None,
+    ) -> Tuple[Optional[str], Optional[int], Optional[str]]:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
+            return None, None, "missing GEMINI_API_KEY"
 
         model = self.settings.get("llm", {}).get("gemini_model", "gemini-3-flash-preview")
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
@@ -800,7 +1108,7 @@ class Brain:
         payload = self._build_gemini_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
 
         try:
-            timeout = aiohttp.ClientTimeout(total=15)
+            timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
             session = await self._get_session()
             async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
                 if resp.status == 200:
@@ -810,16 +1118,71 @@ class Brain:
                         parts = candidates[0]["content"]["parts"]
                         text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
                         if text:
-                            return text
-                    print(f"[Brain Warning] Gemini response missing valid parts. Falling back to persona.")
-                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
+                            return text, 200, None
+                    print("[Brain Warning] Gemini response missing valid parts. Falling back.")
+                    return None, 200, "missing valid parts"
                 else:
                     err_text = await resp.text()
                     print(f"[Brain Warning] Gemini returned status {resp.status}: {err_text[:120]}. Using persona fallback.")
-                    return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
+                    return None, resp.status, f"HTTP {resp.status}"
         except Exception as e:
             print(f"[Brain Warning] Gemini request error/timeout ({e}). Using persona fallback.")
-            return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
+            return None, None, str(e)
+
+    async def _try_stream_gemini(
+        self, system_prompt: str, user_name: str, message: str,
+        is_donation: bool, donation_amount: str, image_base64: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            return
+        model = self.settings.get("llm", {}).get("gemini_model", "gemini-3-flash-preview")
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:streamGenerateContent?alt=sse"
+        headers = {
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json"
+        }
+        payload = self._build_gemini_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
+        session = await self._get_session()
+        async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
+            if resp.status != 200:
+                err_text = await resp.text()
+                print(f"[Brain Warning] Gemini stream returned status {resp.status}: {err_text[:120]}. Using persona fallback.")
+                raise aiohttp.ClientResponseError(
+                    request_info=resp.request_info,
+                    history=resp.history,
+                    status=resp.status,
+                    message=f"Gemini stream status {resp.status}",
+                )
+            async for line in self._iter_lines(resp.content):
+                if not line or not line.startswith("data:"):
+                    continue
+                data_str = line[5:].strip()
+                if not data_str or data_str == "[DONE]":
+                    if data_str == "[DONE]":
+                        break
+                    continue
+                try:
+                    data = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                candidates = data.get("candidates", [])
+                if candidates and "content" in candidates[0] and "parts" in candidates[0]["content"]:
+                    parts = candidates[0]["content"]["parts"]
+                    text = "".join(p.get("text", "") for p in parts if "text" in p)
+                    if text:
+                        yield text
+
+    async def _generate_gemini(
+        self, system_prompt: str, user_name: str, message: str, game_context: str,
+        is_donation: bool, donation_amount: str, is_group_debate: bool, debate_users: Optional[List[str]],
+        image_base64: Optional[str] = None, is_creator: bool = False
+    ) -> str:
+        text, _, _ = await self._try_gemini(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
+        if text:
+            return text
+        return self.conversation.generate_mock_response(user_name, message, game_context, is_donation, donation_amount, is_group_debate, debate_users, is_creator=is_creator)
 
     async def _stream_gemini(
         self, system_prompt: str, user_name: str, message: str, game_context: str,

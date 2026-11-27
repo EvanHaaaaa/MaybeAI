@@ -10,7 +10,7 @@ try:
 except ImportError:
     os.environ.setdefault("MAYBEAI_LLM_PROVIDER", "mock")
 
-from core.brain import Brain, ContextBudgetManager
+from core.brain import Brain, ContextBudgetManager, ProviderCircuitBreaker
 
 
 class _FakeAsyncResp:
@@ -176,7 +176,8 @@ class TestBrain(unittest.IsolatedAsyncioTestCase):
         captured = {}
 
         def fake_post(url, headers=None, json=None, timeout=None):
-            captured["json"] = json
+            if "generativelanguage.googleapis.com" in url:
+                captured["json"] = json
             return _FakeAsyncResp(status=500, text_data="Internal Server Error")
 
         fake_session = MagicMock()
@@ -198,6 +199,85 @@ class TestBrain(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(mock_fallback.call_args.kwargs.get("is_creator"))
         finally:
             await brain.close()
+
+    def test_circuit_breaker_opens_cools_down_and_probes(self):
+        cb = ProviderCircuitBreaker(failure_threshold=2, cooldown_sec=0.05)
+        self.assertTrue(cb.allow_request("gemini"))
+        cb.record_failure("gemini", status_code=429)
+        self.assertTrue(cb.allow_request("gemini"))
+        cb.record_failure("gemini", status_code=429)
+        # Now open
+        self.assertFalse(cb.allow_request("gemini"))
+        self.assertEqual(cb.get_state("gemini")["state"], "open")
+
+        # Wait for cooldown -> half-open probe
+        import time
+        time.sleep(0.07)
+        self.assertTrue(cb.allow_request("gemini"))
+        self.assertEqual(cb.get_state("gemini")["state"], "half_open")
+        # Second concurrent request while probe in flight is blocked
+        self.assertFalse(cb.allow_request("gemini"))
+        # Success closes circuit
+        cb.record_success("gemini")
+        self.assertEqual(cb.get_state("gemini")["state"], "closed")
+        self.assertTrue(cb.allow_request("gemini"))
+
+    async def test_cross_provider_failover_chain_and_timeout(self):
+        self.settings_path.write_text(
+            json.dumps({
+                "llm": {
+                    "provider": "gemini",
+                    "failover_enabled": True,
+                    "failover_timeout_sec": 0.25,
+                    "circuit_breaker_failure_threshold": 2,
+                    "circuit_breaker_cooldown_sec": 30.0,
+                }
+            }),
+            encoding="utf-8",
+        )
+        brain = Brain(settings_path=str(self.settings_path), character_path="config/character.json")
+        calls = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            calls.append((url, getattr(timeout, "total", None)))
+            if "generativelanguage.googleapis.com" in url:
+                return _FakeAsyncResp(status=429, text_data="Rate limited")
+            if "api.openai.com" in url:
+                return _FakeAsyncResp(
+                    status=200,
+                    json_data={"choices": [{"message": {"content": "[emotion: smug] OpenAI backup!"}}]},
+                )
+            return _FakeAsyncResp(status=500, text_data="Unexpected")
+
+        fake_session = MagicMock()
+        fake_session.post = fake_post
+        try:
+            with patch.dict(
+                os.environ,
+                {"MAYBEAI_LLM_PROVIDER": "gemini", "GEMINI_API_KEY": "g-key", "OPENAI_API_KEY": "o-key"},
+                clear=False,
+            ), patch.object(brain, "_get_session", new=AsyncMock(return_value=fake_session)):
+                resp = await brain.generate_response("Viewer", "Halo!")
+            self.assertEqual(resp, "[emotion: smug] OpenAI backup!")
+            self.assertEqual(len(calls), 2)
+            self.assertLess(calls[0][1], 2.0)
+        finally:
+            await brain.close()
+
+    def test_mood_modulated_temperature_clamped(self):
+        brain = Brain(settings_path=str(self.settings_path), character_path="config/character.json")
+        brain.settings["llm"]["temperature"] = 0.85
+        with patch.object(brain.mood, "get_temperature_modifier", return_value=0.12):
+            self.assertAlmostEqual(brain._get_effective_temperature(), 0.97, places=3)
+        brain.settings["llm"]["temperature"] = 1.15
+        with patch.object(brain.mood, "get_temperature_modifier", return_value=0.15):
+            self.assertEqual(brain._get_effective_temperature(), 1.2)
+        brain.settings["llm"]["temperature"] = 0.25
+        with patch.object(brain.mood, "get_temperature_modifier", return_value=-0.15):
+            self.assertEqual(brain._get_effective_temperature(), 0.2)
+        payload = brain._build_openai_payload("sys", "Viewer", "hi", False, "")
+        self.assertGreaterEqual(payload["temperature"], 0.2)
+        self.assertLessEqual(payload["temperature"], 1.2)
 
 
 if __name__ == "__main__":

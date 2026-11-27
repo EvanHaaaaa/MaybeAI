@@ -1,7 +1,20 @@
 import json
 import asyncio
+import os
+import time
+from pathlib import Path
 import websockets
 from typing import Optional, Dict, Any, List
+
+
+def _resolve_vts_token_path(token_path: Optional[str] = None) -> Path:
+    if token_path:
+        return Path(token_path)
+    data_root = os.getenv("MAYBEAI_DATA_DIR", "").strip()
+    if data_root:
+        return Path(data_root) / "vts_token.json"
+    return Path("data") / "vts_token.json"
+
 
 class VTSClient:
     """
@@ -9,11 +22,28 @@ class VTSClient:
     Controls Live2D mouth movements, head gestures, and facial expressions.
     """
 
-    def __init__(self, host: str = "localhost", port: int = 8001, plugin_name: str = "MaybeAI-VTuber"):
+    def __init__(
+        self,
+        host: str = "localhost",
+        port: int = 8001,
+        plugin_name: str = "MaybeAI-VTuber",
+        token_path: Optional[str] = None,
+        auto_reconnect: bool = False,
+        reconnect_base_delay: float = 1.0,
+        reconnect_max_delay: float = 60.0,
+    ):
         self.host = host
         self.port = port
         self.uri = f"ws://{host}:{port}"
         self.plugin_name = plugin_name
+        self.token_path: Path = _resolve_vts_token_path(token_path)
+        self.auto_reconnect: bool = bool(auto_reconnect)
+        self.reconnect_base_delay: float = max(0.01, float(reconnect_base_delay))
+        self.reconnect_max_delay: float = max(self.reconnect_base_delay, float(reconnect_max_delay))
+        self.reconnect_attempts: int = 0
+        self._reconnect_task: Optional[asyncio.Task] = None
+        self._closing: bool = False
+
         self.ws: Optional[websockets.WebSocketClientProtocol] = None
         self.auth_token: Optional[str] = None
         self.connected = False
@@ -31,8 +61,95 @@ class VTSClient:
             "MouthForm": 0.0,
             "MouthOpen": 0.0,
         }
+        self._load_token()
 
-    async def disconnect(self):
+    def _load_token(self) -> Optional[str]:
+        """Loads persisted VTS authentication token from disk if available."""
+        try:
+            if not self.token_path.exists():
+                return None
+            raw = self.token_path.read_text(encoding="utf-8")
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return None
+            stored_plugin = data.get("plugin_name")
+            if stored_plugin and stored_plugin != self.plugin_name:
+                return None
+            tok = data.get("authenticationToken") or data.get("token")
+            if isinstance(tok, str) and tok.strip():
+                self.auth_token = tok.strip()
+                return self.auth_token
+        except Exception:
+            pass
+        return None
+
+    def _save_token(self, token: Optional[str]) -> None:
+        """Persists the VTS authentication token to disk."""
+        if not token:
+            return
+        try:
+            self.token_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "authenticationToken": token,
+                "plugin_name": self.plugin_name,
+                "host": self.host,
+                "port": self.port,
+                "updated_at": time.time(),
+            }
+            self.token_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except Exception as exc:
+            print(f"[VTS] Failed to persist token to {self.token_path}: {exc}")
+
+    def _clear_saved_token(self) -> None:
+        """Removes a stale/rejected persisted VTS token from disk."""
+        try:
+            if self.token_path.exists():
+                self.token_path.unlink()
+        except Exception:
+            pass
+
+    def start_auto_reconnect(self) -> Optional[asyncio.Task]:
+        """Starts the exponential-backoff auto-reconnect loop if not already running."""
+        if self._closing or self.connected:
+            return None
+        if self._reconnect_task is not None and not self._reconnect_task.done():
+            return self._reconnect_task
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None
+        self._reconnect_task = loop.create_task(self.auto_reconnect_loop())
+        return self._reconnect_task
+
+    async def auto_reconnect_loop(self) -> bool:
+        """Reconnects to VTube Studio with exponential backoff until connected or stopped."""
+        delay = self.reconnect_base_delay
+        while not self._closing and not self.connected:
+            self.reconnect_attempts += 1
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                return False
+            if self._closing or self.connected:
+                break
+            ok = await self.connect(_from_reconnect_loop=True)
+            if ok:
+                self.reconnect_attempts = 0
+                return True
+            delay = min(self.reconnect_max_delay, delay * 2.0)
+        return self.connected
+
+    async def disconnect(self, _stop_auto_reconnect: bool = True):
+        if _stop_auto_reconnect:
+            self._closing = True
+            if self._reconnect_task is not None and not self._reconnect_task.done():
+                self._reconnect_task.cancel()
+                try:
+                    await self._reconnect_task
+                except asyncio.CancelledError:
+                    pass
+            self._reconnect_task = None
+
         self.connected = False
         if self.ws:
             try:
@@ -41,8 +158,12 @@ class VTSClient:
                 pass
             self.ws = None
 
+    async def close(self):
+        """Alias for disconnect() to cleanly stop auto-reconnect and close WebSocket."""
+        await self.disconnect(_stop_auto_reconnect=True)
+
     async def reconnect(self, host: Optional[str] = None, port: Optional[int] = None) -> bool:
-        await self.disconnect()
+        await self.disconnect(_stop_auto_reconnect=False)
         if host:
             self.host = host
         if port:
@@ -57,17 +178,21 @@ class VTSClient:
             "port": self.port,
             "plugin_name": self.plugin_name,
             "authenticated": bool(self.auth_token and self.connected),
+            "has_token": bool(self.auth_token),
+            "auto_reconnect": self.auto_reconnect,
+            "reconnect_attempts": self.reconnect_attempts,
             "last_connected_time": self.last_connected_time,
             "last_error": self.last_error
         }
 
-    async def connect(self) -> bool:
+    async def connect(self, _from_reconnect_loop: bool = False) -> bool:
+        self._closing = False
         try:
             self.ws = await websockets.connect(self.uri, open_timeout=3.0)
             self.connected = True
-            import time
             self.last_connected_time = time.time()
             self.last_error = None
+            self.reconnect_attempts = 0
             print(f"[VTS] Connected to VTube Studio at {self.uri}")
             await self._authenticate()
             return True
@@ -75,6 +200,8 @@ class VTSClient:
             self.connected = False
             self.last_error = str(e)
             print(f"[VTS] VTube Studio not detected ({e}). Running in standalone/virtual avatar mode.")
+            if self.auto_reconnect and not self._closing and not _from_reconnect_loop:
+                self.start_auto_reconnect()
             return False
 
     async def _authenticate(self):
@@ -91,23 +218,7 @@ class VTSClient:
         await self.ws.send(json.dumps(state_req))
         resp = json.loads(await self.ws.recv())
 
-        # If not authenticated, request token
-        if not self.auth_token:
-            token_req = {
-                "apiName": "VTubeStudioPublicAPI",
-                "apiVersion": "1.0",
-                "requestID": "token_req",
-                "messageType": "AuthenticationTokenRequest",
-                "data": {
-                    "pluginName": self.plugin_name,
-                    "pluginDeveloper": "MaybeAI"
-                }
-            }
-            await self.ws.send(json.dumps(token_req))
-            resp = json.loads(await self.ws.recv())
-            self.auth_token = resp.get("data", {}).get("authenticationToken")
-
-        # Authenticate session
+        # Try cached/persisted token first
         if self.auth_token:
             auth_req = {
                 "apiName": "VTubeStudioPublicAPI",
@@ -123,6 +234,45 @@ class VTSClient:
             await self.ws.send(json.dumps(auth_req))
             auth_resp = json.loads(await self.ws.recv())
             if auth_resp.get("data", {}).get("authenticated"):
+                self._save_token(self.auth_token)
+                print("[VTS] Authenticated successfully with VTube Studio!")
+                return
+            # Token was rejected/revoked; clear and request a fresh token
+            self.auth_token = None
+            self._clear_saved_token()
+
+        # Request new token
+        token_req = {
+            "apiName": "VTubeStudioPublicAPI",
+            "apiVersion": "1.0",
+            "requestID": "token_req",
+            "messageType": "AuthenticationTokenRequest",
+            "data": {
+                "pluginName": self.plugin_name,
+                "pluginDeveloper": "MaybeAI"
+            }
+        }
+        await self.ws.send(json.dumps(token_req))
+        resp = json.loads(await self.ws.recv())
+        self.auth_token = resp.get("data", {}).get("authenticationToken")
+
+        # Authenticate session with newly acquired token
+        if self.auth_token:
+            auth_req = {
+                "apiName": "VTubeStudioPublicAPI",
+                "apiVersion": "1.0",
+                "requestID": "auth_session",
+                "messageType": "AuthenticationRequest",
+                "data": {
+                    "pluginName": self.plugin_name,
+                    "pluginDeveloper": "MaybeAI",
+                    "authenticationToken": self.auth_token
+                }
+            }
+            await self.ws.send(json.dumps(auth_req))
+            auth_resp = json.loads(await self.ws.recv())
+            if auth_resp.get("data", {}).get("authenticated"):
+                self._save_token(self.auth_token)
                 print("[VTS] Authenticated successfully with VTube Studio!")
 
     async def set_parameter(self, parameter_id: str, value: float, weight: float = 1.0):
@@ -154,6 +304,10 @@ class VTSClient:
             await self.ws.send(json.dumps(payload))
         except Exception:
             self.connected = False
+            if self.auto_reconnect and not self._closing:
+                self.start_auto_reconnect()
+            if self.auto_reconnect and not self._closing:
+                self.start_auto_reconnect()
 
     async def set_parameters(self, params: Dict[str, float], weight: float = 1.0):
         """
@@ -191,6 +345,10 @@ class VTSClient:
             await self.ws.send(json.dumps(payload))
         except Exception:
             self.connected = False
+            if self.auto_reconnect and not self._closing:
+                self.start_auto_reconnect()
+            if self.auto_reconnect and not self._closing:
+                self.start_auto_reconnect()
 
     def get_rig_state(self) -> Dict[str, float]:
         """Returns a snapshot of the last applied Live2D rig parameters."""

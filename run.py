@@ -30,6 +30,9 @@ from core.config_manager import ConfigManager
 
 orchestrator = Orchestrator()
 config_mgr = ConfigManager()
+_PROCESS_START_MONOTONIC = time.monotonic()
+_active_ws_clients: set[WebSocket] = set()
+_active_collab_ws_clients: set[WebSocket] = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -427,6 +430,7 @@ _SENSITIVE_GET_EXACT = frozenset({
     "/api/voice/status",
     "/api/eventbus/stats",
     "/api/platforms/status",
+    "/api/metrics",
 })
 _SENSITIVE_GET_PREFIXES = (
     "/api/memory/",
@@ -515,6 +519,31 @@ async def test_feature_diagnostic(feature: str, req: Optional[Dict[str, Any]] = 
 @app.get("/api/health")
 async def get_health():
     return {"status": "ok"}
+
+
+@app.get("/api/metrics")
+async def get_metrics():
+    orch_metrics: Dict[str, Any] = {}
+    get_metrics_fn = getattr(orchestrator, "get_metrics", None)
+    if callable(get_metrics_fn):
+        raw_metrics = get_metrics_fn()
+        if asyncio.iscoroutine(raw_metrics):
+            raw_metrics = await raw_metrics
+        if isinstance(raw_metrics, dict):
+            orch_metrics = raw_metrics
+
+    main_ws = len(_active_ws_clients)
+    collab_ws = len(_active_collab_ws_clients)
+    return {
+        "uptime_sec": round(max(0.0, time.monotonic() - _PROCESS_START_MONOTONIC), 3),
+        "active_ws_clients": main_ws + collab_ws,
+        "websocket_clients": {
+            "main": main_ws,
+            "collab": collab_ws,
+            "total": main_ws + collab_ws,
+        },
+        "orchestrator": orch_metrics,
+    }
 
 
 @app.get("/api/system/diagnostics")
@@ -892,6 +921,7 @@ async def websocket_endpoint(websocket: WebSocket):
     ws_creator_authorized = _is_ws_creator_authorized(websocket)
 
     await websocket.accept()
+    _active_ws_clients.add(websocket)
 
     async def listener(event: dict):
         evt_type = event.get("type") if isinstance(event, dict) else None
@@ -1032,9 +1062,52 @@ async def websocket_endpoint(websocket: WebSocket):
         "data": orchestrator.collab.get_status()
     })
 
+    def _enqueue_voice_pcm(
+        pcm_bytes: bytes,
+        voice_user: str = "Creator",
+        voice_lang: Optional[str] = None,
+    ) -> None:
+        nonlocal voice_worker_task
+        if not pcm_bytes:
+            return
+        if voice_worker_task is None or voice_worker_task.done():
+            voice_worker_task = asyncio.create_task(_voice_worker())
+        if voice_queue.full():
+            try:
+                voice_queue.get_nowait()
+                voice_queue.task_done()
+            except asyncio.QueueEmpty:
+                pass
+        voice_queue.put_nowait((pcm_bytes, voice_user, voice_lang))
+
     try:
         while True:
-            data = await websocket.receive_json()
+            message = await websocket.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            raw_bytes = message.get("bytes")
+            if raw_bytes is not None:
+                if not ws_creator_authorized:
+                    await websocket.send_json({
+                        "type": "error",
+                        "data": {"error": "Creator authorization required for binary voice stream", "code": "forbidden"}
+                    })
+                    continue
+                _enqueue_voice_pcm(bytes(raw_bytes), "Creator", None)
+                continue
+            raw_text = message.get("text")
+            if raw_text is None:
+                continue
+            try:
+                data = json.loads(raw_text)
+            except Exception:
+                await websocket.send_json({
+                    "type": "error",
+                    "data": {"error": "Invalid JSON payload", "code": "bad_request"}
+                })
+                continue
+            if not isinstance(data, dict):
+                continue
             msg_type = data.get("type")
             if msg_type in _CREATOR_ONLY_WS_ACTIONS and not ws_creator_authorized:
                 await websocket.send_json({
@@ -1652,20 +1725,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     continue
                 raw_audio = data.get("audio_b64") or data.get("pcm_b64") or data.get("chunk") or data.get("pcm")
                 pcm_bytes = _decode_pcm_chunk(raw_audio)
-                if pcm_bytes:
-                    if voice_worker_task is None or voice_worker_task.done():
-                        voice_worker_task = asyncio.create_task(_voice_worker())
-                    if voice_queue.full():
-                        try:
-                            voice_queue.get_nowait()
-                            voice_queue.task_done()
-                        except asyncio.QueueEmpty:
-                            pass
-                    voice_queue.put_nowait((
-                        pcm_bytes,
-                        str(data.get("user") or "Creator"),
-                        data.get("language"),
-                    ))
+                _enqueue_voice_pcm(
+                    pcm_bytes,
+                    str(data.get("user") or "Creator"),
+                    data.get("language"),
+                )
             elif data.get("type") == "mission_action":
                 if not ws_creator_authorized:
                     await websocket.send_json({
@@ -1724,6 +1788,7 @@ async def websocket_endpoint(websocket: WebSocket):
     except (WebSocketDisconnect, Exception):
         pass
     finally:
+        _active_ws_clients.discard(websocket)
         orchestrator.unregister_listener(listener)
         if voice_worker_task is not None and not voice_worker_task.done():
             try:
@@ -1768,6 +1833,7 @@ async def collab_websocket_endpoint(websocket: WebSocket):
         return
 
     await websocket.accept()
+    _active_collab_ws_clients.add(websocket)
 
     async def send_to_peer(envelope_dict: Dict[str, Any]):
         await websocket.send_json(envelope_dict)
@@ -1787,6 +1853,7 @@ async def collab_websocket_endpoint(websocket: WebSocket):
     except Exception:
         pass
     finally:
+        _active_collab_ws_clients.discard(websocket)
         orchestrator.collab.unregister_peer_sender(sender_id)
 
 

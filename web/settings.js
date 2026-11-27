@@ -10,9 +10,15 @@ document.addEventListener("DOMContentLoaded", () => {
   let activeCategory = "diagnostics";
   let searchQuery = "";
 
-  const CREATOR_TOKEN_KEY = "maybeai_creator_token";
+  const clientLib = window.MaybeAIClient || {};
+  const CreatorAuth = clientLib.CreatorAuth;
+  const CREATOR_TOKEN_KEY = (CreatorAuth && CreatorAuth.TOKEN_KEY) || "maybeai_creator_token";
 
   function setCreatorToken(token) {
+    if (CreatorAuth && typeof CreatorAuth.setToken === "function") {
+      CreatorAuth.setToken(token);
+      return;
+    }
     const clean = String(token || "").trim();
     if (!clean) return;
     try { localStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
@@ -20,11 +26,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function clearCreatorToken() {
+    if (CreatorAuth && typeof CreatorAuth.clearToken === "function") {
+      CreatorAuth.clearToken();
+      return;
+    }
     try { localStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
     try { sessionStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
   }
 
   function getCreatorToken() {
+    if (CreatorAuth && typeof CreatorAuth.getToken === "function") {
+      return CreatorAuth.getToken();
+    }
     try {
       const urlToken = new URLSearchParams(window.location.search).get("token");
       if (urlToken && urlToken.trim()) {
@@ -47,6 +60,9 @@ document.addEventListener("DOMContentLoaded", () => {
   getCreatorToken();
 
   function authFetch(url, options = {}) {
+    if (CreatorAuth && typeof CreatorAuth.authFetch === "function") {
+      return CreatorAuth.authFetch(url, options);
+    }
     const token = getCreatorToken();
     const headers = Object.assign({}, options.headers || {});
     if (token) {
@@ -57,6 +73,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function escapeHtml(str) {
+    if (clientLib.escapeHtml) return clientLib.escapeHtml(str);
     if (str === null || str === undefined) return "";
     return String(str)
       .replace(/&/g, "&amp;")
@@ -84,8 +101,35 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnSaveCreatorToken = document.getElementById("btnSaveCreatorToken");
   const btnClearCreatorToken = document.getElementById("btnClearCreatorToken");
   const btnToggleCreatorAuth = document.getElementById("btnToggleCreatorAuth");
+  const connectionStatusBadge = document.getElementById("connectionStatusBadge");
   const connectionText = document.getElementById("connectionText");
   let listenersInitialized = false;
+  let settingsWsClient = null;
+
+  function setConnectionBadge(status, label) {
+    if (connectionText && label) connectionText.textContent = label;
+    if (connectionStatusBadge) {
+      connectionStatusBadge.classList.remove("status-online", "status-offline");
+      connectionStatusBadge.classList.add(status === "online" ? "status-online" : "status-offline");
+    }
+  }
+
+  function connectSettingsWs() {
+    if (!clientLib.ReconnectingWebSocket) return;
+    const urlFactory = () => (CreatorAuth && CreatorAuth.buildWsUrl ? CreatorAuth.buildWsUrl("/ws") : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/ws`);
+    settingsWsClient = new clientLib.ReconnectingWebSocket(urlFactory, {
+      minDelayMs: 1000,
+      maxDelayMs: 30000,
+      onopen: () => setConnectionBadge("online", "SYSTEM ONLINE"),
+      onclose: () => setConnectionBadge("offline", "WS RECONNECTING"),
+      onstatechange: (state) => {
+        if (state === "open") setConnectionBadge("online", "SYSTEM ONLINE");
+        else if (state === "reconnecting") setConnectionBadge("offline", "WS RECONNECTING");
+        else if (state === "connecting") setConnectionBadge("offline", "WS CONNECTING");
+      }
+    });
+    settingsWsClient.connect();
+  }
 
   // Modal Elements
   const confirmModal = document.getElementById("confirmModal");
@@ -124,7 +168,7 @@ document.addEventListener("DOMContentLoaded", () => {
           detail = `${errBody.error || errBody.detail} (HTTP ${res.status})`;
         }
       } catch (e) {}
-      if (connectionText) connectionText.textContent = "AUTH REQUIRED";
+      if (connectionText) setConnectionBadge("offline", "AUTH REQUIRED");
       showCreatorAuthBar(detail);
       const err = new Error(detail);
       err.isAuthError = true;
@@ -146,6 +190,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Initialize
   setupEventListeners();
+  connectSettingsWs();
   init();
 
   async function init() {
@@ -162,7 +207,7 @@ document.addEventListener("DOMContentLoaded", () => {
       diagnostics = diagRes && typeof diagRes === "object" ? diagRes : {};
 
       hideCreatorAuthBar();
-      if (connectionText) connectionText.textContent = "SYSTEM ONLINE";
+      if (connectionText) setConnectionBadge("online", "SYSTEM ONLINE");
       if (loadingState) loadingState.style.display = "none";
       renderNavigation();
       renderContent();
@@ -944,6 +989,9 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         setCreatorToken(val);
         showToast("Creator Token saved. Loading configuration...", "info");
+        if (settingsWsClient && typeof settingsWsClient.reconnectNow === "function") {
+          settingsWsClient.reconnectNow();
+        }
         init();
       };
       btnSaveCreatorToken.addEventListener("click", saveAndRetry);

@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MaybeAI - AI VTuber Studio</title>
   <link rel="stylesheet" href="/static/style.css">
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/vendor/fonts.css">
 </head>
 <body>
   <div class="app-container">
@@ -398,6 +398,7 @@
             </div>
           </div>
           <div class="collab-status-bar">
+            <span id="collab-peer-badge" class="badge">Peer: Disconnected</span>
             <span id="collab-floor-badge" class="badge">Floor: IDLE</span>
             <span id="collab-turn-badge" class="badge badge-accent">Turns: 0/6</span>
           </div>
@@ -2233,6 +2234,7 @@
     </div>
   </div>
 
+  <script src="/static/shared-client.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

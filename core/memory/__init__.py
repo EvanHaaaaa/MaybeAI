@@ -12,9 +12,21 @@ class EpisodicMemoryStore:
     Andrej Karpathy Markdown journals, and event ingestion.
     """
 
-    def __init__(self, db_path: str = "data/memory.db", markdown_dir: str = "data/second_brain"):
-        self.embedder = EmbeddingEngine()
-        self.db = MemoryDatabase(db_path=db_path)
+    def __init__(
+        self,
+        db_path: str = "data/memory.db",
+        markdown_dir: str = "data/second_brain",
+        embedding_provider: str = "auto",
+        embedder: Optional[EmbeddingEngine] = None,
+        vector_scan_limit: int = 2000,
+    ):
+        self.embedder = embedder if embedder is not None else EmbeddingEngine(provider=embedding_provider)
+        self.db = MemoryDatabase(
+            db_path=db_path,
+            embedding_provider=embedding_provider,
+            embedder=self.embedder,
+            vector_scan_limit=vector_scan_limit,
+        )
         self.sync = MarkdownBrainSync(base_dir=markdown_dir)
         self.retriever = MemoryRetriever(db=self.db)
         self.extractor = MemoryExtractor(db=self.db, markdown_sync=self.sync)
@@ -89,6 +101,17 @@ class EpisodicMemoryStore:
 
     def get_latest_journal(self) -> str:
         return self.sync.get_latest_journal_markdown()
+
+    def fulfill_promise(self, promise_id: int) -> bool:
+        """Marks a promise fulfilled in SQLite and syncs promises.md."""
+        updated = self.db.fulfill_promise(promise_id)
+        if updated:
+            self.sync.sync_promises_from_db(self.db)
+        return updated
+
+    def sync_promises(self) -> None:
+        """Bidirectionally reconciles promises.md with SQLite promises_challenges."""
+        self.sync.sync_promises_from_db(self.db)
 
 __all__ = [
     "EpisodicMemoryStore",

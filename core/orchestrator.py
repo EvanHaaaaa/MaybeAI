@@ -9,6 +9,7 @@ import time
 from typing import Dict, Any, Optional, Set, Callable, List
 from core.brain import Brain
 from core.config_manager import ConfigManager
+from core.metrics import MetricsCollector
 from core.tts import TTSEngine
 from core.vts_client import VTSClient
 from core.chat_receiver import ChatReceiver, ChatMessage
@@ -52,6 +53,7 @@ class Orchestrator:
     def __init__(self, config_dir: str = "config", event_bus: Optional[EventBus] = None):
         self.config_dir = config_dir
         self.event_bus = event_bus if event_bus is not None else EventBus()
+        self.metrics = MetricsCollector()
         self.brain = Brain(f"{config_dir}/settings.json", f"{config_dir}/character.json")
         # Share the same EventBus instance between Orchestrator and ConversationEngine
         self.brain.conversation.event_bus = self.event_bus
@@ -106,7 +108,8 @@ class Orchestrator:
         self.vts = VTSClient(
             host=vts_cfg.get("host", "localhost"),
             port=vts_cfg.get("port", 8001),
-            plugin_name=vts_cfg.get("plugin_name", "MaybeAI-VTuber")
+            plugin_name=vts_cfg.get("plugin_name", "MaybeAI-VTuber"),
+            auto_reconnect=bool(vts_cfg.get("auto_reconnect", True)),
         )
 
         # OBS Showrunner Client
@@ -282,7 +285,13 @@ class Orchestrator:
     def _spawn_bg_task(self, coro) -> asyncio.Task:
         task = asyncio.create_task(coro)
         self._bg_tasks.add(task)
-        task.add_done_callback(self._bg_tasks.discard)
+        self.metrics.set_gauge("bg_tasks_active", sum(1 for t in self._bg_tasks if not t.done()))
+
+        def _on_done(done_task: asyncio.Task) -> None:
+            self._bg_tasks.discard(done_task)
+            self.metrics.set_gauge("bg_tasks_active", sum(1 for t in self._bg_tasks if not t.done()))
+
+        task.add_done_callback(_on_done)
         return task
 
     @staticmethod
@@ -387,9 +396,30 @@ class Orchestrator:
 
     def register_listener(self, callback: Callable[[Dict[str, Any]], None]):
         self.web_listeners.add(callback)
+        self.metrics.set_gauge("active_ws_clients", len(self.web_listeners))
 
     def unregister_listener(self, callback: Callable[[Dict[str, Any]], None]):
         self.web_listeners.discard(callback)
+        self.metrics.set_gauge("active_ws_clients", len(self.web_listeners))
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Returns a JSON-serializable snapshot of runtime observability metrics."""
+        bus_stats = self.event_bus.get_stats()
+        self.metrics.set_counter("event_bus_published", int(bus_stats.get("total_published", 0)))
+        self.metrics.set_counter("event_bus_errors", int(bus_stats.get("handler_errors", 0)))
+        self.metrics.set_gauge("active_ws_clients", len(self.web_listeners))
+        self.metrics.set_gauge(
+            "bg_tasks_active",
+            sum(1 for t in self._bg_tasks if not t.done()),
+        )
+        return self.metrics.snapshot()
+
+    async def _speak_with_metrics(self, speech_text: str, **kwargs: Any) -> Any:
+        t0 = time.perf_counter()
+        try:
+            return await self.tts.speak(speech_text, **kwargs)
+        finally:
+            self.metrics.observe("tts_latency_ms", (time.perf_counter() - t0) * 1000.0)
 
     async def _dispatch_to_web_listeners(self, event_name: str, payload: Dict[str, Any]):
         ws_type = BUS_TO_WS_EVENT.get(event_name, event_name)
@@ -405,6 +435,7 @@ class Orchestrator:
                     await asyncio.wait_for(res, timeout=2.0)
             except Exception:
                 self.web_listeners.discard(listener)
+                self.metrics.set_gauge("active_ws_clients", len(self.web_listeners))
 
         await asyncio.gather(*(_send_one(l) for l in listeners), return_exceptions=True)
 
@@ -532,7 +563,10 @@ class Orchestrator:
         Processes a raw PCM16 creator voice chunk through EnergyVAD + StreamingSTTSession.
         Triggers barge-in on voice onset when Eve is busy/speaking and forwards final transcripts.
         """
+        t0 = time.perf_counter()
         res = await self.voice_session.feed_pcm_chunk(pcm_bytes, language=language)
+        if res.get("transcript") or res.get("speech_ended"):
+            self.metrics.observe("stt_latency_ms", (time.perf_counter() - t0) * 1000.0)
 
         if res.get("speech_started") or res.get("speech_ended") or res.get("is_speech"):
             await self.broadcast("voice_vad_state", {
@@ -613,7 +647,12 @@ class Orchestrator:
         }
         if self._accepts_kwarg(self.brain.generate_response, "is_creator"):
             gen_kwargs["is_creator"] = False
-        raw_reply = await self.brain.generate_response(**gen_kwargs)
+        self.metrics.inc("llm_requests")
+        try:
+            raw_reply = await self.brain.generate_response(**gen_kwargs)
+        except Exception:
+            self.metrics.inc("llm_failovers")
+            raise
         _, clean_reply = self.moderator.clean_text(raw_reply)
         speech_text, emotions, _ = ActionParser.parse(clean_reply)
         primary_emotion = emotions[0] if emotions else "happy"
@@ -996,7 +1035,7 @@ class Orchestrator:
             print(f"[AI Improv] [{primary_emotion}] {speech_text}")
             async with self._speech_lock:
                 self._current_emotion = primary_emotion
-                await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
+                await self._speak_with_metrics(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
                 self._current_emotion = "neutral"
 
             if self.vts.connected:
@@ -1091,7 +1130,7 @@ class Orchestrator:
             print(f"[Screen Awareness] [{primary_emotion}] {speech_text}")
             async with self._speech_lock:
                 self._current_emotion = primary_emotion
-                await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
+                await self._speak_with_metrics(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
                 self._current_emotion = "neutral"
 
             if self.vts.connected:
@@ -1577,9 +1616,14 @@ class Orchestrator:
                 }
                 if self._accepts_kwarg(self.brain.generate_response_stream, "is_creator"):
                     stream_kwargs["is_creator"] = is_creator
-                async for chunk in self.brain.generate_response_stream(**stream_kwargs):
-                    raw_chunks.append(chunk)
-                    yield chunk
+                self.metrics.inc("llm_requests")
+                try:
+                    async for chunk in self.brain.generate_response_stream(**stream_kwargs):
+                        raw_chunks.append(chunk)
+                        yield chunk
+                except Exception:
+                    self.metrics.inc("llm_failovers")
+                    raise
 
             async def on_tag(chunk_emotions: List[str], chunk_actions: List[str]):
                 nonlocal current_emotion, current_vts_params
@@ -1618,12 +1662,16 @@ class Orchestrator:
 
             async with self._speech_lock:
                 self._current_emotion = current_emotion
-                await self.tts.speak_stream(
-                    _stream_chunks(),
-                    on_mouth_update=on_stream_mouth_update,
-                    on_sentence_start=on_sentence_start,
-                    on_tag=on_tag,
-                )
+                t0 = time.perf_counter()
+                try:
+                    await self.tts.speak_stream(
+                        _stream_chunks(),
+                        on_mouth_update=on_stream_mouth_update,
+                        on_sentence_start=on_sentence_start,
+                        on_tag=on_tag,
+                    )
+                finally:
+                    self.metrics.observe("tts_latency_ms", (time.perf_counter() - t0) * 1000.0)
                 self._current_emotion = "neutral"
 
             raw_response = "".join(raw_chunks).strip()
@@ -1665,7 +1713,12 @@ class Orchestrator:
             }
             if self._accepts_kwarg(self.brain.generate_response, "is_creator"):
                 gen_kwargs["is_creator"] = is_creator
-            raw_response = await self.brain.generate_response(**gen_kwargs)
+            self.metrics.inc("llm_requests")
+            try:
+                raw_response = await self.brain.generate_response(**gen_kwargs)
+            except Exception:
+                self.metrics.inc("llm_failovers")
+                raise
 
             _, clean_response = self.moderator.clean_text(raw_response)
             speech_text, emotions, actions = ActionParser.parse(clean_response)
@@ -1707,7 +1760,7 @@ class Orchestrator:
             print(f"[AI Speech] [{primary_emotion}] {speech_text}")
             async with self._speech_lock:
                 self._current_emotion = primary_emotion
-                await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
+                await self._speak_with_metrics(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
                 self._current_emotion = "neutral"
 
         neutral_vts_params = await self._apply_vts_mood_rig("neutral")
@@ -1776,7 +1829,7 @@ class Orchestrator:
 
         async with self._speech_lock:
             self._current_emotion = primary_emotion
-            await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
+            await self._speak_with_metrics(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
         # 3. Synchronized Choreography Performance
@@ -1858,7 +1911,7 @@ class Orchestrator:
         vts_params = await self._apply_vts_mood_rig(primary_emotion)
         async with self._speech_lock:
             self._current_emotion = primary_emotion
-            await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
+            await self._speak_with_metrics(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
         # Return to idle
@@ -1894,7 +1947,7 @@ class Orchestrator:
 
             print(f"[Minecraft Commentary] [{primary_emotion}] {speech_text}")
             self._current_emotion = primary_emotion
-            await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
+            await self._speak_with_metrics(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
             # Also speak into server chat so in-game players see Eve's reaction
@@ -1954,7 +2007,7 @@ class Orchestrator:
 
             print(f"[{user_label}] [{primary_emotion}] {speech_text}")
             self._current_emotion = primary_emotion
-            await self.tts.speak(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
+            await self._speak_with_metrics(speech_text, on_mouth_update=lambda val: self._spawn_bg_task(on_mouth_update(val)))
             self._current_emotion = "neutral"
 
             neutral_vts_params = await self._apply_vts_mood_rig("neutral")

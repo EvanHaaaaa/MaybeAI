@@ -1,15 +1,18 @@
 // MaybeAI Mobile/Tablet Creator Stream Deck
 document.addEventListener("DOMContentLoaded", () => {
-  const CREATOR_TOKEN_KEY = "maybeai_creator_token";
+  const clientLib = window.MaybeAIClient || {};
+  const CreatorAuth = clientLib.CreatorAuth;
+  const CREATOR_TOKEN_KEY = (CreatorAuth && CreatorAuth.TOKEN_KEY) || "maybeai_creator_token";
 
   function getCreatorToken() {
+    if (CreatorAuth && typeof CreatorAuth.getToken === "function") {
+      return CreatorAuth.getToken();
+    }
     try {
       const urlToken = new URLSearchParams(window.location.search).get("token");
       if (urlToken && urlToken.trim()) {
         const clean = urlToken.trim();
-        try {
-          localStorage.setItem(CREATOR_TOKEN_KEY, clean);
-        } catch (e) {}
+        try { localStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
         return clean;
       }
     } catch (e) {}
@@ -23,6 +26,9 @@ document.addEventListener("DOMContentLoaded", () => {
   getCreatorToken();
 
   function authFetch(url, options = {}) {
+    if (CreatorAuth && typeof CreatorAuth.authFetch === "function") {
+      return CreatorAuth.authFetch(url, options);
+    }
     const token = getCreatorToken();
     const headers = Object.assign({}, options.headers || {});
     if (token) {
@@ -64,11 +70,29 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnSendCollabTopic = document.getElementById("btnSendCollabTopic");
   const btnCancelCollabTopic = document.getElementById("btnCancelCollabTopic");
 
-  let ws = null;
-  let reconnectTimer = null;
+  let wsClient = null;
+  let binaryPcmEnabled = clientLib.binaryPcm !== false;
   let bargeInCount = 0;
   let missionLoopActive = false;
   let audioMuted = false;
+
+  function sendAudioPcmFrame(buffer) {
+    if (!buffer || !wsClient || !wsClient.isOpen) return;
+    if (binaryPcmEnabled) {
+      try {
+        const pcmView = buffer instanceof Int16Array ? buffer : new Int16Array(buffer);
+        if (wsClient.send(pcmView)) return;
+      } catch (e) {
+        binaryPcmEnabled = false;
+      }
+    }
+    wsClient.send(JSON.stringify({
+      type: "voice_audio_chunk",
+      audio_b64: arrayBufferToBase64(buffer),
+      sample_rate: 16000,
+      user: "Creator"
+    }));
+  }
 
   function setFeedback(text) {
     if (deckFeedbackText) deckFeedbackText.textContent = text;
@@ -173,15 +197,8 @@ document.addEventListener("DOMContentLoaded", () => {
           processorOptions: { targetSampleRate: 16000, frameSize: 512 }
         });
         micWorkletNode.port.onmessage = (event) => {
-          if (!isMicActive || !event.data || event.data.type !== "pcm16") return;
-          if (ws && ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({
-              type: "voice_audio_chunk",
-              audio_b64: arrayBufferToBase64(event.data.buffer),
-              sample_rate: 16000,
-              user: "Creator"
-            }));
-          }
+          if ((!isMicActive && !(event.data && event.data.final)) || !event.data || event.data.type !== "pcm16") return;
+          sendAudioPcmFrame(event.data.buffer);
         };
         const silentGain = micWorkletCtx.createGain();
         silentGain.gain.value = 0;
@@ -210,8 +227,8 @@ document.addEventListener("DOMContentLoaded", () => {
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) finalTxt += event.results[i][0].transcript;
       }
-      if (finalTxt.trim() && ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "chat_message", user: "Creator", text: finalTxt.trim(), source: "mic", is_creator: true }));
+      if (finalTxt.trim() && wsClient && wsClient.isOpen) {
+        wsClient.send(JSON.stringify({ type: "chat_message", user: "Creator", text: finalTxt.trim(), source: "mic", is_creator: true }));
       }
     };
     recognition.onend = () => {
@@ -226,14 +243,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function stopDeckMic() {
     updateMicButton(false);
-    if (micWorkletNode) {
-      try { micWorkletNode.port.postMessage({ type: "stop" }); } catch (e) {}
-      try { micWorkletNode.disconnect(); } catch (e) {}
-      micWorkletNode = null;
-    }
-    if (micWorkletCtx) {
-      try { micWorkletCtx.close(); } catch (e) {}
-      micWorkletCtx = null;
+    const node = micWorkletNode;
+    const ctx = micWorkletCtx;
+    micWorkletNode = null;
+    micWorkletCtx = null;
+    if (node) {
+      try { node.port.postMessage({ type: "stop" }); } catch (e) {}
+      setTimeout(() => {
+        try { node.disconnect(); } catch (e) {}
+        if (ctx) {
+          try { ctx.close(); } catch (e) {}
+        }
+      }, 60);
+    } else if (ctx) {
+      try { ctx.close(); } catch (e) {}
     }
     if (micStream) {
       try { micStream.getTracks().forEach((t) => t.stop()); } catch (e) {}
@@ -293,38 +316,19 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) {}
   }
 
-  function connectWs() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+  function buildDeckWsUrl() {
+    if (CreatorAuth && typeof CreatorAuth.buildWsUrl === "function") {
+      return CreatorAuth.buildWsUrl("/ws");
     }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const token = getCreatorToken();
     let wsUrl = `${protocol}//${window.location.host}/ws`;
     if (token) wsUrl += `?token=${encodeURIComponent(token)}`;
-    ws = new WebSocket(wsUrl);
+    return wsUrl;
+  }
 
-    ws.onopen = () => {
-      if (badgeWs) {
-        badgeWs.textContent = "WS: Online";
-        badgeWs.className = "status-pill status-online";
-      }
-      refreshStatus();
-    };
-
-    ws.onclose = () => {
-      if (badgeWs) {
-        badgeWs.textContent = "WS: Reconnecting";
-        badgeWs.className = "status-pill status-offline";
-      }
-      reconnectTimer = setTimeout(connectWs, 2000);
-    };
-
-    ws.onerror = () => {
-      try { ws.close(); } catch (e) {}
-    };
-
-    ws.onmessage = (event) => {
+  function connectWs() {
+    const onMessage = (event) => {
       let msg;
       try { msg = JSON.parse(event.data); } catch (e) { return; }
       const data = msg.data || {};
@@ -363,11 +367,62 @@ document.addEventListener("DOMContentLoaded", () => {
         setFeedback(`📸 Highlight marked: ${data.reason || data.label || "manual"}`);
       }
     };
+
+    if (clientLib.ReconnectingWebSocket) {
+      wsClient = new clientLib.ReconnectingWebSocket(buildDeckWsUrl, {
+        minDelayMs: 1000,
+        maxDelayMs: 30000,
+        onopen: () => {
+          if (badgeWs) {
+            badgeWs.textContent = "WS: Online";
+            badgeWs.className = "status-pill status-online";
+          }
+          refreshStatus();
+        },
+        onclose: () => {
+          if (badgeWs) {
+            badgeWs.textContent = "WS: Reconnecting";
+            badgeWs.className = "status-pill status-offline";
+          }
+        },
+        onmessage: onMessage
+      });
+      wsClient.connect();
+      return;
+    }
+
+    const rawWs = new WebSocket(buildDeckWsUrl());
+    wsClient = {
+      get isOpen() { return rawWs.readyState === WebSocket.OPEN; },
+      send(d) {
+        if (rawWs.readyState === WebSocket.OPEN) { rawWs.send(d); return true; }
+        return false;
+      },
+      reconnectNow() {
+        try { rawWs.close(); } catch (e) {}
+        connectWs();
+      }
+    };
+    rawWs.onopen = () => {
+      if (badgeWs) {
+        badgeWs.textContent = "WS: Online";
+        badgeWs.className = "status-pill status-online";
+      }
+      refreshStatus();
+    };
+    rawWs.onclose = () => {
+      if (badgeWs) {
+        badgeWs.textContent = "WS: Reconnecting";
+        badgeWs.className = "status-pill status-offline";
+      }
+      setTimeout(connectWs, 2000);
+    };
+    rawWs.onerror = () => { try { rawWs.close(); } catch (e) {} };
+    rawWs.onmessage = onMessage;
   }
 
   function sendWs(payload) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(payload));
+    if (wsClient && wsClient.send(JSON.stringify(payload))) {
       return true;
     }
     setFeedback("⚠️ WebSocket offline — reconnecting...");
@@ -379,10 +434,17 @@ document.addEventListener("DOMContentLoaded", () => {
     btnSaveToken.addEventListener("click", () => {
       const val = deckTokenInput ? deckTokenInput.value.trim() : "";
       if (!val) return;
-      try { localStorage.setItem(CREATOR_TOKEN_KEY, val); } catch (e) {}
+      if (CreatorAuth && typeof CreatorAuth.setToken === "function") {
+        CreatorAuth.setToken(val);
+      } else {
+        try { localStorage.setItem(CREATOR_TOKEN_KEY, val); } catch (e) {}
+      }
       if (deckAuthBar) deckAuthBar.style.display = "none";
-      if (ws) try { ws.close(); } catch (e) {}
-      connectWs();
+      if (wsClient && typeof wsClient.reconnectNow === "function") {
+        wsClient.reconnectNow();
+      } else {
+        connectWs();
+      }
       setFeedback("🔑 Creator token saved.");
     });
   }

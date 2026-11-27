@@ -16,10 +16,17 @@ class MemoryDatabase:
     - User Profiles, Viewer Dossiers, and Promises/Challenges tracking
     """
 
-    def __init__(self, db_path: str = "data/memory.db", embedding_provider: str = "auto"):
+    def __init__(
+        self,
+        db_path: str = "data/memory.db",
+        embedding_provider: str = "auto",
+        embedder: Optional[EmbeddingEngine] = None,
+        vector_scan_limit: int = 2000,
+    ):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.embedder = EmbeddingEngine(provider=embedding_provider)
+        self.embedder = embedder if embedder is not None else EmbeddingEngine(provider=embedding_provider)
+        self.vector_scan_limit = max(1, int(vector_scan_limit))
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:
@@ -211,6 +218,26 @@ class MemoryDatabase:
         except Exception:
             pass
 
+    def _can_persist_reencoded_embedding(
+        self,
+        existing_vec: Optional[np.ndarray],
+        new_vec: Optional[np.ndarray],
+        expected_shape: Tuple[int, ...],
+    ) -> bool:
+        """Guards against overwriting valid cloud/local embeddings with hash fallbacks."""
+        if new_vec is None or getattr(new_vec, "shape", None) != expected_shape:
+            return False
+        if existing_vec is not None:
+            existing_dim = getattr(existing_vec, "shape", (0,))[0]
+            # Preserve valid higher-dim cloud/local embeddings when currently in hash fallback mode
+            if existing_dim > self.embedder.DIMENSION and (
+                self.embedder.active_backend == "hash"
+                or getattr(self.embedder, "last_encode_was_fallback", False)
+                or new_vec.shape[0] == self.embedder.DIMENSION
+            ):
+                return False
+        return True
+
     def vector_search(
         self,
         query_vec: np.ndarray,
@@ -218,11 +245,13 @@ class MemoryDatabase:
         user: Optional[str] = None,
         min_score: float = 0.15,
         reencode_mismatched: bool = True,
+        scan_limit: Optional[int] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """
         Dense vector search over episodic memories using cosine similarity.
         Gracefully handles mismatched vector dimensions (e.g., legacy 128-d blobs
-        vs new 384-d/768-d embeddings) by re-encoding when compatible or safely skipping.
+        vs new 384-d/768-d embeddings) without overwriting valid cloud embeddings
+        with hash fallbacks.
         """
         if query_vec is None:
             return []
@@ -230,16 +259,23 @@ class MemoryDatabase:
         if q_vec.size == 0:
             return []
 
-        memories = self.get_recent_memories(limit=300, user=user)
+        effective_limit = max(1, int(scan_limit)) if scan_limit is not None else self.vector_scan_limit
+        memories = self.get_recent_memories(limit=effective_limit, user=user)
         results = []
 
         for mem in memories:
             vec = mem.get("_embedding_vec")
             if vec is None or getattr(vec, "shape", None) != q_vec.shape:
                 if reencode_mismatched and mem.get("id") is not None:
+                    if (
+                        vec is not None
+                        and getattr(vec, "shape", (0,))[0] > self.embedder.DIMENSION
+                        and self.embedder.active_backend == "hash"
+                    ):
+                        continue
                     try:
                         reencoded = self.embedder.encode(self._memory_embedding_text(mem))
-                        if reencoded is not None and reencoded.shape == q_vec.shape:
+                        if self._can_persist_reencoded_embedding(vec, reencoded, q_vec.shape):
                             vec = reencoded
                             mem["_embedding_vec"] = vec
                             self._update_memory_embedding(mem["id"], vec)
@@ -264,6 +300,7 @@ class MemoryDatabase:
         user: Optional[str] = None,
         min_score: float = 0.15,
         reencode_mismatched: bool = True,
+        scan_limit: Optional[int] = None,
     ) -> List[Tuple[Dict[str, Any], float]]:
         """Async dense vector search using aencode for mismatched legacy embeddings."""
         if query_vec is None:
@@ -272,16 +309,23 @@ class MemoryDatabase:
         if q_vec.size == 0:
             return []
 
-        memories = self.get_recent_memories(limit=300, user=user)
+        effective_limit = max(1, int(scan_limit)) if scan_limit is not None else self.vector_scan_limit
+        memories = self.get_recent_memories(limit=effective_limit, user=user)
         results = []
 
         for mem in memories:
             vec = mem.get("_embedding_vec")
             if vec is None or getattr(vec, "shape", None) != q_vec.shape:
                 if reencode_mismatched and mem.get("id") is not None:
+                    if (
+                        vec is not None
+                        and getattr(vec, "shape", (0,))[0] > self.embedder.DIMENSION
+                        and self.embedder.active_backend == "hash"
+                    ):
+                        continue
                     try:
                         reencoded = await self.embedder.aencode(self._memory_embedding_text(mem))
-                        if reencoded is not None and reencoded.shape == q_vec.shape:
+                        if self._can_persist_reencoded_embedding(vec, reencoded, q_vec.shape):
                             vec = reencoded
                             mem["_embedding_vec"] = vec
                             self._update_memory_embedding(mem["id"], vec)
@@ -605,12 +649,52 @@ class MemoryDatabase:
             cur.execute(query, params)
             return [dict(r) for r in cur.fetchall()]
 
-    def fulfill_promise(self, promise_id: int):
+    def get_promises(
+        self,
+        status: Optional[str] = None,
+        user: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        query = "SELECT * FROM promises_challenges"
+        conditions = []
+        params: List[Any] = []
+        if status:
+            conditions.append("status = ?")
+            params.append(status)
+        if user:
+            conditions.append("user = ?")
+            params.append(user)
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+        query += " ORDER BY created_at ASC LIMIT ?"
+        params.append(max(1, int(limit)))
+
+        with self._get_connection() as con:
+            cur = con.cursor()
+            cur.execute(query, params)
+            return [dict(r) for r in cur.fetchall()]
+
+    def fulfill_promise(self, promise_id: int) -> bool:
         now = time.time()
         with self._get_connection() as con:
             cur = con.cursor()
-            cur.execute("UPDATE promises_challenges SET status = 'fulfilled', fulfilled_at = ? WHERE id = ?", (now, promise_id))
+            cur.execute(
+                "UPDATE promises_challenges SET status = 'fulfilled', fulfilled_at = ? WHERE id = ?",
+                (now, promise_id),
+            )
             con.commit()
+            return cur.rowcount > 0
+
+    def archive_old_promises(self, older_than_days: float = 30.0) -> int:
+        cutoff = time.time() - (max(0.0, float(older_than_days)) * 86400.0)
+        with self._get_connection() as con:
+            cur = con.cursor()
+            cur.execute(
+                "UPDATE promises_challenges SET status = 'archived' WHERE status = 'fulfilled' AND fulfilled_at IS NOT NULL AND fulfilled_at < ?",
+                (cutoff,),
+            )
+            con.commit()
+            return int(cur.rowcount or 0)
 
     # --- Database Statistics ---
 

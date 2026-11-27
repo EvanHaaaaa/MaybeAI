@@ -40,6 +40,10 @@ class ConfigManager:
             "ollama_url": "http://localhost:11434",
             "ollama_model": "llama3.2",
             "fallback_provider": "mock",
+            "failover_enabled": True,
+            "failover_timeout_sec": 1.8,
+            "circuit_breaker_failure_threshold": 3,
+            "circuit_breaker_cooldown_sec": 30.0,
             "streaming_enabled": True,
             "retry_attempts": 2
         },
@@ -62,7 +66,8 @@ class ConfigManager:
             "retrieval_limit": 5,
             "similarity_threshold": 0.70,
             "auto_extract": True,
-            "embedding_provider": "auto"
+            "embedding_provider": "auto",
+            "vector_scan_limit": 2000
         },
         "mood": {
             "enabled": True,
@@ -164,6 +169,7 @@ class ConfigManager:
             "idle_banter_interval_sec": 40,
             "max_planning_steps": 5,
             "human_approval_required": False,
+            "approval_timeout_sec": 300.0,
             "closed_loop_missions": True,
             "mission_tick_interval_sec": 25
         },
@@ -1896,6 +1902,70 @@ class ConfigManager:
                 "min": 1,
                 "max": 50,
                 "default": 5,
+                "restart_required": False
+            },
+            {
+                "path": "autonomous_agent.approval_timeout_sec",
+                "category": "autonomous",
+                "label": "Approval Timeout (Seconds)",
+                "description": "Batas waktu kedaluwarsa permintaan persetujuan langkah otonom.",
+                "type": "number",
+                "min": 0.0,
+                "max": 86400.0,
+                "default": 300.0,
+                "restart_required": False
+            },
+            {
+                "path": "llm.failover_enabled",
+                "category": "brain",
+                "label": "LLM Failover Enabled",
+                "description": "Mengaktifkan failover otomatis ke provider cadangan saat LLM utama gagal.",
+                "type": "toggle",
+                "default": True,
+                "restart_required": False
+            },
+            {
+                "path": "llm.failover_timeout_sec",
+                "category": "brain",
+                "label": "LLM Failover Timeout (Seconds)",
+                "description": "Batas waktu per percobaan provider sebelum failover ke cadangan.",
+                "type": "number",
+                "min": 0.1,
+                "max": 30.0,
+                "default": 1.8,
+                "restart_required": False
+            },
+            {
+                "path": "llm.circuit_breaker_failure_threshold",
+                "category": "brain",
+                "label": "Circuit Breaker Failure Threshold",
+                "description": "Jumlah kegagalan beruntun sebelum circuit breaker provider terbuka.",
+                "type": "number",
+                "min": 1,
+                "max": 20,
+                "default": 3,
+                "restart_required": False
+            },
+            {
+                "path": "llm.circuit_breaker_cooldown_sec",
+                "category": "brain",
+                "label": "Circuit Breaker Cooldown (Seconds)",
+                "description": "Durasi tunggu sebelum circuit breaker melakukan half-open probe.",
+                "type": "number",
+                "min": 1.0,
+                "max": 300.0,
+                "default": 30.0,
+                "restart_required": False
+            },
+            {
+                "path": "memory.vector_scan_limit",
+                "category": "memory",
+                "label": "Vector Scan Limit",
+                "description": "Batas maksimum baris memori yang dipindai saat pencarian vektor.",
+                "type": "number",
+                "min": 100,
+                "max": 50000,
+                "default": 2000,
                 "restart_required": False
             }
         ]

@@ -32,6 +32,7 @@ class AutonomousMissionExecutor:
         speak_fn: Optional[Callable[..., Any]] = None,
         event_bus: Optional[Any] = None,
         human_approval_required: bool = False,
+        approval_timeout_sec: float = 300.0,
         tick_interval_sec: float = 25.0,
         enabled: bool = True,
         scene_switcher: Optional[Callable[[str, str], Any]] = None,
@@ -47,6 +48,7 @@ class AutonomousMissionExecutor:
         self.speak_fn = speak_fn
         self.event_bus = event_bus
         self.human_approval_required = bool(human_approval_required)
+        self.approval_timeout_sec = max(0.0, float(approval_timeout_sec))
         self.tick_interval_sec = max(0.05, float(tick_interval_sec))
         self.enabled = bool(enabled)
         self.scene_switcher = scene_switcher
@@ -496,6 +498,30 @@ class AutonomousMissionExecutor:
         if len(self.history) > 50:
             self.history = self.history[-50:]
 
+    def _expire_stale_approval(self) -> Optional[Dict[str, Any]]:
+        """Expires pending_approval if its approval_timeout_sec TTL has elapsed."""
+        if not self.pending_approval or self.approval_timeout_sec <= 0:
+            return None
+        now = time.time()
+        created_at = float(self.pending_approval.get("created_at") or now)
+        expires_at = float(self.pending_approval.get("expires_at") or (created_at + self.approval_timeout_sec))
+        if now < expires_at:
+            return None
+
+        expired = self.pending_approval
+        self.pending_approval = None
+        step_payload = {
+            "status": "approval_expired",
+            "executed": False,
+            "plan_id": expired.get("plan_id"),
+            "domain": expired.get("domain"),
+            "action_name": expired.get("action_name"),
+            "reason": "Pending approval expired after TTL",
+            "timestamp": now,
+        }
+        self._record_step(step_payload)
+        return {**step_payload, "expired_plan": expired}
+
     async def step_once(self, force: bool = False) -> Dict[str, Any]:
         """
         Executes a single closed-loop mission tick:
@@ -507,6 +533,7 @@ class AutonomousMissionExecutor:
             return {"status": "paused", "executed": False, "reason": "Executor is paused"}
 
         async with self._step_lock:
+            self._expire_stale_approval()
             selected = self._ensure_active_goal_and_subtask()
             if not selected:
                 status_payload = self.get_status()
@@ -517,7 +544,10 @@ class AutonomousMissionExecutor:
 
             if self.human_approval_required and not force:
                 if self.pending_approval is None:
-                    self.pending_approval = self._plan_action(active_goal, active_sub)
+                    plan = self._plan_action(active_goal, active_sub)
+                    if self.approval_timeout_sec > 0:
+                        plan["expires_at"] = float(plan.get("created_at", time.time())) + self.approval_timeout_sec
+                    self.pending_approval = plan
                 status_payload = self.get_status()
                 await self._emit_event("mission.status", status_payload)
                 return {
@@ -708,12 +738,20 @@ class AutonomousMissionExecutor:
 
     async def approve_pending(self) -> Dict[str, Any]:
         """Approves and immediately executes the currently queued mission action."""
+        expired = self._expire_stale_approval()
+        if expired is not None:
+            await self._emit_event("mission.status", self.get_status())
+            return expired
         if not self.pending_approval:
             return {"status": "no_pending", "executed": False}
         return await self.step_once(force=True)
 
     async def reject_pending(self, reason: str = "Rejected by creator") -> Dict[str, Any]:
         """Rejects and clears the currently queued mission action."""
+        expired = self._expire_stale_approval()
+        if expired is not None:
+            await self._emit_event("mission.status", self.get_status())
+            return expired
         if not self.pending_approval:
             return {"status": "no_pending", "executed": False}
         rejected = self.pending_approval
@@ -736,6 +774,7 @@ class AutonomousMissionExecutor:
         enabled: Optional[bool] = None,
         human_approval_required: Optional[bool] = None,
         tick_interval_sec: Optional[float] = None,
+        approval_timeout_sec: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Updates runtime executor settings safely."""
         if enabled is not None:
@@ -744,12 +783,15 @@ class AutonomousMissionExecutor:
             self.human_approval_required = bool(human_approval_required)
         if tick_interval_sec is not None:
             self.tick_interval_sec = max(0.05, float(tick_interval_sec))
+        if approval_timeout_sec is not None:
+            self.approval_timeout_sec = max(0.0, float(approval_timeout_sec))
         status = self.get_status()
         self._emit_event_sync("mission.status", status)
         return status
 
     def get_status(self) -> Dict[str, Any]:
         """Returns a JSON-serializable telemetry snapshot of the mission executor."""
+        self._expire_stale_approval()
         active_goal = self.goal_engine.get_active_goal()
         active_sub = active_goal.get_active_subtask() if active_goal else None
         return {
@@ -757,6 +799,7 @@ class AutonomousMissionExecutor:
             "is_running": self.is_running,
             "is_paused": self.is_paused,
             "human_approval_required": self.human_approval_required,
+            "approval_timeout_sec": self.approval_timeout_sec,
             "tick_interval_sec": self.tick_interval_sec,
             "step_count": self.step_count,
             "last_step_at": self.last_step_at,

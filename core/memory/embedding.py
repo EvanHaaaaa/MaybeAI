@@ -60,6 +60,7 @@ class EmbeddingEngine:
         self._local_model: Any = None
         self._local_kind: Optional[str] = None  # "sentence_transformers" | "fastembed"
         self.active_backend: str = "hash"
+        self.last_encode_was_fallback: bool = False
         self._session: Any = None
 
         self._resolve_backend()
@@ -260,6 +261,7 @@ class EmbeddingEngine:
         return [feat for feat, _ in self._extract_weighted_features(text)]
 
     def _encode_hash(self, text: str) -> np.ndarray:
+        self.last_encode_was_fallback = True
         vec = np.zeros(self.dimension, dtype=np.float32)
         if not text or not text.strip():
             return vec
@@ -438,12 +440,16 @@ class EmbeddingEngine:
             return cached
 
         if self.active_backend == "local":
+            self.last_encode_was_fallback = False
             vec = self._encode_local(text)
         elif self.active_backend == "gemini":
+            self.last_encode_was_fallback = False
             vec = self._encode_gemini_sync(text)
         elif self.active_backend == "openai":
+            self.last_encode_was_fallback = False
             vec = self._encode_openai_sync(text)
         else:
+            self.last_encode_was_fallback = True
             vec = self._encode_hash(text)
 
         self._cache_put(cache_key, vec)
@@ -462,12 +468,16 @@ class EmbeddingEngine:
             return cached
 
         if self.active_backend == "local":
+            self.last_encode_was_fallback = False
             vec = await asyncio.to_thread(self._encode_local, text)
         elif self.active_backend == "gemini":
+            self.last_encode_was_fallback = False
             vec = await self._encode_gemini_async(text)
         elif self.active_backend == "openai":
+            self.last_encode_was_fallback = False
             vec = await self._encode_openai_async(text)
         else:
+            self.last_encode_was_fallback = True
             vec = self._encode_hash(text)
 
         self._cache_put(cache_key, vec)

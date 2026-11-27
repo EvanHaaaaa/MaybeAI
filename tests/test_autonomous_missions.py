@@ -310,6 +310,23 @@ class TestMissionsASGIEndpoints(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(tog_off["success"])
         self.assertTrue(tog_off["is_paused"])
 
+    async def test_pending_approval_expires_after_ttl(self):
+        import time
+        executor = AutonomousMissionExecutor(
+            goal_engine=GoalEngine(storage_dir=self._tmp.name),
+            human_approval_required=True,
+            approval_timeout_sec=0.05,
+        )
+        res1 = await executor.step_once()
+        self.assertEqual(res1["status"], "awaiting_approval")
+        self.assertIsNotNone(executor.pending_approval)
+
+        time.sleep(0.08)
+        res2 = await executor.approve_pending()
+        self.assertEqual(res2["status"], "approval_expired")
+        self.assertFalse(res2["executed"])
+        self.assertIsNone(executor.pending_approval)
+
 
 if __name__ == "__main__":
     unittest.main()

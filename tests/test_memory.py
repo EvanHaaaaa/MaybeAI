@@ -199,5 +199,45 @@ class TestConversationEpisodicIntegration(unittest.TestCase):
         )
         self.assertTrue("catur" in response.lower() or "ratu" in response.lower() or "evan" in response.lower())
 
+    def test_embedding_engine_deduplicated_and_cloud_guard(self):
+        import numpy as np
+        store = self.conv.episodic_memory
+        self.assertIs(store.embedder, store.db.embedder)
+        self.assertGreaterEqual(store.db.vector_scan_limit, 1000)
+
+        # Store a 768-d "cloud" embedding, then search with 128-d hash embedder -> must NOT overwrite 768-d
+        cloud_vec = np.ones(768, dtype=np.float32)
+        cloud_vec /= np.linalg.norm(cloud_vec)
+        mid = store.db.add_episodic_memory(
+            title="Cloud Memory",
+            content="Valid Gemini 768-d cloud embedding",
+            user="Evan",
+            embedding=cloud_vec,
+        )
+        q128 = store.db.embedder.encode("Valid Gemini cloud embedding")
+        store.db.vector_search(q128, top_k=5, reencode_mismatched=True)
+        stored = store.db.get_memory(mid)
+        self.assertEqual(stored["_embedding_vec"].shape, (768,))
+
+    def test_promises_bidirectional_sync_and_archival(self):
+        store = self.conv.episodic_memory
+        pids = []
+        for i in range(6):
+            pid = store.db.add_promise_or_challenge("Evan", f"Janji ke-{i}", ptype="promise")
+            store.sync.sync_promise(pid, "Evan", f"Janji ke-{i}", "promise", "pending", max_completed_rows=2)
+            pids.append(pid)
+
+        # Fulfill 4 promises -> 2 stay in promises.md, 2 overflow to promises_archive.md
+        for pid in pids[:4]:
+            self.assertTrue(store.db.fulfill_promise(pid))
+        store.sync.sync_promises_from_db(store.db, max_completed_rows=2)
+
+        promises_md = (Path(self.temp_dir) / "test_brain" / "promises.md").read_text(encoding="utf-8")
+        archive_md = (Path(self.temp_dir) / "test_brain" / "promises_archive.md").read_text(encoding="utf-8")
+        self.assertIn("Janji ke-4", promises_md)
+        self.assertIn("Janji ke-5", promises_md)
+        self.assertIn("Janji ke-0", archive_md)
+        self.assertIn("Janji ke-1", archive_md)
+
 if __name__ == "__main__":
     unittest.main()

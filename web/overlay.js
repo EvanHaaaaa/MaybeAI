@@ -177,16 +177,15 @@ document.addEventListener("DOMContentLoaded", () => {
   let donationTimer = null;
   let subtitleTimer = null;
 
-  // --- WebSocket Connection (supports ?token= and auto-reconnect) ---
-  let ws = null;
-  let reconnectTimer = null;
+  // --- WebSocket Connection (supports ?token= and exponential backoff reconnect) ---
+  const clientLib = window.MaybeAIClient || {};
+  const CreatorAuth = clientLib.CreatorAuth;
+  let wsClient = null;
 
-  function connectWs() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+  function buildOverlayWsUrl() {
+    if (CreatorAuth && typeof CreatorAuth.buildWsUrl === "function") {
+      return CreatorAuth.buildWsUrl("/ws");
     }
-
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const urlParams = new URLSearchParams(window.location.search);
     const urlToken = urlParams.get("token");
@@ -194,23 +193,59 @@ document.addEventListener("DOMContentLoaded", () => {
     try {
       storedToken = localStorage.getItem("maybeai_creator_token") || null;
     } catch (e) {}
-
     const token = urlToken || storedToken;
     let wsUrl = `${protocol}//${window.location.host}/ws`;
     if (token) {
       wsUrl += `?token=${encodeURIComponent(token)}`;
     }
+    return wsUrl;
+  }
 
-    ws = new WebSocket(wsUrl);
+  function resyncOverlayState() {
+    if (!isLocalAudioPlaying) {
+      targetMouthOpen = 0.0;
+    }
+    if (wsClient && wsClient.isOpen) {
+      wsClient.send(JSON.stringify({ type: "request_state", scope: "overlay" }));
+    }
+    const fetcher = CreatorAuth && CreatorAuth.authFetch ? (u, o) => CreatorAuth.authFetch(u, o) : fetch;
+    fetcher("/api/voice/status").then((res) => {
+      if (!res.ok) return null;
+      return res.json();
+    }).then((vst) => {
+      if (!vst || typeof vst !== "object") return;
+      if (vst.emotion) setEmotion(vst.emotion);
+      if (typeof vst.is_singing === "boolean") {
+        isSinging = vst.is_singing;
+        if (subtitlesEl) subtitlesEl.classList.toggle("is-singing", isSinging);
+      }
+    }).catch(() => {});
+  }
 
-    ws.onclose = () => {
-      reconnectTimer = setTimeout(connectWs, 2000);
+  function connectWs() {
+    if (clientLib.ReconnectingWebSocket) {
+      wsClient = new clientLib.ReconnectingWebSocket(buildOverlayWsUrl, {
+        minDelayMs: 1000,
+        maxDelayMs: 30000,
+        onopen: () => {
+          resyncOverlayState();
+        },
+        onmessage: handleWsMessage
+      });
+      wsClient.connect();
+      return;
+    }
+    const ws = new WebSocket(buildOverlayWsUrl());
+    ws.onopen = () => {
+      if (!isLocalAudioPlaying) targetMouthOpen = 0.0;
+      try { ws.send(JSON.stringify({ type: "request_state", scope: "overlay" })); } catch (e) {}
     };
-
+    ws.onclose = () => {
+      setTimeout(connectWs, 2000);
+    };
     ws.onerror = () => {
       try { ws.close(); } catch (e) {}
     };
-
     ws.onmessage = handleWsMessage;
   }
 
@@ -283,6 +318,10 @@ document.addEventListener("DOMContentLoaded", () => {
         subtitlesEl.classList.remove("is-singing");
       }
       scheduleSubtitleHide(4000);
+    } else if (msg.type === "mood_updated") {
+      if (data.mood) {
+        setEmotion(data.mood);
+      }
     } else if (msg.type === "avatar_movement") {
       applyChoreography(data.movement);
     }
@@ -647,11 +686,11 @@ document.addEventListener("DOMContentLoaded", () => {
   async function initOverlayVrm() {
     if (requestedRenderer !== "vrm" || !requestedVrmUrl || !vrmContainer) return;
     try {
-      const [THREE, gltfMod, vrmMod] = await Promise.all([
-        import("https://esm.sh/three@0.169.0"),
-        import("https://esm.sh/three@0.169.0/examples/jsm/loaders/GLTFLoader.js"),
-        import("https://esm.sh/@pixiv/three-vrm@3.2.0?deps=three@0.169.0")
+      const [THREE, vrmMod] = await Promise.all([
+        import("/static/vendor/three.module.js"),
+        import("/static/vendor/three-vrm.module.js")
       ]);
+      const GLTFLoader = vrmMod.GLTFLoader || THREE.GLTFLoader;
       vrmRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
       vrmRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       vrmRenderer.setSize(480, 480);
@@ -666,7 +705,7 @@ document.addEventListener("DOMContentLoaded", () => {
       vrmScene.add(light);
       vrmScene.add(new THREE.AmbientLight(0xffffff, 0.7));
 
-      const loader = new gltfMod.GLTFLoader();
+      const loader = new GLTFLoader();
       loader.register((parser) => new vrmMod.VRMLoaderPlugin(parser));
       const gltf = await loader.loadAsync(requestedVrmUrl);
       const vrm = gltf.userData && gltf.userData.vrm;

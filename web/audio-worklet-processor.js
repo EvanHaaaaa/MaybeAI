@@ -13,24 +13,28 @@ class MaybeAIPCMProcessor extends AudioWorkletProcessor {
     this._offset = 0;
     this._phase = 0;
     this._lastSample = 0;
+    this._hasLastSample = false;
     this._stopped = false;
 
     this.port.onmessage = (event) => {
       const data = event && event.data;
       if (!data) return;
       if (data.type === "stop") {
-        this._flush();
+        this._flush(true);
         this._stopped = true;
       } else if (data.type === "flush") {
-        this._flush();
+        this._flush(Boolean(data.final));
       }
     };
   }
 
-  _flush() {
+  _flush(isFinal = false) {
     if (this._offset > 0) {
       const partial = this._buffer.slice(0, this._offset);
-      this.port.postMessage({ type: "pcm16", buffer: partial.buffer }, [partial.buffer]);
+      this.port.postMessage(
+        { type: "pcm16", buffer: partial.buffer, final: Boolean(isFinal) },
+        [partial.buffer]
+      );
       this._offset = 0;
     }
   }
@@ -77,22 +81,38 @@ class MaybeAIPCMProcessor extends AudioWorkletProcessor {
       for (let i = 0; i < frameLen; i++) {
         this._pushInt16(mono[i]);
       }
+      this._lastSample = mono[frameLen - 1];
+      this._hasLastSample = true;
       return true;
+    }
+
+    if (!this._hasLastSample) {
+      this._lastSample = mono[0];
+      this._hasLastSample = true;
     }
 
     const ratio = srcRate / dstRate;
     let pos = this._phase;
-    while (pos < frameLen) {
-      const idx = Math.floor(pos);
-      const frac = pos - idx;
-      const s0 = idx === 0 && pos < 1 ? this._lastSample : mono[idx];
-      const s1 = idx + 1 < frameLen ? mono[idx + 1] : mono[idx];
-      const interp = s0 + (s1 - s0) * frac;
+    // Interpolate across [frameLen - 1] so pos in [-1, 0) bridges _lastSample -> mono[0]
+    // and pos in [0, frameLen - 1) bridges mono[idx] -> mono[idx + 1] without skipping mono[0].
+    while (pos < frameLen - 1) {
+      let interp;
+      if (pos < 0) {
+        const frac = pos + 1;
+        interp = this._lastSample + (mono[0] - this._lastSample) * frac;
+      } else {
+        const idx = Math.floor(pos);
+        const frac = pos - idx;
+        const s0 = mono[idx];
+        const s1 = mono[idx + 1];
+        interp = s0 + (s1 - s0) * frac;
+      }
       this._pushInt16(interp);
       pos += ratio;
     }
     this._phase = pos - frameLen;
     this._lastSample = mono[frameLen - 1];
+    this._hasLastSample = true;
     return true;
   }
 }

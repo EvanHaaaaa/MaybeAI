@@ -142,7 +142,9 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- Creator Token Persistence & Authenticated Fetch ---
-  const CREATOR_TOKEN_KEY = "maybeai_creator_token";
+  const clientLib = window.MaybeAIClient || {};
+  const CreatorAuth = clientLib.CreatorAuth;
+  const CREATOR_TOKEN_KEY = (CreatorAuth && CreatorAuth.TOKEN_KEY) || "maybeai_creator_token";
   const creatorAuthBar = document.getElementById("creatorAuthBar");
   const creatorAuthMsg = document.getElementById("creatorAuthMsg");
   const creatorTokenInput = document.getElementById("creatorTokenInput");
@@ -152,6 +154,10 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnToggleCreatorAuth = document.getElementById("btnToggleCreatorAuth");
 
   function setCreatorToken(token) {
+    if (CreatorAuth && typeof CreatorAuth.setToken === "function") {
+      CreatorAuth.setToken(token);
+      return;
+    }
     const clean = String(token || "").trim();
     if (!clean) return;
     try { localStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
@@ -159,11 +165,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function clearCreatorToken() {
+    if (CreatorAuth && typeof CreatorAuth.clearToken === "function") {
+      CreatorAuth.clearToken();
+      return;
+    }
     try { localStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
     try { sessionStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
   }
 
   function getCreatorToken() {
+    if (CreatorAuth && typeof CreatorAuth.getToken === "function") {
+      return CreatorAuth.getToken();
+    }
     try {
       const urlToken = new URLSearchParams(window.location.search).get("token");
       if (urlToken && urlToken.trim()) {
@@ -205,13 +218,17 @@ document.addEventListener("DOMContentLoaded", () => {
   getCreatorToken();
 
   async function authFetch(url, options = {}) {
-    const token = getCreatorToken();
-    const headers = Object.assign({}, options.headers || {});
-    if (token) {
-      headers["X-Creator-Token"] = token;
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-    const res = await fetch(url, Object.assign({}, options, { headers }));
+    const res = CreatorAuth && typeof CreatorAuth.authFetch === "function"
+      ? await CreatorAuth.authFetch(url, options)
+      : await (() => {
+          const token = getCreatorToken();
+          const headers = Object.assign({}, options.headers || {});
+          if (token) {
+            headers["X-Creator-Token"] = token;
+            headers["Authorization"] = `Bearer ${token}`;
+          }
+          return fetch(url, Object.assign({}, options, { headers }));
+        })();
     if (res.status === 401 || res.status === 403) {
       showCreatorAuthBar(`Creator Token required or invalid (HTTP ${res.status}).`);
     }
@@ -234,8 +251,12 @@ document.addEventListener("DOMContentLoaded", () => {
       if (!val) return;
       setCreatorToken(val);
       hideCreatorAuthBar();
-      if (ws) try { ws.close(); } catch (e) {}
-      connectWs();
+      if (wsClient && typeof wsClient.reconnectNow === "function") {
+        wsClient.reconnectNow();
+      } else {
+        if (ws) try { ws.close(); } catch (e) {}
+        connectWs();
+      }
     };
     btnSaveCreatorToken.addEventListener("click", saveAndReconnect);
     if (creatorTokenInput) {
@@ -430,12 +451,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // --- WebSocket Connection ---
   let ws = null;
-  let reconnectTimer = null;
+  let wsClient = null;
+  let binaryPcmEnabled = clientLib.binaryPcm !== false;
 
-  function connectWs() {
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+  function buildStudioWsUrl() {
+    if (CreatorAuth && typeof CreatorAuth.buildWsUrl === "function") {
+      return CreatorAuth.buildWsUrl("/ws");
     }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const creatorToken = getCreatorToken();
@@ -443,9 +464,12 @@ document.addEventListener("DOMContentLoaded", () => {
     if (creatorToken) {
       wsUrl += `?token=${encodeURIComponent(creatorToken)}`;
     }
-    ws = new WebSocket(wsUrl);
+    return wsUrl;
+  }
 
-    ws.onopen = () => {
+  function connectWs() {
+    const onOpen = (event, sock) => {
+      if (sock) ws = sock;
       wsStatus.textContent = "Connected";
       wsStatus.className = "badge badge-online";
       if (typeof refreshMissionStatus === "function") refreshMissionStatus();
@@ -454,24 +478,47 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof refreshObsAndHighlightsStatus === "function") refreshObsAndHighlightsStatus();
     };
 
-    ws.onclose = (event) => {
+    const onClose = (event) => {
+      ws = null;
       wsStatus.textContent = "Reconnecting...";
       wsStatus.className = "badge";
       if (event && (event.code === 1008 || event.code === 4001 || event.code === 4003)) {
         showCreatorAuthBar("WebSocket authentication failed. Please enter a valid Creator Token.");
       }
-      reconnectTimer = setTimeout(connectWs, 2000);
     };
 
+    if (clientLib.ReconnectingWebSocket) {
+      wsClient = new clientLib.ReconnectingWebSocket(buildStudioWsUrl, {
+        minDelayMs: 1000,
+        maxDelayMs: 30000,
+        onopen: onOpen,
+        onclose: onClose,
+        onmessage: handleWsMessage
+      });
+      ws = wsClient.connect();
+      return;
+    }
+
+    ws = new WebSocket(buildStudioWsUrl());
+    ws.onopen = (e) => onOpen(e, ws);
+    ws.onclose = (e) => {
+      onClose(e);
+      setTimeout(connectWs, 2000);
+    };
     ws.onerror = () => {
-      try { ws.close(); } catch (e) {}
+      try { if (ws) ws.close(); } catch (e) {}
     };
-
     ws.onmessage = handleWsMessage;
   }
 
   function handleWsMessage(event) {
-    const msg = JSON.parse(event.data);
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch (e) {
+      return;
+    }
+    if (!msg || typeof msg !== "object") return;
 
     if (msg.type === "error" && msg.data && msg.data.code === "forbidden") {
       showCreatorAuthBar(`🔒 ${msg.data.error || "Creator token required"}`);
@@ -747,6 +794,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   function escapeHtml(string) {
+    if (clientLib.escapeHtml) return clientLib.escapeHtml(string);
     if (string === null || string === undefined) return "";
     return String(string)
       .replace(/&/g, "&amp;")
@@ -989,20 +1037,26 @@ document.addEventListener("DOMContentLoaded", () => {
       cancelAnimationFrame(vadRafId);
       vadRafId = null;
     }
-    if (workletNode) {
-      try { workletNode.port.postMessage({ type: "stop" }); } catch (e) {}
-      try { workletNode.disconnect(); } catch (e) {}
-      workletNode = null;
+    const node = workletNode;
+    const ctx = vadAudioContext;
+    workletNode = null;
+    vadAudioContext = null;
+    if (node) {
+      try { node.port.postMessage({ type: "stop" }); } catch (e) {}
+      setTimeout(() => {
+        try { node.disconnect(); } catch (e) {}
+        if (ctx) {
+          try { ctx.close(); } catch (e) {}
+        }
+      }, 60);
+    } else if (ctx) {
+      try { ctx.close(); } catch (e) {}
     }
     if (vadMediaStream) {
       try {
         vadMediaStream.getTracks().forEach(t => t.stop());
       } catch (e) {}
       vadMediaStream = null;
-    }
-    if (vadAudioContext) {
-      try { vadAudioContext.close(); } catch (e) {}
-      vadAudioContext = null;
     }
     vadAnalyser = null;
     vadTimeData = null;
@@ -1155,9 +1209,20 @@ document.addEventListener("DOMContentLoaded", () => {
         processorOptions: { targetSampleRate: 16000, frameSize: 512 }
       });
       workletNode.port.onmessage = (event) => {
-        if (!isListeningMic || !useWorkletMic || !event.data || event.data.type !== "pcm16") return;
-        const b64 = arrayBufferToBase64(event.data.buffer);
-        if (!b64 || !ws || ws.readyState !== WebSocket.OPEN) return;
+        if ((!isListeningMic && !(event.data && event.data.final)) || !useWorkletMic || !event.data || event.data.type !== "pcm16") return;
+        const buf = event.data.buffer;
+        if (!buf || !ws || ws.readyState !== WebSocket.OPEN) return;
+        if (binaryPcmEnabled) {
+          try {
+            const pcmView = buf instanceof Int16Array ? buf : new Int16Array(buf);
+            ws.send(pcmView);
+            return;
+          } catch (e) {
+            binaryPcmEnabled = false;
+          }
+        }
+        const b64 = arrayBufferToBase64(buf);
+        if (!b64) return;
         ws.send(JSON.stringify({
           type: "voice_audio_chunk",
           audio_b64: b64,
@@ -4986,6 +5051,7 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // --- Long-Term Pillar 3: AI VTuber Collab Card ---
+  const collabPeerBadge = document.getElementById("collab-peer-badge");
   const collabFloorBadge = document.getElementById("collab-floor-badge");
   const collabTurnBadge = document.getElementById("collab-turn-badge");
   const collabPeerUrl = document.getElementById("collabPeerUrl");
@@ -5028,10 +5094,16 @@ document.addEventListener("DOMContentLoaded", () => {
     const maxTurns = data.max_collab_turns !== undefined ? data.max_collab_turns : 6;
     const connected = Boolean(data.connected || data.peer_connected);
 
+    if (collabPeerBadge) {
+      collabPeerBadge.textContent = connected ? "Peer: Connected" : "Peer: Disconnected";
+      collabPeerBadge.className = connected ? "badge badge-online" : "badge";
+    }
     if (collabFloorBadge) {
       collabFloorBadge.textContent = `Floor: ${floor}${connected ? " 🟢" : ""}`;
       collabFloorBadge.className = connected ? "badge badge-online" : "badge";
     }
+    if (btnCollabConnect) btnCollabConnect.disabled = connected;
+    if (btnCollabDisconnect) btnCollabDisconnect.disabled = !connected;
     if (collabTurnBadge) {
       collabTurnBadge.textContent = `Turns: ${turns}/${maxTurns}`;
     }
@@ -5528,11 +5600,11 @@ document.addEventListener("DOMContentLoaded", () => {
     try { localStorage.setItem(VRM_URL_STORAGE_KEY, cleanUrl); } catch (e) {}
     setVrmStatus("Loading Three.js + VRM...");
     try {
-      const [THREE, gltfMod, vrmMod] = await Promise.all([
-        import("https://esm.sh/three@0.169.0"),
-        import("https://esm.sh/three@0.169.0/examples/jsm/loaders/GLTFLoader.js"),
-        import("https://esm.sh/@pixiv/three-vrm@3.2.0?deps=three@0.169.0")
+      const [THREE, vrmMod] = await Promise.all([
+        import("/static/vendor/three.module.js"),
+        import("/static/vendor/three-vrm.module.js")
       ]);
+      const GLTFLoader = vrmMod.GLTFLoader || THREE.GLTFLoader;
       vrmThree = THREE;
       if (!vrmRenderer) {
         vrmRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
@@ -5550,7 +5622,7 @@ document.addEventListener("DOMContentLoaded", () => {
         vrmScene.add(new THREE.AmbientLight(0xffffff, 0.7));
       }
 
-      const loader = new gltfMod.GLTFLoader();
+      const loader = new GLTFLoader();
       loader.register((parser) => new vrmMod.VRMLoaderPlugin(parser));
       const gltf = await loader.loadAsync(cleanUrl);
       const vrm = gltf.userData && gltf.userData.vrm;

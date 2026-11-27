@@ -20,6 +20,10 @@
     "ollama_url": "http://localhost:11434",
     "ollama_model": "llama3.2",
     "fallback_provider": "mock",
+    "failover_enabled": true,
+    "failover_timeout_sec": 1.8,
+    "circuit_breaker_failure_threshold": 3,
+    "circuit_breaker_cooldown_sec": 30.0,
     "streaming_enabled": true,
     "retry_attempts": 2
   },
@@ -42,7 +46,8 @@
     "retrieval_limit": 5,
     "similarity_threshold": 0.7,
     "auto_extract": true,
-    "embedding_provider": "auto"
+    "embedding_provider": "auto",
+    "vector_scan_limit": 2000
   },
   "mood": {
     "enabled": true,
@@ -144,6 +149,7 @@
     "idle_banter_interval_sec": 40,
     "max_planning_steps": 5,
     "human_approval_required": false,
+    "approval_timeout_sec": 300.0,
     "closed_loop_missions": true,
     "mission_tick_interval_sec": 25
   },
