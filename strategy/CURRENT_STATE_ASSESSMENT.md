@@ -1,14 +1,26 @@
 # MaybeAI — Current State Architecture & Maturity Assessment
 
-**Document Owner:** Agent 11 (`strat-arch`) — Principal Software & Future Architecture Engineer  
-**Evidence Basis:** `audit/FINAL_AUDIT_REPORT.md` and `audit/00`–`11` (Zero source modifications; verified against live code, 315 Python unit tests, Node.js guard tests, and Chaos Scenarios A–E).  
-**Overall System Verdict:** **`NO-GO`** for Unattended / Public / Docker / LAN streaming; **`CONDITIONAL GO`** for Supervised Localhost Creator streaming (contingent on P0 concurrency/correctness fixes).
+**Document Owner:** Agent 11 (`ng-strat-arch`) — Principal Software & Future Architecture Engineer  
+**Target Baseline:** `HEAD` commit `96b7315` (Post-Horizon 0–3 + YouTube Karaoke)  
+**Evidence Basis:** [FINAL_POST_IMPLEMENTATION_AUDIT.md](file:///d:/projects/MaybeAI/audit/FINAL_POST_IMPLEMENTATION_AUDIT.md) and `audit/00`–`13` (Zero source modifications; verified against `381` Python `unittest` cases across `43` modules [`380` passed, `1` skipped: Playwright E2E], `node tests/test_guard_runner.js`, `node --check` on all `7` JS files, and Chaos Scenarios A–H).  
 
 ---
 
-## 1. L0–L5 Maturity Scale Definition
+## 1. Executive Summary & Deployment Readiness Verdict
 
-To avoid optimistic grading, every subsystem is scored strictly against operational reality:
+Following the Horizon 0–3 hardening sprints (`4c4e473` through `1953889`) and the YouTube Song Request / Auto-Karaoke release (`83298fa`), MaybeAI has progressed from an unhardened L1.5–L2.5 prototype to a **hardened, modular single-node AI VTuber platform (overall L3.0–L3.5)**.
+
+| Deployment Profile | Verdict | Key Conditions / Blockers |
+|---|---|---|
+| **Supervised Localhost** (`127.0.0.1:7860`) | **GO** | Origin + Creator token controls, graceful offline degradation, `<50ms` DB/moderation latency. |
+| **Authenticated LAN / Docker** (`MAYBEAI_HEADLESS=1`) | **CONDITIONAL GO** | Require strong `MAYBEAI_CREATOR_TOKEN`, Docker log rotation (`max-size`/`max-file`), container memory limits, and minimal `plugins.granted_permissions`. |
+| **Unattended 24/7 Public Internet** | **NO-GO** | Blocked by `SEC-GAP-001` (`?token=` + `localStorage`), `SEC-GAP-002` (Windows Python monkeypatch sandbox), `SEC-GAP-003` (raw `obs.summary` prompt injection), `CollabManager.disconnect_peer()` stuck `floor_state="listening"`, `aiohttp` `ResourceWarning`s, and lack of structured log rotation / deep health checks. |
+
+---
+
+## 2. L0–L5 Maturity Scale Definition
+
+Every domain is scored strictly against operational reality:
 
 | Level | Label | Criteria |
 |---|---|---|
@@ -21,130 +33,96 @@ To avoid optimistic grading, every subsystem is scored strictly against operatio
 
 ---
 
-## 2. Executive Maturity Scorecard
+## 3. Architectural Snapshot (`96b7315`)
 
-| Subsystem | Maturity | Deployment Readiness | Primary Limiting Factors (Audit IDs) |
-|---|---|---|---|
-| **1. Core Infrastructure** | **L2.5** | Conditional | Sequential `EventBus.publish()` HoL blocking (`[PERF-HIGH-001]`), 12+ untracked `create_task` leaks (`[INFRA-HIGH-001]`), `perform_song()` lock bypass (`[INFRA-HIGH-002]`), LLM key masking gap (`[INFRA-HIGH-005]`). |
-| **2. Audio, Voice & Avatar** | **L2.0** | Conditional | Barge-in `CancelledError` swallowing (`[AUDIO-CRIT-001]`), synthetic 80 ms square-wave lip-sync colliding with browser RMS (`[AUDIO-CRIT-002]`), STT blocking WS loop (`[AUDIO-HIGH-001]`), `Singer` BGM not stopped (`[AUDIO-HIGH-002]`). |
-| **3. Cognition & Memory** | **L2.5** | Conditional | Replanned goals never complete (`[COG-CRIT-001]`), infinite 25s replan loop (`[COG-CRIT-002]`), 0ms MC polling vs. fabricated offline progress (`[COG-HIGH-001]`), unbounded prompt (`[COG-HIGH-002]`), `is_creator` dropped (`[COG-HIGH-003]`). |
-| **4. AI-to-AI Collab** | **L1.5** | **NO-GO** | Zero replay protection (`[COLLAB-CRIT-001]`), `_is_loopback_url` spoofing (`[COLLAB-HIGH-001]`), permanent cooldown deadlock (`[COLLAB-HIGH-003]`), concurrent reply storm (`[COLLAB-HIGH-004]`), partial sync wiring. |
-| **5. Games, Vision & OT** | **L2.0** | Conditional | `chess.Board` thread race (`[GAME-CRIT-001]`), Mineflayer bridge no crash recovery & timer leaks (`[GAME-CRIT-002]`), OBS stale `is_connected=True` (`[GAME-HIGH-002]`), `ffmpeg` missing timeout/confinement (`[GAME-HIGH-004]`, `[SEC-HIGH-003]`). |
-| **6. Security & Trust Boundaries** | **L1.5** | **NO-GO** | Unauthenticated `/ws` mutations & state push (`[SEC-CRIT-001]`), unjailed plugin sandbox (`[SEC-CRIT-002]`), broken Docker/LAN WS auth (`[SEC-HIGH-001]`), unauthenticated `GET /api/*` (`[SEC-HIGH-002]`), non-blocking `Moderator` (`[SEC-HIGH-004]`). |
-| **7. Frontend & Creator UX** | **L2.0** | **NO-GO** (on `/settings`) | Stored DOM XSS in `/settings` (`[UI-HIGH-001]`), missing token UI & `401/403` crash on `/` & `/settings` (`[UI-HIGH-002]`), 2s WS reconnect storm & `deck.js` double-WS (`[UI-HIGH-003]`), CDN VRM dependency (`[UI-MED-004]`). |
-| **8. QA, Testing & Ops** | **L2.0** | Conditional | 315 unit tests (1 load-sensitive error `[QA-HIGH-001]`), 0% live adapter/browser E2E coverage, tests mutate `data/` (`[QA-MED-003]`), 13+ asyncio slow-callback warnings (`>100ms`), no soak/CI gates. |
+MaybeAI operates as a **single-process async FastAPI + EventBus monolith** (`run.py` `1,935` lines + `core/orchestrator.py` `2,197` lines) with isolated subprocesses for untrusted plugins (`core/plugins/sandbox_worker.py`), external media tools (`yt-dlp`, `ffmpeg`, `demucs`), and the Node.js Mineflayer bridge (`minecraft/bot.js`).
+
+- **Control & Event Plane:** Typed async `EventBus` (`core/event_bus.py`) with `asyncio.gather` concurrent dispatch (`handler_timeout=5.0s`), bounded `publish_nowait(max_pending_tasks=256)`, `ChatReceiver.queue(maxsize=500)`, and `Orchestrator._spawn_bg_task` / `_busy_lock`.
+- **Cognitive & Memory Plane:** `ConversationEngine` + `Brain` (`ContextBudgetManager`, `ProviderCircuitBreaker`) backed by SQLite WAL + FTS5 + dense vector scan (`MemoryDatabase`, `vector_scan_limit=2000`) and Markdown Second Brain sync.
+- **Real-Time Media Plane:** `AudioWorklet` 16 kHz binary PCM → bounded `voice_queue(maxsize=64)` → `STTEngine`/`EnergyVAD` → `TTSEngine` (`edge-tts`/`kokoro`/`elevenlabs`/`custom` + `RVCVoiceConverter`) → 50ms RMS lip-sync + browser `AnalyserNode` arbitration (`isLocalAudioPlaying`).
 
 ```mermaid
 flowchart LR
-    subgraph L1["L1-L1.5 (Unhardened / NO-GO)"]
-        SEC["Security & Trust (L1.5)"]
-        COL["AI-to-AI Collab (L1.5)"]
+    subgraph Current["Current Single-Node Runtime (L3.0-L3.5)"]
+        INF["Infrastructure & EventBus (L3.5)"]
+        LLM["LLM & Circuit Breaker (L3.5)"]
+        AUD["Voice & Avatar Lip-Sync (L3.5)"]
+        GAM["Games, OBS, Highlights, VOD (L3.0)"]
+        SEC["Security & Plugins (L2.5-L3.0)"]
+        COG["Memory & Cognition (L2.0-L3.0)"]
+        COL["AI Collaboration (L2.5)"]
+        DX["Frontend DX & Observability (L2.0-L3.0)"]
     end
-    subgraph L2["L2.0-L2.5 (Functional Happy-Path)"]
-        AUD["Audio & Avatar (L2.0)"]
-        GAM["Games, Vision & OT (L2.0)"]
-        UX["Frontend & UX (L2.0)"]
-        QA["QA & Ops (L2.0)"]
-        INF["Core Infra (L2.5)"]
-        COG["Cognition & Memory (L2.5)"]
+    subgraph Target["Pre-H4 & H4 Target (L4.0+)"]
+        P0["P0-P2 Remediations: SEC-GAP-001..003, WS Outbound Queue, ClientTimeout"]
+        H4["Dedicated ML/Audio Workers + Hierarchical Memory + Multi-Peer Mesh"]
     end
-    subgraph Target["Horizon 1-2 Target (L3.0-L3.5)"]
-        L3["Production-Hardened Single-Node (L3+)"]
-    end
-
-    L1 -->|"Horizon 0: Auth, Nonce, XSS, Sandbox"| L3
-    L2 -->|"Horizon 1: EventBus, Barge-In, Locks, Recovery"| L3
+    Current -->|"Pre-H4 P0/P1/P2 Fixes"| P0 --> H4
 ```
 
 ---
 
-## 3. Subsystem-by-Subsystem Evidence & Capability Breakdown
+## 4. Major Horizon 0–3 Wins Delivered
 
-### 3.1 Core Infrastructure (`run.py`, `core/orchestrator.py`, `core/event_bus.py`, `core/config_manager.py`, `core/chat_receiver.py`) — **Maturity: L2.5**
-* **Current Capabilities:**
-  * Typed async/sync pub-sub `EventBus` (`core/event_bus.py:124-264`) with wildcard `*`, per-handler exception isolation, and bounded `deque(maxlen=200)` history (verified in Chaos Scenario A and `test_event_bus.py`).
-  * FastAPI `lifespan` startup/shutdown (`run.py:34-40`) orchestrating 16+ subsystems.
-  * `ConfigManager` (`core/config_manager.py:248-255, 1582-1588`) with atomic `os.replace` saves and secret masking for 6 fields (`29` core infra tests passing in `1.729s`).
-* **Partially Implemented:**
-  * Hot-reload pipeline (`core/orchestrator.py:712-849`) spawns untracked `asyncio.create_task` calls (`[INFRA-HIGH-001]`: 12+ untracked call sites across `orchestrator.py` and `run.py:631`).
-  * `perform_song()` bypasses `_busy_lock` when invoked via `POST /api/performance/start` or `AutonomousMissionExecutor` (`[INFRA-HIGH-002]`).
-  * `EventBus.publish()` awaits handlers sequentially, causing head-of-line blocking (`0.207s` stall on a `200ms` subscriber in Chaos Scenario A1, `[PERF-HIGH-001]` / `[INFRA-HIGH-003]`).
-  * `ConfigManager.validate_config()` only validates 110 schema keys out of `DEFAULT_SETTINGS`, uses a fixed `.tmp` filename, and omits `llm.gemini_api_key` / `llm.openai_api_key` from `SECRET_MASK_FIELDS` (`[INFRA-HIGH-005]`, `[INFRA-MED-001]`).
-  * `ChatReceiver.queue` is unbounded (`asyncio.Queue()`), and `ChatMessage` uses deprecated `asyncio.get_event_loop().time()` (`[INFRA-HIGH-004]`).
-* **Planned Capabilities:**
-  * Runtime enforcement of `performance.max_concurrent_tasks`, `performance.websocket_ping_interval_sec`, and `system.response_timeout_sec` (defined in `DEFAULT_SETTINGS` with 0 runtime references, `[INFRA-MED-002]`).
-  * Offloading synchronous `ConfigManager` / SQLite / `VODSummarizer` disk I/O off the event loop (`[INFRA-MED-003]`).
+- **Security & Auth:** Origin + token-first Creator authentication on mutating/sensitive HTTP & WS endpoints, `/ws/overlay` read-only separation, `ConfigManager` masking of all `8` secret fields (`llm.*_api_key` included), `ClipPipeline` `is_relative_to()` path confinement & filtergraph escaping, `YouTubeKaraokeProcessor` SSRF/URL canonicalization, `Moderator` prompt-injection drop, and OS-isolated plugin subprocesses (`bwrap` / `_WindowsJobObject`) with AST manifest parsing + default-deny `granted_permissions`.
+- **Concurrency & Audio:** `EventBus` concurrent dispatch + bounded `publish_nowait` (`256`), `ChatReceiver(maxsize=500)`, `_spawn_bg_task` tracking, `perform_song()` `_busy_lock`, full-duplex `AudioWorklet` 16 kHz binary PCM + `EnergyVAD` barge-in, `speak_stream()` `CancelledError` propagation, `Singer` BGM stop + clock-locked cues, and real 50ms RMS lip-sync + `isLocalAudioPlaying` arbitration.
+- **Cognition & Adapters:** `ContextBudgetManager` per-provider budgeting, `ProviderCircuitBreaker` cross-provider failover, `is_creator` end-to-end plumbing, `MoodEngine.get_temperature_modifier()` wired to `Brain`, `Goal.recalculate_progress()` `REPLANNED` fix + `MAX_REPLAN_ATTEMPTS=3` + `approval_timeout_sec=300.0`, Chess `board.copy()` + Stockfish UCI fallback, `bot.js` timer cleanup + `EADDRINUSE` exit, `OBSWebSocketClient` disconnect reset, and offline vendored Three-VRM (`web/vendor/`).
 
-### 3.2 Real-Time Audio, Voice Duplex & Avatar Synchronization (`core/tts.py`, `core/tts_providers.py`, `core/stt.py`, `core/singer.py`, `core/vts_client.py`) — **Maturity: L2.0**
-* **Current Capabilities:**
-  * Browser 16 kHz mono Int16 PCM capture via `AudioWorklet` (`web/audio-worklet-processor.js`, 32 ms frames) with `EnergyVAD` (`core/stt.py:23-118`) and `StreamingSTTSession` (30s max buffer).
-  * Streaming LLM -> `SentenceChunker` (`core/tts.py:20-135`) -> `TTSEngine.speak_stream()` bounded `asyncio.Queue(maxsize=4)` with clean temp-file cleanup on barge-in (verified in Chaos Scenario B: `0` disk leftovers).
-* **Partially Implemented:**
-  * **Full-Duplex Barge-In:** `TTSEngine.speak_stream()` catches `asyncio.CancelledError` and returns partial text instead of re-raising when `_stop_requested=True` (`[AUDIO-CRIT-001]`, `core/tts.py:588-600`), letting `Orchestrator._execute_interaction()` emit post-barge-in `ai_response` / Minecraft / Discord messages. Barge-in also fails to stop `Singer` BGM (`pygame.mixer.music`, `[AUDIO-HIGH-002]`), and `transcribe_wav_bytes()` blocks the WS receive loop (`[AUDIO-HIGH-001]`).
-  * **Multi-Provider TTS & RVC:** `EdgeTTSProvider` fallback uses incompatible non-Edge `self.voice` (`[AUDIO-HIGH-003]`), MIME/filename is hardcoded to `audio/mpeg` / `input.mp3` even for WAV from Kokoro, and `Singer` bypasses `create_tts_provider()`.
-  * **VTube Studio Integration:** Authenticates and injects parameters, but `VTS_AUTH_TOKEN` is ephemeral and `auto_reconnect: true` has no reconnect loop.
-* **Planned Capabilities:**
-  * **Server-Side Audio-Envelope Lip-Sync:** Currently a synthetic 80 ms square wave (`0.95`/`0.50` in `TTSEngine`, `0.70`/`0.20` in `Singer`) that collides with browser `AnalyserNode` RMS in `output_mode="both"` (`[AUDIO-CRIT-002]`).
-  * **Streaming Partial STT:** `stt_partial` only broadcasts static `"Listening..."` (`[AUDIO-LOW-001]`).
+---
 
-### 3.3 Cognition, Memory & Autonomous Planning (`core/brain.py`, `core/conversation/`, `core/memory/`, `core/mood/`, `core/personality/`, `core/relationship/`, `core/planning/`) — **Maturity: L2.5**
-* **Current Capabilities:**
-  * Multi-provider LLM routing (`openai`, `gemini`, `ollama`, `mock`) with SSE/NDJSON streaming and shared `aiohttp.ClientSession` reuse (`core/brain.py`).
-  * Hybrid Second Brain memory (`core/memory/`): SQLite FTS5 + dense cosine vector search + Karpathy Markdown sync.
-  * 5-dimension `MoodEngine` with exponential decay, bounded `PersonalityEvolutionEngine` (`[0.05, 0.98]`), and 5-tier `RelationshipEngine` (79 cognitive unit tests passing in `2.537s`).
-* **Partially Implemented:**
-  * **Closed-Loop Autonomous Missions (`AutonomousMissionExecutor`):** Replanned goals can **never** reach `COMPLETED` because `Goal.recalculate_progress()` includes `REPLANNED` subtasks in the denominator (`[COG-CRIT-001]`). Repeated failures trigger an infinite 25s replan loop growing `goals.json`/`agenda.md` unboundedly (`[COG-CRIT-002]`). Live Minecraft telemetry checks inventory 0ms after `toggle_wander()`, while disconnected mode fabricates `simulated: True` progress (`[COG-HIGH-001]`). Approval gates have no timeout (`[COG-MED-001]`).
-  * **Identity & Routing:** `is_creator` is dropped on all live LLM paths and error fallbacks (`[COG-HIGH-003]`). `MoodEngine.get_temperature_modifier()` is implemented but never called by `Brain`.
-  * **Memory Performance:** `EpisodicMemoryStore` instantiates a duplicate `EmbeddingEngine` (`[COG-HIGH-004]`), `_encode_gemini_async()` creates a new `aiohttp.ClientSession` per call (`[PERF-MED-001]`), and vector search is capped at 300 rows (`[COG-HIGH-005]`).
-* **Planned Capabilities:**
-  * **Context Window Budgeter:** `MasterPromptBuilder` concatenates 11+ subsystem directives unconditionally with mismatched `max_tokens` (`150` OpenAI vs `800` Gemini, `[COG-HIGH-002]`).
-  * **Cross-Provider LLM Failover & Bidirectional Markdown Sync:** Provider errors drop straight to offline mock responses; `fulfill_promise()` is never wired.
+## 5. Cross-Module Integration & Chaos Verification Summary
 
-### 3.4 AI-to-AI Collaboration (`core/collab/protocol.py`, `core/collab/manager.py`, `run.py`) — **Maturity: L1.5**
-* **Current Capabilities:**
-  * `CollabEnvelope` canonical JSON + HMAC-SHA256 signing/verification (`core/collab/protocol.py:55-106`), `/ws/collab` transport, and `shared_secret` masking (`9/9` unit tests passing).
-* **Partially Implemented:**
-  * **Security & Replay:** Zero replay protection (`message_id` nonce cache and `timestamp` freshness window are missing, reproduced in Chaos Scenario D3, `[COLLAB-CRIT-001]`). `_is_loopback_url()` uses substring matching (`ws://localhost.evil.com` returns `True`, `[COLLAB-HIGH-001]`). `/ws/collab` accepts query-string secrets and mutates global `shared_secret` (`[COLLAB-HIGH-002]`).
-  * **Floor & Turn Arbitration:** `turn_cooldown_sec` permanently deadlocks in `"cooldown"` once `turn_count >= max_collab_turns` because `_refresh_cooldown()` checks `turn_count < max_collab_turns` (`[COLLAB-HIGH-003]`). Inbound `turn_utterance` bursts spawn concurrent LLM reply tasks (`[COLLAB-HIGH-004]`), and `emote_sync`/`duet_sync` bypass cooldown (`[QA-MED-002]`).
-  * **Subsystem Sync:** `duet_sync`, `emote_sync`, and `game_move` are inbound-only and ignore sync parameters (`lyric_index`, `timestamp`, `action`).
-* **Planned Capabilities:**
-  * Replay/nonce cache, `collab.enabled=False` enforcement (`[COLLAB-MED-001]`), capability handshake, and Web Dashboard Collab UI.
+- **Strong Seams ([10_cross_module_integration.md](file:///d:/projects/MaybeAI/audit/10_cross_module_integration.md)):** `EventBus` exception/timeout isolation, `Orchestrator._busy_lock` + `barge_in()` cancellation, `Moderator` ingress filtering, and `PluginRegistry` AST + JSON-RPC timeout isolation.
+- **Weak Seams:** Synchronous `_ingest_message` disk/DB calls on the event loop (`0.109s–0.282s` slow callbacks); `CollabManager` inbound-only subsystem wiring & stale `floor_state` on disconnect; `HighlightDetector` async replay callback updating `replay_saved` post-publish.
+- **Chaos Scenarios A–H ([11_chaos_testing.md](file:///d:/projects/MaybeAI/audit/11_chaos_testing.md)):** **6 PASS** (A: 50 msgs + SuperChat + Karaoke + Barge-in in `0.28ms`; C: `Moderator` injection drop; D: `MemoryDatabase` `[384]*5` dimension guard; F: `PluginRegistry` OS isolation; G: `ProviderCircuitBreaker` transitions; H: 500-listener fan-out `2.159ms`/broadcast, 2000-row vector scan `45.32ms`), **2 PARTIAL** (B: `CollabManager.disconnect_peer()` leaves `floor_state="listening"`; E: stdout-only `print()` + `aiohttp` `ResourceWarning`s).
 
-### 3.5 Games, Vision, OBS & Highlights (`core/minecraft/`, `core/chess/`, `core/vision/`, `core/desktop/`, `core/highlights/`, `minecraft/bot.js`) — **Maturity: L2.0**
-* **Current Capabilities:**
-  * `ChessController`/`ChessEngine` (`python-chess`, alpha-beta depths 1–4), `MiniGameEngine` (6 modes), `StoryEngine` (campaigns + D20), `VisionEngine` (`mss` + pixel diff + rate-limited VLM), `PerformanceDirector`, `OBSWebSocketClient`, `HighlightDetector`, `ClipPipeline` (`ffmpeg` 9:16), and `VODSummarizer`.
-* **Partially Implemented:**
-  * **Chess:** `amake_bot_move()` mutates shared `self.engine.board` inside `asyncio.to_thread` without cloning or locking (`[GAME-CRIT-001]`).
-  * **Minecraft Bridge:** `MinecraftController` has no Node.js crash recovery, leaves `connection_status="connected"` on drop (Chaos Scenario E1, `[GAME-CRIT-002]` / `[QA-HIGH-002]`), and `bot.js` leaks `setInterval` timers while swallowing `uncaughtException`.
-  * **OBS & Highlights:** `OBSWebSocketClient` leaves `is_connected=True` on transport error (Chaos Scenario E2, `[GAME-HIGH-002]`), `HighlightDetector` sets `replay_saved=True` before async OBS save finishes (`[GAME-HIGH-003]`), `ClipPipeline` lacks path confinement (`[SEC-HIGH-003]`), `-nostdin`, and `ffmpeg` timeout (`[GAME-HIGH-004]`), and `VisualAnalyzer` raises `TypeError` on `detected_label` (`[GAME-HIGH-001]`).
-  * **Karaoke:** `Singer` suffers cumulative TTS network drift and runs blocking `pygame` calls on the event loop (`[GAME-HIGH-005]`).
-* **Planned Capabilities:**
-  * Live VLM-grounded commentary, OBS auto-reconnect, and audio-clock-locked karaoke.
+---
 
-### 3.6 Security & Operational Technology (`run.py`, `core/plugins/`, `core/moderator.py`, `core/desktop/`) — **Maturity: L1.5**
-* **Current Capabilities:**
-  * Origin validation + constant-time token comparison on mutating HTTP endpoints, parameterized SQLite/FTS5 queries, Desktop Companion metacharacter filtering (`shell=False`), and clean plugin subprocess `env` stripping (`leaks=[]` in Chaos Scenario C2).
-* **Partially Implemented:**
-  * **WebSocket & HTTP Auth:** `_CREATOR_ONLY_WS_ACTIONS` omits `memory_action`, `mood_action`, `relationship_action`, `minigame_action`, `story_action`, `multiplayer_action`, and `trigger_improv`, while `/ws` pushes private state pre-auth (`[SEC-CRIT-001]`). `_is_ws_creator_authorized()` checks loopback *before* token, breaking Docker/LAN Creator auth (`[SEC-HIGH-001]`). All `GET /api/*` routes except `/api/config` are unauthenticated (`[SEC-HIGH-002]`).
-  * **Plugin Sandbox:** No OS filesystem/network/RLIMIT jail (plugins can read `.env`, `config/settings.json`, `data/memory.db`), trusts self-declared `manifest.permissions`, executes import-time code, and permits `inprocess` mode (`[SEC-CRIT-002]`).
-  * **Prompt Injection & Moderation:** `Moderator.clean_text()` only redacts with `[CENSORED]` and never drops messages; `strict_mode` and `prompt_injection_filter` are dead flags; `user`/`donation_amount` are unmoderated (`[SEC-HIGH-004]`).
-* **Planned Capabilities:**
-  * OS-level plugin sandboxing, persistent `VTS_AUTH_TOKEN`, `ANTHROPIC_API_KEY` / `GROQ_API_KEY` routing, and fail-closed Docker/LAN token generation.
+## 6. Performance & Soak Baseline
 
-### 3.7 Frontend & Creator UX (`web/`) — **Maturity: L2.0**
-* **Current Capabilities:**
-  * 4-tab Studio Dashboard (`/`), OBS Stage Overlay (`/overlay`), Mobile Stream Deck (`/deck` with `#deck-auth-bar`), 23-category Settings Center (`/settings`), and `AudioWorklet` 16 kHz downsampler.
-* **Partially Implemented:**
-  * **Security & Auth UX:** `/settings` has stored DOM XSS across `renderDiagnosticsView()`, `renderCategorySettingsView()`, `renderSearchResults()`, and `renderControlHtml()` (`[UI-HIGH-001]`). `/` and `/settings` lack token entry UI and crash on `401/403` (`[UI-HIGH-002]`).
-  * **Transport & Audio:** Uncapped 2000ms WS reconnect loop across all pages, missing `overlay.js` `ws.onopen` re-sync, `deck.js` double-WS race on token save (`[UI-HIGH-003]`), and `AudioWorklet` resampler/tail-frame drop (`[UI-MED-002]`).
-* **Planned Capabilities:**
-  * Shared `CreatorAuth` + `ReconnectingWebSocket` client, local vendoring of Three.js/`@pixiv/three-vrm`/fonts (`[UI-MED-004]`), binary WS PCM frames, and live `/settings` status badge.
+Verified in [12_performance_analysis.md](file:///d:/projects/MaybeAI/audit/12_performance_analysis.md):
+- **WS Fan-Out:** `0.074ms` (`10` clients) → `0.262ms` (`100`) → `2.159ms` (`500`) per broadcast; single stalled client caps at `2.0s` due to missing per-WS outbound queue (`INFRA-MED-001-RES`).
+- **Vector Scan:** `13.54ms` (`100` rows) → `45.32ms` (`2000` rows), bounded by `vector_scan_limit=2000`.
+- **8–12h Soak:** **Feasible** under supervision with Docker log rotation (`max-size`/`max-file`) and `Orchestrator.shutdown()` cleanup; monitor `rss_mb` and `bg_tasks_active` via `/api/metrics`.
 
-### 3.8 QA, Testing & Operations (`tests/`, `Dockerfile`, `docker-compose.yml`) — **Maturity: L2.0**
-* **Current Capabilities:**
-  * 35 Python test files (`315` tests) + `1` Node.js test (`test_guard_runner.js`) + `node --check` on all 5 JS files. Zero `DeprecationWarning` / `ResourceWarning` tracebacks under `-W default`.
-* **Partially Implemented:**
-  * Full suite had 1 load-sensitive error (`test_hard_timeout_kills_infinite_loop_subprocess` due to shared `hook_timeout_sec` on cold start, `[QA-HIGH-001]`).
-  * Tests mutate workspace `data/` files (`[QA-MED-003]`), and `PluginRegistry._subprocesses` retains crashed worker entries (`[QA-MED-001]`).
-* **Planned Capabilities:**
-  * Live integration contract tests (OBS, VTS, Mineflayer, `ffmpeg`), browser E2E tests, multi-hour soak tests, and CI/CD quality gates.
+---
+
+## 7. Primary Technical Debt & Pre-Horizon 4 Blockers
+
+1. **`SEC-GAP-001` (High):** `web/shared-client.js` still passes `?token=` in WS URLs and stores tokens in `localStorage` despite server-side `Sec-WebSocket-Protocol` support.
+2. **`SEC-GAP-002` (High):** Windows plugin sandbox relies on bypassable Python monkeypatches (`ctypes`/`subprocess`/`Path.unlink` unguarded).
+3. **`SEC-GAP-003` (Medium):** Indirect VLM/OCR prompt injection via raw `obs.summary` in `core/conversation/engine.py`.
+4. **`INFRA-MED-001-RES` / `INFRA-MED-002` / `INFRA-MED-003`:** Missing per-WS outbound `asyncio.Queue(maxsize=64)`, 4 dead config keys (`response_timeout_sec`, `max_concurrent_tasks`, `websocket_ping_interval_sec`, `audio_buffer_size_kb`), and sync disk/DB calls in `_ingest_message`.
+5. **`AUDIO-MED-001/002/003`:** `ClientTimeout(total=1.8)` truncating >1.8s LLM streams; `TTSEngine.speak()` swallowing `CancelledError`; `Singer` missing neural provider config in `reload_settings()`.
+6. **`CHAOS-B-001` & Collab Scaling:** `CollabManager.disconnect_peer()` leaves `floor_state="listening"`; `on_hello` dead code; subsystems don't auto-emit sync frames; 2-peer scalar model.
+7. **Monolithic Frontend & Runtime Hygiene:** `web/app.js` (`5,896` lines) + 4 separate HTML/JS apps with 5 unguarded `ws.readyState` calls, `0` `:focus-visible`/`prefers-reduced-motion` rules; stdout `print()` instead of `RotatingFileHandler`; `ResourceWarning`s; Playwright E2E skipped.
+
+---
+
+## 8. 21-Domain L0–L5 Maturity Scorecard (Post-H3 + YouTube Karaoke)
+
+All 21 domains below are scored strictly against [FINAL_POST_IMPLEMENTATION_AUDIT.md](file:///d:/projects/MaybeAI/audit/FINAL_POST_IMPLEMENTATION_AUDIT.md) and `audit/00`–`13` at commit `96b7315`:
+
+| # | Domain | Score | Maturity Label | Verified Strengths | Remaining Gaps & Limiting Factors |
+|---|---|---|---|---|---|
+| 1 | **Infrastructure** | **L3.5** | Hardened Single-Node → Resilient | `_spawn_bg_task`, `_busy_lock` on `perform_song()`, `EventBus` concurrent `gather` + `publish_nowait(256)`, `ChatReceiver(500)`, `mkstemp` atomic config, `157/157` schema keys across `24` sections. | Missing per-WS outbound `asyncio.Queue(maxsize=64)` (`INFRA-MED-001-RES`, 2.0s stall); 4 dead config keys (`INFRA-MED-002`); sync disk/DB I/O on event loop (`0.11s–0.19s` slow callbacks, `INFRA-MED-003`). |
+| 2 | **LLM** | **L3.5** | Hardened Single-Node → Resilient | `ProviderCircuitBreaker` (`closed`→`open`→`half_open`), SSE/NDJSON streaming across Gemini/OpenAI/Ollama/Mock, `ContextBudgetManager` (`1800`/`1600` budgets, harmonized `max_tokens=800`), `is_creator` plumbed end-to-end. | `ClientTimeout(total=1.8)` truncates healthy LLM streams >1.8s (`AUDIO-MED-001`); heuristic char/4 token estimator (not `tiktoken`). |
+| 3 | **Voice** | **L3.5** | Hardened Single-Node → Resilient | `AudioWorklet` 16 kHz binary PCM frames, bounded `voice_queue(64)` + `_voice_worker` STT offload, `EnergyVAD` barge-in, `speak_stream()` `CancelledError` propagation, `Singer` BGM stop, multi-provider TTS + `RVCVoiceConverter`. | `TTSEngine.speak()` swallows `CancelledError` (`AUDIO-MED-002`); `reload_settings()` omits `Singer` neural provider/fallback fields (`AUDIO-MED-003`); `stt_partial` hardcoded to `"Listening..."`; unused `tts.volume`; local `faster-whisper`/`kokoro` absent in `.venv`. |
+| 4 | **Avatar** | **L3.5** | Hardened Single-Node → Resilient | Real 50ms RMS audio-envelope extraction, browser `AnalyserNode` arbitration (`if (!isLocalAudioPlaying)`), persistent VTS token (`data/vts_token.json`), exponential-backoff `auto_reconnect_loop()`, `apply_mood_rig()`. | `MouthSmile` vs `MouthForm` parameter split between `trigger_expression()` and `apply_mood_rig()`; duplicate `start_auto_reconnect()` checks; no timestamped server-to-browser lip-sync frames for VTS in `output_mode="browser"`. |
+| 5 | **Memory** | **L2.0** | Functional Happy-Path | Hybrid SQLite WAL + FTS5 + dense vector search, shared `EmbeddingEngine`, dimension-mismatch guard (`[384]*5` preserved on 128-d fallback), Markdown Second Brain sync. | `2000`-row linear Python vector scan (`45.32ms`, older rows invisible); zero hierarchical consolidation (episodic-to-semantic distillation/pruning); `fulfill_promise()`/`archive_old_promises()` unwired & one-way sync. |
+| 6 | **Cognitive Reasoning** | **L2.0** | Functional Happy-Path | `ContextBudgetManager` priority pruning, `is_creator` `[CREATOR VERIFIED]` authority injection, `ProviderCircuitBreaker` failover. | Retrieve-and-inject RAG only (no causal learning or policy updates); `StrategyReplanner` uses keyword matching (`"creeper"`, `"blunder"`); `Goal.reflection` is write-only. |
+| 7 | **Personality** | **L2.0** | Functional Happy-Path | Asymptotically bounded 5-trait `PersonalityEvolutionEngine` (`[0.05, 0.98]`), milestone unlocks, baseline sync to `MoodEngine`. | Driven by static `experience_matrix` parametric sliders rather than learned behavioral abstractions. |
+| 8 | **Emotional Continuity** | **L3.0** | Production-Hardened Single-Node | Continuous 5-dimension `MoodEngine` with exponential baseline decay, `get_temperature_modifier()` (`[-0.15, +0.15]`) wired to `Brain` (`[0.2, 1.2]`), `RelationshipEngine` 5-tier dossiers + inside jokes. | Lacks long-horizon emotional memory weighting across multi-day sessions. |
+| 9 | **Autonomous Missions** | **L2.0** | Functional Happy-Path | `Goal.recalculate_progress()` excludes `REPLANNED` subtasks, `MAX_REPLAN_ATTEMPTS=3` cap, `approval_timeout_sec=300.0` TTL, Minecraft telemetry polling + disconnect block. | `Goal.reflection` write-only; `_execute_chess` still returns `{"simulated": True}` when `self.chess is None`; replanning remains keyword-templated. |
+| 10 | **Vision** | **L3.0** | Production-Hardened Single-Node | `VisualAnalyzer` `scene_label` fix, `VisionEngine.aperceive_with_vlm()` + `MultimodalVisionModel` cooldown & structured output. | Local classification remains color-heuristic; VLM output only patches `obs.summary` post-hoc (doesn't drive `generate_commentary()`); `obs.summary` enters prompt unsanitized (`SEC-GAP-003`). |
+| 11 | **Social Intelligence** | **L2.5** | Functional → Hardened | `YouTubeLiveAdapter`, `DiscordAdapter`, `TikTokLiveAdapter` inherit `BasePlatformAdapter` with bounded `_seen_order(1000)` & `ChatReceiver(500)`; `ChatCurator` tracks `is_creator`; `RelationshipEngine` tracks viewer affinity. | Synchronous `_ingest_message` DB/Markdown writes on event loop; `promises.md` fulfillment unwired; no cross-platform unified user identity graph. |
+| 12 | **Minecraft** | **L3.0** | Production-Hardened Single-Node | `bot.js` `clearAllIntervals()` + `EADDRINUSE` exit + `MinecraftController._listen_bridge()` `finally:` state reset (`connection_status="disconnected"`). | `startAutonomyLoop()` defined but never called; no automatic reconnect/respawn loop if `bot.js` crashes mid-session; `uncaughtException` logs without exiting. |
+| 13 | **Entertainment** | **L3.0** | Production-Hardened Single-Node | `ChessEngine` `board.copy()` + Stockfish UCI fallback; `Singer` `vocal_track` + clock-locked cues; `YouTubeKaraokeProcessor` SSRF/VTT/cache/RVC pipeline; `MiniGameEngine` (6 modes) & `StoryEngine` showrunner hooks. | Missing host binaries (`yt-dlp`, `ffmpeg`, `demucs`, `stockfish`) prevent live E2E verification; `_delayed_bot_move` not cancelled on `start_game()`/`resign_game()`. |
+| 14 | **AI Collaboration** | **L2.5** | Functional → Hardened | `CollabEnvelope` HMAC-SHA256, `±60s` skew, `1024`-nonce LRU, `NaN`/`Infinity` rejection, SSRF `validate_outbound_url`, non-query Bearer/`Sec-WebSocket-Protocol` auth, `_refresh_cooldown` recovery. | `disconnect_peer()` leaves `floor_state="listening"` (`CHAOS-B-001`); `on_hello` dead code; subsystems don't auto-emit sync frames; 2-peer scalar state (`_ws_client`, `connected_peer`); `handle_incoming_envelope` defaults `is_loopback=True`. |
+| 15 | **Plugins** | **L2.5** | Functional → Hardened | Static AST manifest extraction (`ast.parse`), default-deny `granted_permissions`, stripped env, Linux `bwrap` + `RLIMIT`, `_WindowsJobObject` (512 MB / 2 procs), RPC permission enforcement. | Windows FS/net isolation relies on bypassable Python monkeypatches (`SEC-GAP-002`); `sandbox_mode="inprocess"` still accepted in `VALID_SANDBOX_MODES`. |
+| 16 | **OBS** | **L3.0** | Production-Hardened Single-Node | `OBSWebSocketClient` disabled by default, `obs.password` masked, resets `is_connected=False` & `_client=None` on error, graceful missing `obsws-python` fallback, `PermissionManager` risk gating. | `_sync_initial_state()` doesn't query `get_replay_buffer_status()`; no config-change reconnect or background auto-reconnect loop. |
+| 17 | **Highlights** | **L3.0** | Production-Hardened Single-Node | `HighlightDetector` sets sync `replay_saved` before `HIGHLIGHT_MARKED`; `ClipPipeline` enforces `is_relative_to()` path confinement, `-nostdin`, timeout, and filtergraph escaping. | Async `save_replay_buffer` updates `marker.replay_saved` after `HIGHLIGHT_MARKED` is emitted; `ClipPipeline.get_status()` absent. |
+| 18 | **VOD** | **L3.0** | Production-Hardened Single-Node | `VODSummarizer` subscribes to `EventBus`, offloads `generate_summary()` to `asyncio.to_thread`, writes collision-safe `YYYY-MM-DD.md` summaries to Second Brain. | `VODSummarizer.get_status()` absent (guarded by `hasattr` in `run.py`). |
+| 19 | **Security** | **L3.0** | Production-Hardened Single-Node | Origin + token-first Creator auth across HTTP/WS, `/ws/overlay` separation, `8/8` secrets masked, `Moderator` injection drop, `ClipPipeline` & `YouTubeKaraokeProcessor` SSRF/path guards. | `SEC-GAP-001` (`?token=` + `localStorage`), `SEC-GAP-002` (Windows plugin monkeypatch), `SEC-GAP-003` (raw `obs.summary`), `SEC-GAP-004` (DNS-rebinding TOCTOU), `SEC-GAP-005` (`yt-dlp --max-filesize` & job cap). |
+| 20 | **Observability** | **L3.0** | Production-Hardened Single-Node | `/api/health` (Docker `HEALTHCHECK`), auth-gated `/api/metrics` (`MetricsCollector`: `rss_mb`, `uptime_sec`, counters, gauges, `p50`/`p95` histograms), `/api/eventbus/stats`. | Uses stdout `print()` instead of structured JSON `logging` + `RotatingFileHandler`; no Prometheus endpoint; no deep DB/EventBus `/api/health` probe; `aiohttp` `ResourceWarning`s. |
+| 21 | **Developer Experience** | **L2.0** | Functional Happy-Path | `380/381` Python `unittest` cases + `GuardRunner` + `node --check` on 7 JS files; `web/shared-client.js` & offline `web/vendor/` (zero CDN, zero Node build step). | 4 separate HTML/JS apps with duplicated boilerplate; `web/app.js` (`5,896` lines) with 5 unguarded `ws.readyState` calls; `0` `:focus-visible`/`prefers-reduced-motion` rules; mixed EN/ID copy; Playwright E2E skipped without `playwright`. |

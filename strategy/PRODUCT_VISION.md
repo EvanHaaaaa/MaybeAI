@@ -1,95 +1,90 @@
 # MaybeAI — Long-Term Product Vision & Strategy (`strategy/PRODUCT_VISION.md`)
 
-**Author:** Agent 9 — Product Vision & Innovation Strategist (`strat-product`)  
-**Grounding Baseline:** `audit/FINAL_AUDIT_REPORT.md` and `audit/00_repository_inventory.md` through `audit/11_performance_analysis.md`  
-**Current Readiness Verdict:** `NO-GO` for unattended/public/Docker/LAN streams; `CONDITIONAL GO` for supervised localhost creator streams pending P0 hardening.
+**Author:** Agent 9 (`ng-strat-product`) — Product Vision & Innovation Strategist  
+**Grounding Baseline:** [FINAL_POST_IMPLEMENTATION_AUDIT.md](file:///d:/projects/MaybeAI/audit/FINAL_POST_IMPLEMENTATION_AUDIT.md) (`HEAD` `96b7315`, Post-Horizon 0–3 + YouTube Karaoke) and `audit/00..13`  
+**Current Readiness Verdict ([13_production_readiness.md](file:///d:/projects/MaybeAI/audit/13_production_readiness.md)):**
+- **Supervised Localhost (`127.0.0.1:7860`):** **`GO`**
+- **Authenticated LAN / Docker (`MAYBEAI_HEADLESS=1`):** **`CONDITIONAL GO`**
+- **Unattended 24/7 Public Internet:** **`NO-GO`** (blocked by `SEC-GAP-001/002/003`, `CHAOS-B-001`, `INFRA-MED-001-RES`, `ResourceWarning`s, and missing structured log rotation)
 
 ---
 
-## 1. Executive Vision: From Multi-Feature AI VTuber to Autonomous Digital Companion
+## 1. Eve's Product Identity: From Hardened AI VTuber Runtime to Autonomous Digital Companion
 
-Today, MaybeAI (personified by **Eve**) is an ambitious, feature-dense **AI VTuber runtime** spanning 94 Python modules in `core/`, a FastAPI/WebSocket server (`run.py`), 4 browser surfaces (`/`, `/settings`, `/overlay`, `/deck`), a Node.js Mineflayer bridge (`minecraft/`), and integrations with OBS Studio, VTube Studio, `python-chess`, and multi-platform chat (Twitch, YouTube Live, Discord, TikTok).
+Following Horizons 0–3 (`4c4e473`..`1953889`) and the YouTube Song Request / Auto-Karaoke release (`83298fa`), MaybeAI (**Eve**) has graduated from an unhardened L1.5–L2.5 prototype into a **hardened, modular single-node AI VTuber platform (overall L3.0–L3.5)** backed by `97` Python modules in `core/`, `4` browser surfaces (`/`, `/settings`, `/overlay`, `/deck`), offline-vendored Three-VRM (`web/vendor/`), a Node.js Mineflayer bridge (`minecraft/`), and `380/381` passing automated tests.
 
-Its long-term transformation is to evolve from a **creator-triggered, multi-feature stream toy** into a **persistent, trustworthy, autonomous digital companion**—an entity with:
-1. **Coherent Intelligence:** Bounded, token-budgeted reasoning across local and cloud LLMs with graceful cross-provider failover.
-2. **Continuous Personality & Memory:** A living Second Brain where episodic memories, promises, inside jokes, mood baselines, and personality traits evolve consistently across sessions without corrupting or drifting uncontrollably.
-3. **Genuine Social & Emotional Awareness:** Audience-aware curation, multi-user relationship continuity, and Creator-vs-Viewer authority boundaries that hold across every LLM path and surface.
-4. **Grounded Agency:** Closed-loop autonomous missions that act only on verified world/game state—never fabricating offline progress or trapping themselves in infinite replan loops.
-5. **Real-Time Presence & Adaptability:** Sub-second full-duplex voice barge-in, true audio-envelope lip-sync across 2D/3D/VTS avatars, and safe extensibility via isolated plugins and multi-AI collaborations.
+**Product Identity:** Eve is not a stateless chatbot bolted onto an avatar, nor a brittle macro script for OBS. Eve's identity is a **local-first, persistent, embodied digital companion** who:
+- **Remembers and Evolves:** Combines SQLite WAL + FTS5 + dense vector recall with human-readable Markdown Second Brain journals, 5-tier viewer relationships, and homeostatic mood/personality baselines.
+- **Perceives and Speaks in Real Time:** Listens via 16 kHz binary `AudioWorklet` PCM + `EnergyVAD`, interrupts cleanly via `barge_in()` across speech and karaoke BGM, and animates VTube Studio, 2D Canvas, and 3D VRM from real 50ms RMS audio envelopes.
+- **Acts in Interactive Worlds:** Plays Minecraft (`casual`/`guard`/`speedrun`), Chess (alpha-beta + Stockfish UCI fallback), 6 mini-games, RPG storytelling, OBS Showrunner, YouTube Karaoke / AI Cover, and 9:16 highlight clipping.
+- **Collaborates Safely:** Connects peer-to-peer over HMAC-SHA256 `/ws/collab` and runs third-party extensions inside OS-isolated plugin subprocesses (`bwrap` / Windows Job Objects) with default-deny capabilities.
 
-> **Core Strategic Thesis:** MaybeAI does not win by adding more disconnected mini-features. Its architectural moat already exists in `EventBus` + Second Brain + multi-surface studio/overlay/deck + game/world bridges. Winning requires **hardening the core loop into a reliable, secure, low-latency nervous system** first, then compounding those subsystems into a cohesive companion.
-
----
-
-## 2. Current-State Reality vs. Target Transformation
-
-Every capability claim below is strictly classified against verified audit evidence (`audit/FINAL_AUDIT_REPORT.md` & `audit/00..11`).
-
-| Capability Area | Classification | Verified Current Reality | Target Companion State |
-|---|---|---|---|
-| **Event-Driven Core & Config** | **Current Capability** | Typed async `EventBus`, FastAPI `lifespan`, `ConfigManager` atomic writes (`os.replace`), 110-field `/settings` schema (`audit/01`). | Backpressure-safe concurrent `EventBus`, tracked background tasks, full secret masking (`llm.*_api_key`), runtime concurrency limits. |
-| **Voice Duplex & Audio Pipeline** | **Partially Implemented** | Browser 16 kHz `AudioWorklet` + `EnergyVAD` + `SentenceChunker` work, but `speak_stream()` swallows `CancelledError` (`[AUDIO-CRIT-001]`), `Singer` BGM ignores barge-in (`[AUDIO-HIGH-002]`), and `transcribe_wav_bytes()` blocks WS (`[AUDIO-HIGH-001]`). | Sub-second clean barge-in across speech + karaoke, non-blocking STT worker pool, persistent HTTP session pooling. |
-| **Avatar Lip-Sync & Visual Presence** | **Planned Capability** | Server emits a fixed 80 ms square wave (`0.95`/`0.50`) that collides with browser `AnalyserNode` RMS (`[AUDIO-CRIT-002]`); VRM relies on external `esm.sh` CDN (`[UI-MED-004]`). | Unified server-computed RMS audio-envelope lip-sync frames, conflict-free browser playback, offline-bundled VRM/fonts. |
-| **Memory, Mood & Personality** | **Current Capability** (with gaps) | SQLite FTS5 + cosine vector search + Markdown sync, 5-dim `MoodEngine`, bounded `PersonalityEvolutionEngine`, 5-tier `RelationshipEngine` (`audit/03`). | Hybrid vector/FTS5 retrieval beyond 300-row cap (`[COG-HIGH-005]`), wired `fulfill_promise()` & mood temperature, LRU `UserMemory`. |
-| **LLM Routing & Context Budgeting** | **Planned Capability** | Unbounded prompt concatenation across 11+ directives (`[COG-HIGH-002]`), `is_creator` dropped on live LLM paths (`[COG-HIGH-003]`), zero cross-provider failover (`[COG-MED-002]`). | Token-aware `ContextBudgetManager`, verified `[CREATOR VERIFIED]` authority propagation, automatic provider failover chain. |
-| **Autonomous Missions & Agency** | **Partially Implemented** | `AutonomousMissionExecutor` & approval gate exist, but replanned goals never reach `COMPLETED` (`[COG-CRIT-001]`), replanning loops infinitely (`[COG-CRIT-002]`), and 0ms MC polling / offline simulation distort progress (`[COG-HIGH-001]`). | Telemetry-verified action completion, capped replanning (`MAX_REPLAN_ATTEMPTS`), expiring approval gates (`[COG-MED-001]`). |
-| **Gaming & Interactive Worlds** | **Current Capability** (with gaps) | Mineflayer bridge (`santai`/`kompe`/`guard`), `python-chess`, 6 mini-games, RPG storytelling, OBS Showrunner, `ffmpeg` 9:16 highlights (`audit/05`). | Thread-safe `chess.Board` cloning (`[GAME-CRIT-001]`), Node bridge crash recovery (`[GAME-CRIT-002]`), OBS reconnect (`[GAME-HIGH-002]`), audio-clock-locked karaoke. |
-| **AI-to-AI Collaboration** | **Partially Implemented** | HMAC-SHA256 `CollabEnvelope` & `/ws/collab` exist, but lack replay protection (`[COLLAB-CRIT-001]`), cooldown auto-recovery (`[COLLAB-HIGH-003]`), and bidirectional `duet_sync`/`emote_sync`/`game_move` (`audit/04`). | Replay-safe, capability-negotiated multi-AI floor arbitration with Web Dashboard Collab UI and bidirectional game/emote/duet sync. |
-| **Plugin Ecosystem & Security** | **Partially Implemented** | Subprocess `sandbox_worker.py` strips env vars (`leaks=[]`) and kills on timeout, but lacks OS filesystem/network jail (`[SEC-CRIT-002]`) and `/ws` + `GET /api/*` have auth gaps (`[SEC-CRIT-001]`, `[SEC-HIGH-002]`). | Full Creator auth across `/ws`, REST, and Docker/LAN (`[SEC-HIGH-001]`), XSS-free UI (`[UI-HIGH-001]`), OS-jailed capability-enforced plugins. |
+**Next-Generation Transformation (Horizons 4–8):** Evolve Eve from a **creator-supervised AI VTuber runtime** (`L2` cognition/memory, `L2.5` 2-peer collab, `L3` unattended readiness) into a **self-consistent, causally learning, multi-agent Autonomous Digital Companion** capable of unattended 24/7 operation, longitudinal memory consolidation, safe L2–L4 world agency, and multi-AI ensemble shows.
 
 ---
 
-## 3. Target Personas
+## 2. Capability Classification Discipline
 
-### Persona 1: Solo Streamer ("Maya")
-- **Profile:** Variety/Just-Chatting/Minecraft VTuber streaming on Twitch/YouTube/TikTok with OBS Studio and VTube Studio or `/overlay` (2D/VRM) on a single Windows PC.
-- **Core Needs:** Zero-fuss startup (`start.bat`), expressive lip-sync that matches her AI co-host's actual voice, instant voice barge-in when she talks over the AI, automated 9:16 highlight clips + VOD summaries, and a mobile `/deck` to trigger karaoke, improv, or mute without alt-tabbing.
-- **Current Friction (Audit-Grounded):** Square-wave lip-sync jitter (`[AUDIO-CRIT-002]`), post-barge-in ghost replies (`[AUDIO-CRIT-001]`), OBS disconnect stale state (`[GAME-HIGH-002]`), and offline VRM failure when CDN is unreachable (`[UI-MED-004]`).
-- **Value Unlocked:** A dependable, low-latency AI co-host that feels alive on camera, never talks over her after she interrupts, and turns every stream into ready-to-post clips.
+Throughout all strategy documents, every capability is strictly separated by verified audit status:
 
-### Persona 2: Technical Creator ("Alex")
-- **Profile:** Developer/power-user running MaybeAI in Docker or across a LAN (headless server + separate gaming PC / OBS machine), customizing local LLMs (Ollama), local TTS/STT (Kokoro, Faster-Whisper, RVC), and writing custom `plugins/*.py`.
-- **Core Needs:** Secure LAN/Docker authentication (`MAYBEAI_CREATOR_TOKEN`), strict prompt-injection defense against hostile chatters, clean APIs/SDKs for plugins, token-budgeted prompts for 8K-context local models, and reliable diagnostics.
-- **Current Friction (Audit-Grounded):** Broken Docker/LAN WS auth (`[SEC-HIGH-001]`), unauthenticated `/ws` & `GET /api/*` (`[SEC-CRIT-001]`, `[SEC-HIGH-002]`), `/settings` XSS & missing token UI (`[UI-HIGH-001]`, `[UI-HIGH-002]`), dead `strict_mode` prompt-injection flags (`[SEC-HIGH-004]`), and 4K/8K prompt bloat (`[COG-HIGH-002]`).
-- **Value Unlocked:** A self-hostable, LAN-safe, hackable companion platform where local models run fast and third-party plugins cannot exfiltrate `.env` or `data/memory.db`.
-
-### Persona 3: Multi-AI Collab Producer ("Ren")
-- **Profile:** Creator/producer orchestrating multi-agent streams—two or more AI VTubers bantering, singing duets, reacting with synchronized emotes, or playing Chess/Minecraft together.
-- **Core Needs:** Deterministic turn-taking without reply storms or permanent cooldown deadlocks, synchronized duet lyrics and emotes, bidirectional game moves, and a visual Collab control panel in the Studio Dashboard.
-- **Current Friction (Audit-Grounded):** Permanent `"cooldown"` deadlock after `max_collab_turns` (`[COLLAB-HIGH-003]`), concurrent reply storms (`[COLLAB-HIGH-004]`), replayable envelopes (`[COLLAB-CRIT-001]`), one-way/partial `duet_sync`/`emote_sync`/`game_move`, and zero Collab UI in `web/` (`audit/04`).
-- **Value Unlocked:** Reliable, choreographed multi-AI entertainment that scales from 1-on-1 banter to full collaborative shows.
+| Classification | Definition | Examples in Post-H3 Baseline |
+|---|---|---|
+| **`EXISTING`** | Implemented, wired, and verified in `HEAD` `96b7315` | `EventBus` concurrent dispatch, `ContextBudgetManager`, `ProviderCircuitBreaker`, `is_creator` plumbing, `AudioWorklet` binary PCM, RMS lip-sync + `isLocalAudioPlaying` arbitration, `YouTubeKaraokeProcessor`, `PluginRegistry` AST manifest + default-deny |
+| **`INCOMPLETE`** | Partially implemented or missing a runtime wiring/hardening link | `promises.md` fulfillment (`fulfill_promise()` uncalled), `CollabManager` outbound subsystem sync & `on_hello`, `StreamingSTTSession` partial transcripts, `Sec-WebSocket-Protocol` frontend adoption (`SEC-GAP-001`), Windows OS plugin isolation (`SEC-GAP-002`), `obs.summary` sanitization (`SEC-GAP-003`) |
+| **`EXPERIMENTAL`** | Optional/scaffolded behind missing local dependencies or unverified live | Local `faster-whisper` / `kokoro-onnx` backends (absent in `.venv`), live `yt-dlp`/`ffmpeg`/`demucs`/`stockfish`/`obsws-python` execution on hosts without those binaries |
+| **`PLANNED`** | Scoped next-gen evolution addressing verified audit gaps | Per-WS bounded outbound queues (`INFRA-MED-001-RES`), `ClientTimeout` TTFB fix (`AUDIO-MED-001`), `Goal.reflection` causal loop, hierarchical memory consolidation, multi-peer `PeerSession` mesh |
+| **`PROPOSED`** | High-value innovation bets for Horizons 5–8 | `sqlite-vec` + FTS5 RRF scaling, hybrid SLM/LLM router, Narrative Identity Graph, multi-platform audience graph, unified Creator Studio SPA |
+| **`REJECTED`** | Intentionally excluded to protect latency, local-first simplicity, or safety | Premature microservices/Kubernetes split, external Neo4j/Qdrant before workload threshold, unconstrained OS "Computer Use", monolithic Speech-to-Speech replacing `Moderator`/RVC/Second Brain |
 
 ---
 
-## 4. Competitive Differentiation
-
-| Dimension | Typical AI VTuber Bots | Generic LLM Chatbots | MaybeAI Differentiator |
-|---|---|---|---|
-| **Memory & Continuity** | Ephemeral sliding window; forgets viewers next stream. | Flat RAG chunks without emotional or social state. | **Second Brain + Social Graph:** SQLite FTS5 + vector recall + human-readable Markdown sync + 5-tier relationships + evolving personality & mood baselines. |
-| **Embodied World Agency** | Text-only or scripted OBS hotkeys. | No game/stream world loop. | **Unified EventBus Agency:** Closed-loop `AutonomousMissionExecutor` bridging Mineflayer (`santai`/`kompe`/`guard`), `python-chess`, RPG storytelling, Desktop Companion, and OBS Showrunner. |
-| **Voice & Stage Presence** | Sequential turn-based TTS; no interruption handling. | No real-time avatar or broadcast overlay. | **Full-Duplex Studio Stack:** 32 ms `AudioWorklet` PCM, `SentenceChunker` streaming TTS, built-in `/overlay` (2D + 3D VRM), VTS RPC, and `/deck` mobile control. |
-| **Multi-AI & Extensibility** | Single-bot silo. | Closed SaaS plugins. | **Open Local-First Ecosystem:** Native `/ws/collab` AI-to-AI protocol + out-of-process `PluginRegistry` + multi-provider LLM/TTS/STT (cloud or 100% local). |
-
----
-
-## 5. Core Product Pillars
+## 3. Core Product Pillars
 
 ### Pillar 1: Trustworthy & Secure Broadcast Core (`Secure-by-Default`)
-Every control surface (`/`, `/settings`, `/overlay`, `/deck`, `/ws`, `/api/*`, `/ws/collab`) must enforce consistent Creator authentication, origin checks, XSS-safe rendering, prompt-injection filtering, and sandboxed plugin/subprocess boundaries—making Docker and LAN deployments genuinely `GO`.
+- **Current Reality (`EXISTING` / `INCOMPLETE`):** Origin + token-first Creator auth, `Moderator` injection drops, `ConfigManager` 8/8 secret masking, and `ClipPipeline`/`YouTubeKaraokeProcessor` confinement are `EXISTING`. Remaining gaps (`SEC-GAP-001/002/003`, `INFRA-MED-001-RES`, `ResourceWarning`s) block unattended 24/7 exposure.
+- **Strategic Direction:** Close all P0/P1 audit gaps (`Sec-WebSocket-Protocol` auth, OS-enforced Windows plugin jail, sanitized VLM/OCR perception, per-WS outbound queues, structured log rotation) to achieve **`GO` for Unattended 24/7**.
 
 ### Pillar 2: Real-Time Duplex Presence (`Zero-Jank Voice & Avatar`)
-Voice interaction must feel conversational: sub-second barge-in that cleanly cancels speech, BGM, and downstream broadcasts; non-blocking STT; and a single, conflict-free audio-envelope lip-sync pipeline driving VTS, 2D Canvas, and offline-capable 3D VRM.
+- **Current Reality (`EXISTING` / `INCOMPLETE`):** 16 kHz `AudioWorklet` PCM, non-blocking `_voice_worker` STT offload, `EnergyVAD` barge-in, 50ms RMS lip-sync, browser `AnalyserNode` arbitration, and offline `web/vendor/` Three-VRM are `EXISTING` (L3.5). `ClientTimeout(total=1.8)` stream truncation (`AUDIO-MED-001`), `TTSEngine.speak()` `CancelledError` swallowing (`AUDIO-MED-002`), and hardcoded `"Listening..."` partials are `INCOMPLETE`.
+- **Strategic Direction:** Fix stream TTFB timeouts, upgrade to `silero-vad` + streaming partial STT + AEC, and unify VTS/2D/3D expression parameters.
 
-### Pillar 3: Grounded Cognitive Continuity (`Memory That Earns Trust`)
-Cognition must respect token budgets, preserve Creator authority across all providers, fail over gracefully when an API blips, and execute autonomous missions only against verified world telemetry—turning Second Brain memories, promises, and personality evolution into observable behavior.
+### Pillar 3: Grounded Cognitive Continuity (`Memory & Identity That Learn`)
+- **Current Reality (`EXISTING` / `INCOMPLETE`):** `ContextBudgetManager`, `ProviderCircuitBreaker`, `MoodEngine.get_temperature_modifier()`, shared `EmbeddingEngine`, `REPLANNED` progress fix, and `MAX_REPLAN_ATTEMPTS=3` are `EXISTING` (L2–L3). However, Eve currently *retrieves and mutates scalar sliders* rather than genuinely learning (`04_cognitive_memory.md`): `Goal.reflection` is write-only, `StrategyReplanner` is keyword-templated, `fulfill_promise()` is unwired, and vector search scans at most 2,000 recent rows linearly.
+- **Strategic Direction:** Wire causal self-reflection, hierarchical episodic-to-semantic memory consolidation, `sqlite-vec` + FTS5 RRF scaling, and a Narrative Identity Graph so Eve compounds lived experience across months of streams.
 
-### Pillar 4: Interactive Worlds & Multi-AI Stage (`Playable Entertainment`)
-Games (Minecraft, Chess, Mini-Games, RPG Storytelling), Karaoke/Performance, Highlights/VOD, and AI-to-AI Collab must operate as resilient, reconnect-capable, bidirectional experiences—supported by an intuitive Studio & Deck UX.
+### Pillar 4: Playable Worlds, Entertainment & Content Production
+- **Current Reality (`EXISTING` / `INCOMPLETE`):** Thread-safe Chess (+ Stockfish fallback), hardened `bot.js` + `MinecraftController`, `YouTubeKaraokeProcessor` (`yt-dlp`/`demucs`/`ffmpeg`/RVC/VTT), clock-locked `Singer`, `HighlightDetector`, `ClipPipeline`, `VODSummarizer`, and `OBSWebSocketClient` are `EXISTING` (L3). Missing host binaries, `startAutonomyLoop()` uncalled, `Singer` config reload gaps, and async `replay_saved` ordering remain `INCOMPLETE`.
+- **Strategic Direction:** Evolve into an integrated AI Showrunner that coordinates games, karaoke/duets, and live VLM commentary while automatically producing ready-to-publish 9:16 shorts and timestamped VOD chapters.
+
+### Pillar 5: Open Plugin & Multi-Agent Ecosystem
+- **Current Reality (`EXISTING` / `INCOMPLETE`):** `PluginRegistry` AST manifest + default-deny `granted_permissions` and HMAC-SHA256 `/ws/collab` + SSRF-guarded `validate_outbound_url` are `EXISTING` (L2.5). Windows Python-level sandbox monkeypatches (`SEC-GAP-002`), `disconnect_peer()` stuck `floor_state` (`CHAOS-B-001`), missing outbound collab emitters, and 2-peer scalar state limit scaling.
+- **Strategic Direction:** Harden OS plugin isolation, ship a typed Plugin SDK, and refactor `CollabManager` into a `PeerSession` mesh + distributed floor arbitrator for N-agent shows.
 
 ---
 
-## 6. Strategic Horizon Summary
+## 4. Differentiation Strategy
 
-1. **Phase 1 — Core Hardening (Weeks 1–4):** Resolve all P0/P1 audit blockers (`[SEC-CRIT-*]`, `[COLLAB-CRIT-001]`, `[AUDIO-CRIT-*]`, `[COG-CRIT-*]`, `[GAME-CRIT-*]`, `[PERF-HIGH-001]`, `[UI-HIGH-*]`) to achieve `GO` for both Supervised Localhost and Docker/LAN streams.
-2. **Phase 2 — Adjacent Expansion (Months 2–3):** Ship `ContextBudgetManager`, cross-provider LLM failover, audio-envelope lip-sync, bidirectional Collab + Dashboard UI, offline VRM bundling, and OBS/Minecraft auto-recovery.
-3. **Phase 3 — Horizon-3 Bets (Months 4–6+):** Introduce Silero/WebRTC VAD + binary WS audio, HNSW/sqlite-vec hybrid memory scaling, OS-level plugin sandboxing, live VLM-grounded commentary, and multi-party Collab capability negotiation.
+| Dimension | Typical AI VTuber Bots | Generic LLM / Companion SaaS | MaybeAI Competitive Moat |
+|---|---|---|---|
+| **Architecture & Ownership** | Fragile scripts tied to one cloud API | Closed multi-tenant SaaS; user data locked in cloud | **Local-First Modular Monolith:** Single-node Python/FastAPI + SQLite WAL + offline Three-VRM + local Ollama/RVC/Kokoro support with zero mandatory cloud lock-in. |
+| **Memory & Identity** | Sliding context window; forgets viewers | Flat cloud RAG; no emotional homeostasis | **Hybrid Second Brain + Affective Core:** SQLite FTS5 + vector recall + Markdown sync + 5-tier `RelationshipEngine` + `MoodEngine` sampling coupling + evolving personality. |
+| **Voice & Stage** | Turn-based TTS; no interruption | Text-only or high-latency cloud voice | **Sub-Second Duplex Studio:** 32ms `AudioWorklet` binary PCM, `barge_in()` across speech & karaoke BGM, 50ms RMS lip-sync, OBS `/overlay`, VTS RPC, and mobile `/deck`. |
+| **Embodied Agency & Show** | Scripted chat triggers | No game or broadcast integration | **EventBus Multi-World Runtime:** Mineflayer Minecraft, Stockfish/alpha-beta Chess, RPG Storytelling, YouTube AI Cover/Karaoke, OBS Showrunner, and 9:16 `ClipPipeline`. |
+| **Extensibility & Collab** | Single-bot silo | Proprietary plugin store | **Sandboxed Plugins + Open Collab:** AST-manifested, OS-isolated plugins + HMAC-SHA256 SSRF-safe `/ws/collab` evolving toward N-agent shows. |
+
+---
+
+## 5. Autonomous Digital Companion Vision (Covering §9.1–9.10)
+
+MaybeAI's next-generation roadmap spans ten integrated capability pillars (§9.1–9.10):
+
+1. **Cognitive Intelligence (§9.1):** Move from bounded contextual reasoning (`L2`) to causal self-reflection (`Goal.reflection` feedback loops), experience-driven replanning, and hybrid SLM/LLM routing with tokenizer-accurate budgeting.
+2. **Advanced Memory (§9.2):** Move from 2,000-row linear vector scans (`L2`) to hierarchical episodic-to-semantic consolidation, automated promise fulfillment, and `sqlite-vec` + FTS5 RRF retrieval across 50,000+ episodes.
+3. **Persistent Identity (§9.3):** Move from static 5-float `experience_matrix` sliders (`L2`) to a Narrative Identity Graph that preserves core character invariants while evolving authentic long-term quirks, values, and inside jokes.
+4. **Multimodal Perception (§9.4):** Move from color-heuristic screen labels and unsanitized `obs.summary` (`L3`, `SEC-GAP-003`) to sanitized, scene-change-driven VLM ring buffers and `silero-vad` + streaming partial STT.
+5. **Autonomous Companion (§9.5):** Progress systematically across **Autonomy Levels L0–L4** — from `L0` (Manual Trigger) and `L1` (Assisted Suggestion) through `L2` (Supervised Closed-Loop, current), `L3` (Bounded Autonomous Showrunner with `PermissionManager` & telemetry verification), to `L4` (24/7 Self-Regulating Companion within explicit Creator guardrails).
+6. **Social Intelligence (§9.6):** Evolve `RelationshipEngine` and `ChatCurator` into a cross-platform Audience Graph that tracks viewer cohorts, shared history, and social pacing without falling for chat manipulation.
+7. **Entertainment (§9.7):** Unify Minecraft, Chess, Mini-Games, RPG Storytelling, and YouTube Karaoke/AI Cover under a resilient, auto-reconnecting Showrunner with synchronized music, voice, and avatar choreography.
+8. **Content Production (§9.8):** Turn every live session into a zero-effort content pipeline: race-free `HighlightDetector` + OBS replay buffer + `ClipPipeline` 9:16 captioned shorts + `VODSummarizer` chaptered recaps.
+9. **Plugin Ecosystem (§9.9):** Upgrade from bypassable Windows monkeypatches (`L2.5`) to OS-enforced capability jails, a typed `PluginSDK`, and Creator-approved permission manifests for community extensions.
+10. **Multi-Agent Ecosystem (§9.10):** Evolve from 2-peer scalar `CollabManager` (`L2.5`) to a `PeerSession` mesh with `target_id` routing, distributed floor arbitration, and outbound `duet_sync`/`emote_sync`/`game_move` orchestration for multi-AI ensemble streams.
