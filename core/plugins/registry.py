@@ -44,7 +44,7 @@ class _WindowsJobObject:
         cls,
         pid: int,
         memory_limit_mb: int = 512,
-        max_processes: int = 2,
+        max_processes: int = 1,
     ) -> Tuple[Optional["_WindowsJobObject"], str]:
         if os.name != "nt":
             return None, "not_windows"
@@ -86,10 +86,24 @@ class _WindowsJobObject:
                     ("PeakJobMemoryUsed", ctypes.c_size_t),
                 ]
 
+            class JOBOBJECT_BASIC_UI_RESTRICTIONS(ctypes.Structure):
+                _fields_ = [
+                    ("UIRestrictionsClass", wintypes.DWORD),
+                ]
+
             JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
             JOB_OBJECT_LIMIT_PROCESS_MEMORY = 0x00000100
             JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+            JobObjectBasicUIRestrictions = 4
             JobObjectExtendedLimitInformation = 9
+            JOB_OBJECT_UILIMIT_HANDLES = 0x00000001
+            JOB_OBJECT_UILIMIT_READCLIPBOARD = 0x00000002
+            JOB_OBJECT_UILIMIT_WRITECLIPBOARD = 0x00000004
+            JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS = 0x00000008
+            JOB_OBJECT_UILIMIT_DISPLAYSETTINGS = 0x00000010
+            JOB_OBJECT_UILIMIT_GLOBALATOMS = 0x00000020
+            JOB_OBJECT_UILIMIT_DESKTOP = 0x00000040
+            JOB_OBJECT_UILIMIT_EXITWINDOWS = 0x00000080
             PROCESS_SET_QUOTA = 0x0100
             PROCESS_TERMINATE = 0x0001
 
@@ -118,6 +132,27 @@ class _WindowsJobObject:
             if not ok_set:
                 kernel32.CloseHandle(job_handle)
                 return None, "windows_job_setinfo_failed"
+
+            ui_info = JOBOBJECT_BASIC_UI_RESTRICTIONS()
+            ui_info.UIRestrictionsClass = (
+                JOB_OBJECT_UILIMIT_HANDLES
+                | JOB_OBJECT_UILIMIT_READCLIPBOARD
+                | JOB_OBJECT_UILIMIT_WRITECLIPBOARD
+                | JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS
+                | JOB_OBJECT_UILIMIT_DISPLAYSETTINGS
+                | JOB_OBJECT_UILIMIT_GLOBALATOMS
+                | JOB_OBJECT_UILIMIT_DESKTOP
+                | JOB_OBJECT_UILIMIT_EXITWINDOWS
+            )
+            ok_ui = kernel32.SetInformationJobObject(
+                job_handle,
+                JobObjectBasicUIRestrictions,
+                ctypes.byref(ui_info),
+                ctypes.sizeof(ui_info),
+            )
+            if not ok_ui:
+                kernel32.CloseHandle(job_handle)
+                return None, "windows_job_setui_failed"
 
             proc_handle = kernel32.OpenProcess(
                 PROCESS_SET_QUOTA | PROCESS_TERMINATE,
@@ -206,8 +241,17 @@ class _SandboxPluginClient:
             return
         self.scratch_dir.mkdir(parents=True, exist_ok=True)
         perms = [str(p).strip() for p in (self._permission_provider() or []) if str(p).strip()]
+        worker_exe = sys.executable
+        launch_env = dict(self.env)
+        if os.name == "nt":
+            base_exe = getattr(sys, "_base_executable", None)
+            if base_exe and Path(base_exe).exists() and Path(base_exe) != Path(sys.executable):
+                # Bypass Windows venvlauncher.exe stub so ActiveProcessLimit=1 applies to the worker alone.
+                worker_exe = str(base_exe)
+                launch_env.setdefault("__PYVENV_LAUNCHER__", sys.executable)
+
         worker_cmd: List[str] = [
-            sys.executable,
+            worker_exe,
             "-m",
             "core.plugins.sandbox_worker",
             str(self.source_path),
@@ -246,7 +290,7 @@ class _SandboxPluginClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=self.env,
+                env=launch_env,
                 cwd=str(self.scratch_dir),
             )
         except OSError:
@@ -258,7 +302,7 @@ class _SandboxPluginClient:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=self.env,
+                env=launch_env,
                 cwd=str(self.scratch_dir),
             )
 
@@ -930,6 +974,10 @@ class PluginRegistry:
         auto_enable: Optional[bool] = None,
     ) -> str:
         """Validates and registers an in-process plugin instance without running `on_load` yet."""
+        if not builtin and source_path is not None:
+            raise PermissionError(
+                "In-process execution of external plugins is disallowed; use subprocess sandbox."
+            )
         if not isinstance(plugin, MaybeAIPlugin):
             raise TypeError("Plugin must inherit from MaybeAIPlugin.")
         manifest = getattr(plugin, "manifest", None)
@@ -1045,6 +1093,14 @@ class PluginRegistry:
                 meta["last_error"] = f"{err_name}: {exc}"
                 print(f"[PluginRegistry] on_load error for '{plugin_id}': {meta['last_error']}")
                 return False
+
+        if not src.get("builtin") and src.get("source_path"):
+            meta["loaded"] = False
+            meta["sandbox_level"] = SANDBOX_LEVEL_BLOCKED
+            meta["os_isolation_detail"] = "inprocess_blocked"
+            meta["error_count"] = int(meta.get("error_count", 0)) + 1
+            meta["last_error"] = "PermissionError: In-process execution of external plugins is disabled"
+            return False
 
         plugin = self._plugins.get(plugin_id)
         if plugin is None:
@@ -1165,39 +1221,15 @@ class PluginRegistry:
                         discovered_ids.append(blocked_pid)
                         print(f"[PluginRegistry] Blocked sandboxed plugin '{file_path}': {exc}")
                 else:
-                    ast_manifest = self._extract_manifest_from_ast(file_path)
-                    if ast_manifest is not None and (
-                        not self.enabled or ast_manifest.id not in self.enabled_plugins
-                    ):
-                        pid = self._register_sandbox_manifest(
-                            ast_manifest,
-                            source_path=str(file_path),
-                            auto_enable=False,
-                            sandbox_level="inprocess",
-                            os_isolation_detail="inprocess_deferred",
-                        )
-                        self._metadata[pid]["sandboxed"] = False
-                        self._sources[pid]["sandboxed"] = False
-                        discovered_ids.append(pid)
-                        continue
-                    mod_name = f"maybeai_ext_plugin_{file_path.stem}"
-                    try:
-                        spec = importlib.util.spec_from_file_location(mod_name, str(file_path))
-                        if spec is None or spec.loader is None:
-                            continue
-                        module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(module)
-                        for cls in self._extract_plugin_classes(module):
-                            instance = cls()
-                            pid = self.register_plugin(
-                                instance,
-                                builtin=False,
-                                source_path=str(file_path),
-                                module_name=mod_name,
-                            )
-                            discovered_ids.append(pid)
-                    except Exception as exc:
-                        print(f"[PluginRegistry] Failed loading external plugin '{file_path}': {exc}")
+                    # Disallow inprocess execution for ALL external plugins (SEC-GAP-002).
+                    blocked_pid = self._record_blocked_plugin(
+                        file_path,
+                        PermissionError(
+                            "In-process execution of external plugins is disallowed; use 'subprocess' sandbox_mode."
+                        ),
+                    )
+                    discovered_ids.append(blocked_pid)
+                    print(f"[PluginRegistry] Blocked external plugin '{file_path}': inprocess mode is disallowed")
 
         # 3. Load enabled plugins
         if self.enabled:
@@ -1242,7 +1274,7 @@ class PluginRegistry:
         await self._unload_plugin_instance(plugin_id)
 
         try:
-            if src.get("sandboxed") and src.get("source_path"):
+            if src.get("sandboxed") and src.get("source_path") and self.sandbox_mode == "subprocess":
                 file_path = Path(src["source_path"])
                 ast_manifest = self._extract_manifest_from_ast(file_path)
                 if ast_manifest is not None:
@@ -1265,21 +1297,8 @@ class PluginRegistry:
                     else:
                         await client.graceful_shutdown(timeout=min(self.hook_timeout_sec, 2.0))
             elif src.get("source_path"):
-                file_path = Path(src["source_path"])
-                mod_name = src["module_name"]
-                spec = importlib.util.spec_from_file_location(mod_name, str(file_path))
-                if spec is None or spec.loader is None:
-                    raise ImportError(f"Cannot load spec for '{file_path}'")
-                module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)
-                cls = getattr(module, src["class_name"])
-                new_instance = cls()
-                self.register_plugin(
-                    new_instance,
-                    builtin=False,
-                    source_path=str(file_path),
-                    module_name=mod_name,
-                    auto_enable=was_enabled,
+                raise PermissionError(
+                    "In-process execution of external plugins is disallowed; use 'subprocess' sandbox_mode."
                 )
             elif src.get("builtin"):
                 module = importlib.reload(importlib.import_module(src["module_name"]))
@@ -1301,7 +1320,7 @@ class PluginRegistry:
                     auto_enable=was_enabled,
                 )
         except Exception as exc:
-            if src.get("sandboxed"):
+            if src.get("sandboxed") or src.get("source_path"):
                 meta["sandbox_level"] = SANDBOX_LEVEL_BLOCKED
             meta["error_count"] = int(meta.get("error_count", 0)) + 1
             meta["last_error"] = f"{type(exc).__name__}: {exc}"

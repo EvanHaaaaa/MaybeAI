@@ -21,7 +21,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const clean = String(token || "").trim();
     if (!clean) return;
-    try { localStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
+    try { localStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
     try { sessionStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
   }
 
@@ -39,7 +39,17 @@ document.addEventListener("DOMContentLoaded", () => {
       return CreatorAuth.getToken();
     }
     try {
-      const urlToken = new URLSearchParams(window.location.search).get("token");
+      const params = new URLSearchParams(window.location.search);
+      const hasTokenParam = params.has("token");
+      const urlToken = params.get("token");
+      if (hasTokenParam && window.history && typeof window.history.replaceState === "function") {
+        try {
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.delete("token");
+          const cleanPath = nextUrl.pathname + (nextUrl.searchParams.toString() ? `?${nextUrl.searchParams.toString()}` : "") + (nextUrl.hash || "");
+          window.history.replaceState(null, "", cleanPath);
+        } catch (e) {}
+      }
       if (urlToken && urlToken.trim()) {
         const clean = urlToken.trim();
         setCreatorToken(clean);
@@ -47,11 +57,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (e) {}
     try {
-      return (
-        localStorage.getItem(CREATOR_TOKEN_KEY) ||
-        sessionStorage.getItem(CREATOR_TOKEN_KEY) ||
-        ""
-      );
+      return sessionStorage.getItem(CREATOR_TOKEN_KEY) || "";
     } catch (e) {
       return "";
     }

@@ -105,6 +105,7 @@ def install_boundary_guards(
     allow_fs_read = "fs:read" in granted
     allow_fs_write = "fs:write" in granted
     allow_net_outbound = "net:outbound" in granted or "network:outbound" in granted
+    allow_sys_exec = "sys:exec" in granted
 
     resolved_scratch = _resolve_safe_path(scratch_dir)
     resolved_repo = _resolve_safe_path(repo_root)
@@ -155,6 +156,47 @@ def install_boundary_guards(
     builtins.open = _guarded_open  # type: ignore[assignment]
     io.open = _guarded_open  # type: ignore[assignment]
     os.open = _guarded_os_open  # type: ignore[assignment]
+
+    if not allow_sys_exec:
+        _blocked_roots = ("ctypes", "_ctypes", "subprocess", "_winapi", "winreg")
+
+        class _BlockedModuleFinder:
+            """sys.meta_path blocker preventing untrusted plugins from importing native/exec modules."""
+
+            def find_spec(self, fullname: str, path: Any = None, target: Any = None) -> Any:  # noqa: ARG002
+                if fullname in _blocked_roots or fullname.startswith(tuple(f"{r}." for r in _blocked_roots)):
+                    raise PermissionError(
+                        f"Sandbox boundary: import of '{fullname}' denied (requires 'sys:exec' capability)"
+                    )
+                return None
+
+        # Evict any pre-imported blocked modules (e.g., _winapi/subprocess imported by asyncio)
+        # so subsequent plugin imports hit _BlockedModuleFinder instead of sys.modules cache.
+        for mod_name in list(sys.modules):
+            if mod_name in _blocked_roots or mod_name.startswith(tuple(f"{r}." for r in _blocked_roots)):
+                sys.modules.pop(mod_name, None)
+
+        sys.meta_path.insert(0, _BlockedModuleFinder())
+
+        def _deny_os_system(*args, **kwargs):  # noqa: ARG001
+            raise PermissionError(
+                "Sandbox boundary: os.system denied (requires 'sys:exec' capability)"
+            )
+
+        def _deny_os_popen(*args, **kwargs):  # noqa: ARG001
+            raise PermissionError(
+                "Sandbox boundary: os.popen denied (requires 'sys:exec' capability)"
+            )
+
+        os.system = _deny_os_system  # type: ignore[assignment]
+        os.popen = _deny_os_popen  # type: ignore[assignment]
+        if hasattr(os, "startfile"):
+            def _deny_os_startfile(*args, **kwargs):  # noqa: ARG001
+                raise PermissionError(
+                    "Sandbox boundary: os.startfile denied (requires 'sys:exec' capability)"
+                )
+
+            os.startfile = _deny_os_startfile  # type: ignore[assignment]
 
     if not allow_net_outbound:
         orig_connect = socket.socket.connect

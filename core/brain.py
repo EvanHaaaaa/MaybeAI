@@ -285,6 +285,15 @@ class Brain:
         llm_cfg = self.settings.get("llm", {}) if isinstance(self.settings, dict) else {}
         return max(0.1, float(llm_cfg.get("failover_timeout_sec", 1.8)))
 
+    def _get_streaming_timeout(self) -> aiohttp.ClientTimeout:
+        """Returns streaming ClientTimeout: fast connect/failover, generous per-chunk sock_read."""
+        failover = self._get_failover_timeout_sec()
+        return aiohttp.ClientTimeout(
+            connect=failover,
+            sock_connect=failover,
+            sock_read=max(5.0, failover * 3),
+        )
+
     def _is_provider_configured(self, provider: str) -> bool:
         prov = (provider or "mock").strip().lower()
         if prov == "gemini":
@@ -398,6 +407,12 @@ class Brain:
         if self._session is not None and self._session.closed is not True:
             await self._session.close()
         self._session = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        await self.close()
 
     def get_provider(self) -> str:
         """Returns the active LLM provider, respecting the MAYBEAI_LLM_PROVIDER env override."""
@@ -829,7 +844,7 @@ class Brain:
             "Content-Type": "application/json"
         }
         payload = self._build_openai_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64, stream=True)
-        timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
+        timeout = self._get_streaming_timeout()
         session = await self._get_session()
         async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
             if resp.status != 200:
@@ -890,7 +905,7 @@ class Brain:
         yielded_any = False
         try:
             session = await self._get_session()
-            async with session.post(url, headers=headers, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(url, headers=headers, json=payload, timeout=self._get_streaming_timeout()) as resp:
                 if resp.status != 200:
                     print(f"[Brain Warning] OpenAI stream status {resp.status}. Using persona fallback.")
                 else:
@@ -980,7 +995,7 @@ class Brain:
         base_url = os.getenv("OLLAMA_BASE_URL") or self.settings.get("llm", {}).get("ollama_url", "http://localhost:11434")
         url = f"{base_url}/api/chat"
         payload = self._build_ollama_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64, stream=True)
-        timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
+        timeout = self._get_streaming_timeout()
         session = await self._get_session()
         async with session.post(url, json=payload, timeout=timeout) as resp:
             if resp.status != 200:
@@ -1026,7 +1041,7 @@ class Brain:
         yielded_any = False
         try:
             session = await self._get_session()
-            async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=30)) as resp:
+            async with session.post(url, json=payload, timeout=self._get_streaming_timeout()) as resp:
                 if resp.status == 200:
                     async for line in self._iter_lines(resp.content):
                         stripped = line.strip()
@@ -1143,7 +1158,7 @@ class Brain:
             "Content-Type": "application/json"
         }
         payload = self._build_gemini_payload(system_prompt, user_name, message, is_donation, donation_amount, image_base64)
-        timeout = aiohttp.ClientTimeout(total=self._get_failover_timeout_sec())
+        timeout = self._get_streaming_timeout()
         session = await self._get_session()
         async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
             if resp.status != 200:
@@ -1205,7 +1220,7 @@ class Brain:
 
         yielded_any = False
         try:
-            timeout = aiohttp.ClientTimeout(total=30)
+            timeout = self._get_streaming_timeout()
             session = await self._get_session()
             async with session.post(url, headers=headers, json=payload, timeout=timeout) as resp:
                 if resp.status != 200:

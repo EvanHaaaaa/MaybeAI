@@ -1,6 +1,6 @@
 import ipaddress
 import socket
-from typing import Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 from urllib.parse import urlparse
 
 
@@ -124,18 +124,23 @@ def _resolve_hostname_ips(hostname: str, port: Optional[int]) -> List[IPAddr]:
     return ips
 
 
-def validate_outbound_url(
+def _format_host_header(hostname: str, port: Optional[int], netloc: str) -> str:
+    clean_netloc = netloc.rsplit("@", 1)[-1] if netloc else ""
+    if clean_netloc:
+        return clean_netloc
+    if ":" in hostname and not hostname.startswith("["):
+        base = f"[{hostname}]"
+    else:
+        base = hostname
+    return f"{base}:{port}" if port is not None else base
+
+
+def _validate_and_resolve(
     url: str,
     allowed_schemes: Iterable[str] = DEFAULT_ALLOWED_SCHEMES,
     allow_private: bool = False,
     allowlist: Optional[Iterable[str]] = None,
-) -> str:
-    """
-    Validates an outbound URL against SSRF risks.
-    Checks scheme, rejects metadata/link-local/unspecified/multicast/reserved IPs,
-    and rejects loopback/RFC1918/private ranges unless `allow_private=True` or
-    explicitly present in `allowlist`.
-    """
+) -> Tuple[str, str, str]:
     raw = str(url or "").strip()
     if not raw:
         raise SSRFValidationError("Outbound URL must not be empty.")
@@ -156,17 +161,19 @@ def validate_outbound_url(
     if not hostname:
         raise SSRFValidationError(f"Outbound URL '{raw}' is missing a hostname.")
 
+    host_header = _format_host_header(hostname, parsed.port, parsed.netloc)
     allowlist_entries = _normalize_allowlist(allowlist)
     literal_ip = _parse_ip_literal(hostname)
 
     if literal_ip is not None:
         if _is_allowlisted(hostname, [literal_ip], allowlist_entries):
-            return raw
+            return raw, str(_unwrap_ip(literal_ip)), host_header
         _validate_ip_address(literal_ip, allow_private=allow_private, hostname=hostname)
-        return raw
+        return raw, str(_unwrap_ip(literal_ip)), host_header
 
     if _is_allowlisted(hostname, [], allowlist_entries):
-        return raw
+        resolved_ips = _resolve_hostname_ips(hostname, parsed.port)
+        return raw, str(_unwrap_ip(resolved_ips[0])), host_header
 
     if hostname in _METADATA_HOSTNAMES:
         raise SSRFValidationError(f"Outbound URL host '{hostname}' is a blocked metadata hostname.")
@@ -176,13 +183,100 @@ def validate_outbound_url(
             raise SSRFValidationError(
                 f"Outbound URL host '{hostname}' is a loopback hostname (allow_private=False)."
             )
-        return raw
+        try:
+            resolved_ips = _resolve_hostname_ips(hostname, parsed.port)
+            pinned = str(_unwrap_ip(resolved_ips[0]))
+        except SSRFValidationError:
+            pinned = "::1" if hostname == "ip6-loopback" else "127.0.0.1"
+        return raw, pinned, host_header
 
     resolved_ips = _resolve_hostname_ips(hostname, parsed.port)
     if _is_allowlisted(hostname, resolved_ips, allowlist_entries):
-        return raw
+        return raw, str(_unwrap_ip(resolved_ips[0])), host_header
 
     for ip_obj in resolved_ips:
         _validate_ip_address(ip_obj, allow_private=allow_private, hostname=hostname)
 
-    return raw
+    return raw, str(_unwrap_ip(resolved_ips[0])), host_header
+
+
+def validate_outbound_url(
+    url: str,
+    allowed_schemes: Iterable[str] = DEFAULT_ALLOWED_SCHEMES,
+    allow_private: bool = False,
+    allowlist: Optional[Iterable[str]] = None,
+) -> str:
+    """
+    Validates an outbound URL against SSRF risks.
+    Checks scheme, rejects metadata/link-local/unspecified/multicast/reserved IPs,
+    and rejects loopback/RFC1918/private ranges unless `allow_private=True` or
+    explicitly present in `allowlist`.
+    """
+    validated_url, _, _ = _validate_and_resolve(
+        url,
+        allowed_schemes=allowed_schemes,
+        allow_private=allow_private,
+        allowlist=allowlist,
+    )
+    return validated_url
+
+
+def resolve_and_pin_host(
+    url: str,
+    allowed_schemes: Iterable[str] = DEFAULT_ALLOWED_SCHEMES,
+    allow_private: bool = False,
+    allowlist: Optional[Iterable[str]] = None,
+) -> Tuple[str, str, str]:
+    """
+    Validates an outbound URL against SSRF risks and pins its resolved IP.
+    Returns `(validated_url, pinned_ip, host_header)` to prevent DNS-rebinding TOCTOU.
+    """
+    return _validate_and_resolve(
+        url,
+        allowed_schemes=allowed_schemes,
+        allow_private=allow_private,
+        allowlist=allowlist,
+    )
+
+
+def create_pinned_connector(hostname: str, pinned_ip: str, **connector_kwargs: Any) -> Any:
+    """
+    Creates an `aiohttp.TCPConnector` whose DNS resolver is pinned to `pinned_ip`
+    for `hostname`, preventing DNS rebinding between validation and connect.
+    """
+    import aiohttp
+    from aiohttp.abc import AbstractResolver
+
+    clean_host = (hostname or "").strip().strip("[]").lower()
+    ip_obj = ipaddress.ip_address(str(pinned_ip).strip().strip("[]"))
+    family = socket.AF_INET6 if ip_obj.version == 6 else socket.AF_INET
+
+    class _PinnedResolver(AbstractResolver):
+        async def resolve(
+            self,
+            host: str,
+            port: int = 0,
+            family: int = socket.AF_UNSPEC,
+        ) -> List[Dict[str, Any]]:
+            target = (host or "").strip().strip("[]").lower()
+            if target != clean_host:
+                raise SSRFValidationError(
+                    f"Pinned connector refused unexpected host '{host}' (expected '{clean_host}')."
+                )
+            return [
+                {
+                    "hostname": host,
+                    "host": str(ip_obj),
+                    "port": port,
+                    "family": family if family != socket.AF_UNSPEC else (
+                        socket.AF_INET6 if ip_obj.version == 6 else socket.AF_INET
+                    ),
+                    "proto": 0,
+                    "flags": socket.AI_NUMERICHOST,
+                }
+            ]
+
+        async def close(self) -> None:
+            return None
+
+    return aiohttp.TCPConnector(resolver=_PinnedResolver(), **connector_kwargs)

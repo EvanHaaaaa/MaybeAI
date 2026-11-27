@@ -9,15 +9,26 @@ document.addEventListener("DOMContentLoaded", () => {
       return CreatorAuth.getToken();
     }
     try {
-      const urlToken = new URLSearchParams(window.location.search).get("token");
+      const params = new URLSearchParams(window.location.search);
+      const hasTokenParam = params.has("token");
+      const urlToken = params.get("token");
+      if (hasTokenParam && window.history && typeof window.history.replaceState === "function") {
+        try {
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.delete("token");
+          const cleanPath = nextUrl.pathname + (nextUrl.searchParams.toString() ? `?${nextUrl.searchParams.toString()}` : "") + (nextUrl.hash || "");
+          window.history.replaceState(null, "", cleanPath);
+        } catch (e) {}
+      }
       if (urlToken && urlToken.trim()) {
         const clean = urlToken.trim();
-        try { localStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
+        try { localStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
+        try { sessionStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
         return clean;
       }
     } catch (e) {}
     try {
-      return localStorage.getItem(CREATOR_TOKEN_KEY) || localStorage.maybeai_creator_token || "";
+      return sessionStorage.getItem(CREATOR_TOKEN_KEY) || "";
     } catch (e) {
       return "";
     }
@@ -321,10 +332,7 @@ document.addEventListener("DOMContentLoaded", () => {
       return CreatorAuth.buildWsUrl("/ws");
     }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const token = getCreatorToken();
-    let wsUrl = `${protocol}//${window.location.host}/ws`;
-    if (token) wsUrl += `?token=${encodeURIComponent(token)}`;
-    return wsUrl;
+    return `${protocol}//${window.location.host}/ws`;
   }
 
   function connectWs() {
@@ -391,7 +399,9 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    const rawWs = new WebSocket(buildDeckWsUrl());
+    const token = getCreatorToken();
+    const protocols = token ? [`maybeai.token.${token}`] : [];
+    const rawWs = protocols.length > 0 ? new WebSocket(buildDeckWsUrl(), protocols) : new WebSocket(buildDeckWsUrl());
     wsClient = {
       get isOpen() { return rawWs.readyState === WebSocket.OPEN; },
       send(d) {
@@ -437,7 +447,8 @@ document.addEventListener("DOMContentLoaded", () => {
       if (CreatorAuth && typeof CreatorAuth.setToken === "function") {
         CreatorAuth.setToken(val);
       } else {
-        try { localStorage.setItem(CREATOR_TOKEN_KEY, val); } catch (e) {}
+        try { localStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
+        try { sessionStorage.setItem(CREATOR_TOKEN_KEY, val); } catch (e) {}
       }
       if (deckAuthBar) deckAuthBar.style.display = "none";
       if (wsClient && typeof wsClient.reconnectNow === "function") {

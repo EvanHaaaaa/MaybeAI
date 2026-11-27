@@ -4,6 +4,7 @@ import aiohttp
 import random
 from typing import Optional, Dict, Any, List
 
+from core.moderator import Moderator
 from core.vision.models import VisualSceneType, VisualObservation
 
 
@@ -58,6 +59,12 @@ class MultimodalVisionModel:
         """Builds a structured scene/activity payload from a VisualObservation."""
         scene_type = str(observation.scene_type or VisualSceneType.UNKNOWN.value)
         activity = _SCENE_ACTIVITY_MAP.get(scene_type, "unknown")
+        safe_summary = Moderator.sanitize_metadata(vlm_summary or observation.summary, max_len=400)
+        safe_commentary = (
+            Moderator.sanitize_metadata(commentary, max_len=400)
+            if commentary is not None
+            else None
+        )
         return {
             "scene_type": scene_type,
             "scene_label": observation.scene_label,
@@ -65,8 +72,8 @@ class MultimodalVisionModel:
             "is_event": bool(observation.is_event),
             "event_type": observation.event_type,
             "confidence": round(float(observation.confidence), 2),
-            "summary": vlm_summary or observation.summary,
-            "commentary": commentary,
+            "summary": safe_summary,
+            "commentary": safe_commentary,
             "timestamp": observation.timestamp,
         }
 
@@ -235,7 +242,8 @@ class MultimodalVisionModel:
                             if candidates and "content" in candidates[0]:
                                 parts = candidates[0]["content"].get("parts", [])
                                 text = "".join(p.get("text", "") for p in parts if "text" in p).strip()
-                                return text or None
+                                sanitized = Moderator.sanitize_metadata(text, max_len=500)
+                                return sanitized or None
             except Exception as e:
                 print(f"[VLM Warning] Gemini VLM request error: {e}")
 
@@ -264,7 +272,8 @@ class MultimodalVisionModel:
                             choices = data.get("choices", [])
                             if choices:
                                 content = choices[0].get("message", {}).get("content", "")
-                                return content.strip() or None
+                                sanitized = Moderator.sanitize_metadata(content, max_len=500)
+                                return sanitized or None
             except Exception as e:
                 print(f"[VLM Warning] OpenAI VLM request error: {e}")
 

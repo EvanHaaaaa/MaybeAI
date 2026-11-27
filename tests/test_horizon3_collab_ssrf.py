@@ -4,7 +4,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from core.collab.manager import CollabManager
 from core.collab.protocol import CollabEnvelope
-from core.security_net import SSRFValidationError, validate_outbound_url
+from core.security_net import (
+    SSRFValidationError,
+    create_pinned_connector,
+    resolve_and_pin_host,
+    validate_outbound_url,
+)
 from core.tts_providers import (
     FishSpeechProvider,
     GPTSoVITSProvider,
@@ -288,6 +293,54 @@ class TestCollabSSRFAndBidirectional(unittest.IsolatedAsyncioTestCase):
         )
         other_move.sign("collab-sec")
         self.assertTrue((await mgr.handle_incoming_envelope(other_move.to_dict(), is_loopback=False))["accepted"])
+
+    async def test_resolve_and_pin_host_and_pinned_connector(self):
+        fake_public_dns = [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 0))]
+        with patch("core.security_net.socket.getaddrinfo", return_value=fake_public_dns):
+            validated_url, pinned_ip, host_header = resolve_and_pin_host(
+                "https://api.example.com:8443/v1/test",
+                allow_private=False,
+            )
+            self.assertEqual(validated_url, "https://api.example.com:8443/v1/test")
+            self.assertEqual(pinned_ip, "93.184.216.34")
+            self.assertEqual(host_header, "api.example.com:8443")
+
+            connector = create_pinned_connector("api.example.com", pinned_ip)
+            try:
+                resolved = await connector._resolver.resolve("api.example.com", 8443)
+                self.assertEqual(resolved[0]["host"], "93.184.216.34")
+                with self.assertRaises(SSRFValidationError):
+                    await connector._resolver.resolve("evil.example.com", 8443)
+            finally:
+                await connector.close()
+
+    async def test_disconnect_peer_resets_floor_state_and_on_hello_callback(self):
+        hello_events = []
+        mgr = CollabManager(settings={"enabled": True, "shared_secret": "collab-sec"})
+        mgr.set_action_callbacks(on_hello=lambda env: hello_events.append(env))
+
+        mgr.floor_state = "listening"
+        mgr.active_peer = "PeerA"
+        mgr.connected_peer = "PeerA"
+        mgr.peer_connected = False
+        await mgr.disconnect_peer()
+        self.assertEqual(mgr.floor_state, "idle")
+        self.assertIsNone(mgr.active_peer)
+        self.assertIsNone(mgr.connected_peer)
+
+        peer_hello = CollabEnvelope(
+            sender_id="peer-a",
+            sender_name="PeerA",
+            event_type="hello",
+            payload={"capabilities": ["duet_sync"], "protocol_version": "1.0"},
+        )
+        peer_hello.sign("collab-sec")
+        res = await mgr.handle_incoming_envelope(peer_hello.to_dict(), is_loopback=False)
+        self.assertTrue(res["accepted"])
+        import asyncio
+        await asyncio.sleep(0)
+        self.assertEqual(len(hello_events), 1)
+        self.assertEqual(hello_events[0].sender_name, "PeerA")
 
 
 if __name__ == "__main__":

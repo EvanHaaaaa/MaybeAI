@@ -465,8 +465,6 @@ class TTSEngine:
                     await self._invoke_callback(on_mouth_update, 0.0)
                 except Exception:
                     pass
-            if self._stop_requested:
-                return None
             raise
         except Exception as e:
             self.last_error = str(e)
@@ -476,6 +474,13 @@ class TTSEngine:
             self._is_speaking = False
             self._active_speak_task = None
             self._active_mouth_callback = None
+            if self._tts_channel is not None:
+                try:
+                    self._tts_channel.stop()
+                except Exception:
+                    pass
+                self._tts_channel = None
+            self._tts_sound = None
             if output_file:
                 self._cleanup_audio_file(output_file)
                 self._active_temp_files.discard(output_file)

@@ -12,6 +12,7 @@ _PROMPT_INJECTION_PATTERNS: Tuple[re.Pattern, ...] = (
 )
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]+")
 _INJECTION_TOKENS_RE = re.compile(r"<\|[^|>]+\|>|\[(?:SYSTEM|INST|/INST)\]", re.IGNORECASE)
+_VISUAL_DELIMITER_RE = re.compile(r"</?visual_observation_data>", re.IGNORECASE)
 
 
 class Moderator:
@@ -94,11 +95,14 @@ class Moderator:
 
     @staticmethod
     def sanitize_metadata(value: Any, max_len: int = 64) -> str:
-        """Sanitize metadata fields (user, donation_amount) against control chars and injection delimiters."""
+        """Sanitize metadata fields (user, donation_amount, visual OCR) against control chars and injection delimiters."""
         if value is None:
             return ""
         cleaned = _CONTROL_CHARS_RE.sub(" ", str(value))
         cleaned = _INJECTION_TOKENS_RE.sub("", cleaned)
+        cleaned = _VISUAL_DELIMITER_RE.sub("", cleaned)
+        for pattern in _PROMPT_INJECTION_PATTERNS:
+            cleaned = pattern.sub("[FILTERED]", cleaned)
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         if max_len > 0 and len(cleaned) > max_len:
             cleaned = cleaned[:max_len].rstrip()

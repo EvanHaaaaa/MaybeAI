@@ -25,6 +25,7 @@ load_dotenv()
 # Add workspace to sys.path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from core.logging_setup import setup_logging
 from core.orchestrator import Orchestrator
 from core.config_manager import ConfigManager
 
@@ -36,6 +37,7 @@ _active_collab_ws_clients: set[WebSocket] = set()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    setup_logging()
     await orchestrator.start()
     yield
     await orchestrator.shutdown()
@@ -149,15 +151,20 @@ def _extract_ws_subprotocol_secret(websocket: WebSocket, prefix: str) -> tuple[s
     return "", None
 
 
+def _allow_legacy_ws_token() -> bool:
+    return os.getenv("MAYBEAI_ALLOW_LEGACY_WS_TOKEN", "1") != "0"
+
+
 def _is_ws_creator_authorized(websocket: WebSocket) -> bool:
     configured_token = _get_configured_creator_token()
     if configured_token:
         proto_token, _ = _extract_ws_subprotocol_secret(websocket, "maybeai.token.")
+        legacy_token = websocket.query_params.get("token", "") if _allow_legacy_ws_token() else ""
         provided_token = (
-            _extract_bearer_token(websocket.headers)
+            proto_token
+            or _extract_bearer_token(websocket.headers)
             or websocket.headers.get("x-creator-token")
-            or proto_token
-            or websocket.query_params.get("token", "")
+            or legacy_token
             or ""
         ).strip()
         if not provided_token:
@@ -960,15 +967,45 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.accept()
     _active_ws_clients.add(websocket)
 
-    async def listener(event: dict):
+    outbound_queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue(maxsize=64)
+
+    async def _outbound_sender() -> None:
+        while True:
+            event = await outbound_queue.get()
+            try:
+                await websocket.send_json(event)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                orchestrator.unregister_listener(listener)
+                return
+            finally:
+                outbound_queue.task_done()
+
+    sender_task = asyncio.create_task(_outbound_sender())
+
+    def _enqueue_outbound(event: Dict[str, Any]) -> None:
+        if sender_task.done():
+            return
+        if outbound_queue.full():
+            try:
+                outbound_queue.get_nowait()
+                outbound_queue.task_done()
+            except asyncio.QueueEmpty:
+                pass
+        try:
+            outbound_queue.put_nowait(event)
+        except asyncio.QueueFull:
+            pass
+
+    def listener(event: dict) -> None:
         evt_type = event.get("type") if isinstance(event, dict) else None
         if evt_type in _PRIVATE_WS_EVENTS and not ws_creator_authorized:
             return
-        try:
-            await websocket.send_json(event)
-        except Exception:
+        if sender_task.done():
             orchestrator.unregister_listener(listener)
-            raise
+            return
+        _enqueue_outbound(event)
 
     orchestrator.register_listener(listener)
 
@@ -987,10 +1024,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     user=voice_user,
                     language=voice_lang,
                 )
-                try:
-                    await websocket.send_json({"type": "voice_chunk_ack", "data": res})
-                except Exception:
-                    pass
+                _enqueue_outbound({"type": "voice_chunk_ack", "data": res})
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -1847,6 +1881,11 @@ async def websocket_endpoint(websocket: WebSocket):
             if not voice_worker_task.done():
                 voice_worker_task.cancel()
                 await asyncio.gather(voice_worker_task, return_exceptions=True)
+        if not sender_task.done():
+            await asyncio.sleep(0)
+            if not sender_task.done():
+                sender_task.cancel()
+            await asyncio.gather(sender_task, return_exceptions=True)
 
 
 @app.websocket("/ws/collab")
@@ -1860,14 +1899,20 @@ async def collab_websocket_endpoint(websocket: WebSocket):
     is_loopback = client_host in _LOOPBACK_HOSTS
     secret = _get_collab_secret()
     proto_secret, selected_subprotocol = _extract_ws_subprotocol_secret(websocket, "maybeai.collab.")
+    if not proto_secret:
+        proto_secret, selected_subprotocol = _extract_ws_subprotocol_secret(websocket, "maybeai.token.")
 
     if secret:
+        legacy_secret = (
+            (websocket.query_params.get("secret") or websocket.query_params.get("token") or "")
+            if _allow_legacy_ws_token()
+            else ""
+        )
         provided_secret = (
-            _extract_bearer_token(websocket.headers)
+            proto_secret
+            or _extract_bearer_token(websocket.headers)
             or websocket.headers.get("x-collab-secret")
-            or proto_secret
-            or websocket.query_params.get("secret")
-            or websocket.query_params.get("token")
+            or legacy_secret
             or ""
         ).strip()
         if not provided_secret or not hmac.compare_digest(
@@ -1910,6 +1955,7 @@ async def collab_websocket_endpoint(websocket: WebSocket):
 
 
 def main():
+    setup_logging()
     sys_cfg = config_mgr.settings.get("system", {})
     default_host = sys_cfg.get("host", "127.0.0.1") if isinstance(sys_cfg, dict) else "127.0.0.1"
     default_port = int(sys_cfg.get("port", 7860)) if isinstance(sys_cfg, dict) else 7860

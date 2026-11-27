@@ -160,7 +160,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
     const clean = String(token || "").trim();
     if (!clean) return;
-    try { localStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
+    try { localStorage.removeItem(CREATOR_TOKEN_KEY); } catch (e) {}
     try { sessionStorage.setItem(CREATOR_TOKEN_KEY, clean); } catch (e) {}
   }
 
@@ -178,7 +178,17 @@ document.addEventListener("DOMContentLoaded", () => {
       return CreatorAuth.getToken();
     }
     try {
-      const urlToken = new URLSearchParams(window.location.search).get("token");
+      const params = new URLSearchParams(window.location.search);
+      const hasTokenParam = params.has("token");
+      const urlToken = params.get("token");
+      if (hasTokenParam && window.history && typeof window.history.replaceState === "function") {
+        try {
+          const nextUrl = new URL(window.location.href);
+          nextUrl.searchParams.delete("token");
+          const cleanPath = nextUrl.pathname + (nextUrl.searchParams.toString() ? `?${nextUrl.searchParams.toString()}` : "") + (nextUrl.hash || "");
+          window.history.replaceState(null, "", cleanPath);
+        } catch (e) {}
+      }
       if (urlToken && urlToken.trim()) {
         const clean = urlToken.trim();
         setCreatorToken(clean);
@@ -186,12 +196,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (e) {}
     try {
-      return (
-        localStorage.getItem(CREATOR_TOKEN_KEY) ||
-        sessionStorage.getItem(CREATOR_TOKEN_KEY) ||
-        localStorage.maybeai_creator_token ||
-        ""
-      );
+      return sessionStorage.getItem(CREATOR_TOKEN_KEY) || "";
     } catch (e) {
       return "";
     }
@@ -459,12 +464,25 @@ document.addEventListener("DOMContentLoaded", () => {
       return CreatorAuth.buildWsUrl("/ws");
     }
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const creatorToken = getCreatorToken();
-    let wsUrl = `${protocol}//${window.location.host}/ws`;
-    if (creatorToken) {
-      wsUrl += `?token=${encodeURIComponent(creatorToken)}`;
-    }
-    return wsUrl;
+    return `${protocol}//${window.location.host}/ws`;
+  }
+
+  async function syncStudioStateOnReconnect() {
+    try {
+      const voiceRes = await authFetch("/api/voice/status");
+      if (voiceRes && voiceRes.ok) {
+        const vst = await voiceRes.json();
+        const th = vst && vst.stt && Number(vst.stt.vad_energy_threshold);
+        if (Number.isFinite(th) && th > 0) vadThreshold = th;
+      }
+    } catch (e) {}
+    try {
+      const moodRes = await authFetch("/api/mood");
+      if (moodRes && moodRes.ok) {
+        const moodData = await moodRes.json();
+        if (typeof updateMoodUi === "function") updateMoodUi(moodData);
+      }
+    } catch (e) {}
   }
 
   function connectWs() {
@@ -476,6 +494,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (typeof refreshCollabStatus === "function") refreshCollabStatus();
       if (typeof refreshPluginsList === "function") refreshPluginsList();
       if (typeof refreshObsAndHighlightsStatus === "function") refreshObsAndHighlightsStatus();
+      syncStudioStateOnReconnect();
     };
 
     const onClose = (event) => {
@@ -499,7 +518,9 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    ws = new WebSocket(buildStudioWsUrl());
+    const token = getCreatorToken();
+    const protocols = token ? [`maybeai.token.${token}`] : [];
+    ws = protocols.length > 0 ? new WebSocket(buildStudioWsUrl(), protocols) : new WebSocket(buildStudioWsUrl());
     ws.onopen = (e) => onOpen(e, ws);
     ws.onclose = (e) => {
       onClose(e);
@@ -734,7 +755,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (llmProviderSelect) {
     llmProviderSelect.addEventListener("change", () => {
       const selected = llmProviderSelect.value;
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "set_llm_provider", provider: selected }));
       }
     });
@@ -862,7 +883,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (btnDonationUsd) {
     btnDonationUsd.addEventListener("click", () => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: "donation",
           user: "GigaChadViewer",
@@ -876,7 +897,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (btnDonationIdr) {
     btnDonationIdr.addEventListener("click", () => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: "donation",
           user: "SultanLokal",
@@ -890,7 +911,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   if (btnQuickDebate) {
     btnQuickDebate.addEventListener("click", () => {
-      if (ws.readyState === WebSocket.OPEN) {
+      if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
           type: "bulk_chat",
           messages: [
@@ -1350,7 +1371,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const btnOpenPovTab = document.getElementById("btn-open-pov-tab");
 
   function sendMinecraftAction(actionData) {
-    if (ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: "minecraft_action", ...actionData }));
     }
   }

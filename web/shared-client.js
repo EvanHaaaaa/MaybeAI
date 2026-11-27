@@ -22,7 +22,7 @@
     setToken(token) {
       const clean = String(token || "").trim();
       if (!clean) return;
-      try { global.localStorage.setItem(TOKEN_KEY, clean); } catch (e) {}
+      try { global.localStorage.removeItem(TOKEN_KEY); } catch (e) {}
       try { global.sessionStorage.setItem(TOKEN_KEY, clean); } catch (e) {}
     },
 
@@ -34,7 +34,17 @@
     getToken() {
       try {
         const search = global.location && global.location.search ? global.location.search : "";
-        const urlToken = new URLSearchParams(search).get("token");
+        const params = new URLSearchParams(search);
+        const hasTokenParam = params.has("token");
+        const urlToken = params.get("token");
+        if (hasTokenParam && global.history && typeof global.history.replaceState === "function" && global.location) {
+          try {
+            const nextUrl = new URL(global.location.href);
+            nextUrl.searchParams.delete("token");
+            const cleanPath = nextUrl.pathname + (nextUrl.searchParams.toString() ? `?${nextUrl.searchParams.toString()}` : "") + (nextUrl.hash || "");
+            global.history.replaceState(null, "", cleanPath);
+          } catch (e) {}
+        }
         if (urlToken && urlToken.trim()) {
           const clean = urlToken.trim();
           this.setToken(clean);
@@ -42,12 +52,7 @@
         }
       } catch (e) {}
       try {
-        return (
-          global.localStorage.getItem(TOKEN_KEY) ||
-          global.sessionStorage.getItem(TOKEN_KEY) ||
-          global.localStorage.maybeai_creator_token ||
-          ""
-        );
+        return global.sessionStorage.getItem(TOKEN_KEY) || "";
       } catch (e) {
         return "";
       }
@@ -68,23 +73,25 @@
       return fetch(url, Object.assign({}, options, { headers }));
     },
 
+    getWsProtocols() {
+      const token = this.getToken();
+      return token ? [`maybeai.token.${token}`] : [];
+    },
+
     buildWsUrl(path = "/ws") {
       const loc = global.location;
       const protocol = loc && loc.protocol === "https:" ? "wss:" : "ws:";
       const host = loc ? loc.host : "localhost:7860";
-      const token = this.getToken();
-      let wsUrl = `${protocol}//${host}${path}`;
-      if (token) {
-        const sep = wsUrl.includes("?") ? "&" : "?";
-        wsUrl += `${sep}token=${encodeURIComponent(token)}`;
-      }
-      return wsUrl;
+      return `${protocol}//${host}${path}`;
     }
   };
 
   class ReconnectingWebSocket {
     constructor(urlOrFactory, options = {}) {
       this._urlOrFactory = urlOrFactory;
+      this._protocolsOrFactory = options.protocols !== undefined
+        ? options.protocols
+        : () => CreatorAuth.getWsProtocols();
       this.minDelayMs = Number(options.minDelayMs) || 1000;
       this.maxDelayMs = Number(options.maxDelayMs) || 30000;
       this.factor = Number(options.factor) || 2;
@@ -114,6 +121,15 @@
       return typeof this._urlOrFactory === "function"
         ? this._urlOrFactory()
         : this._urlOrFactory;
+    }
+
+    _resolveProtocols() {
+      const resolved = typeof this._protocolsOrFactory === "function"
+        ? this._protocolsOrFactory()
+        : this._protocolsOrFactory;
+      if (Array.isArray(resolved)) return resolved.filter(Boolean);
+      if (typeof resolved === "string" && resolved) return [resolved];
+      return [];
     }
 
     _clearTimer() {
@@ -161,7 +177,8 @@
       }
 
       const url = this._resolveUrl();
-      const ws = new WebSocket(url);
+      const protocols = this._resolveProtocols();
+      const ws = protocols.length > 0 ? new WebSocket(url, protocols) : new WebSocket(url);
       this._ws = ws;
 
       ws.onopen = (event) => {

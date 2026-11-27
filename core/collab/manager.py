@@ -53,6 +53,7 @@ class CollabManager:
         on_duet_sync: Optional[Callable[[CollabEnvelope], Any]] = None,
         on_emote_sync: Optional[Callable[[CollabEnvelope], Any]] = None,
         on_game_move: Optional[Callable[[CollabEnvelope], Any]] = None,
+        on_hello: Optional[Callable[[CollabEnvelope], Any]] = None,
     ):
         self.event_bus = event_bus
         self.self_id = self_id
@@ -87,6 +88,7 @@ class CollabManager:
 
         self.peer_connected: bool = False
         self.connected_peer: Optional[str] = None
+        self.active_peer: Optional[str] = None
         self.history: Deque[Dict[str, Any]] = deque(maxlen=50)
 
         self._http_session: Optional[aiohttp.ClientSession] = None
@@ -98,6 +100,7 @@ class CollabManager:
         self._on_duet_sync: Optional[Callable[[CollabEnvelope], Any]] = on_duet_sync
         self._on_emote_sync: Optional[Callable[[CollabEnvelope], Any]] = on_emote_sync
         self._on_game_move: Optional[Callable[[CollabEnvelope], Any]] = on_game_move
+        self._on_hello: Optional[Callable[[CollabEnvelope], Any]] = on_hello
         self._reply_tasks: Set[asyncio.Task] = set()
         self._lock = asyncio.Lock()
         self.max_timestamp_skew_sec: float = 60.0
@@ -163,14 +166,17 @@ class CollabManager:
         on_duet_sync: Optional[Callable[[CollabEnvelope], Any]] = None,
         on_emote_sync: Optional[Callable[[CollabEnvelope], Any]] = None,
         on_game_move: Optional[Callable[[CollabEnvelope], Any]] = None,
+        on_hello: Optional[Callable[[CollabEnvelope], Any]] = None,
     ) -> None:
-        """Registers optional async/sync callbacks for inbound duet_sync, emote_sync, and game_move."""
+        """Registers optional async/sync callbacks for inbound duet_sync, emote_sync, game_move, and hello."""
         if on_duet_sync is not None:
             self._on_duet_sync = on_duet_sync
         if on_emote_sync is not None:
             self._on_emote_sync = on_emote_sync
         if on_game_move is not None:
             self._on_game_move = on_game_move
+        if on_hello is not None:
+            self._on_hello = on_hello
 
     def register_peer_sender(
         self,
@@ -489,9 +495,12 @@ class CollabManager:
         self._http_session = None
 
         was_connected = self.peer_connected
+        prev_floor_state = self.floor_state
         self.peer_connected = False
         self.connected_peer = None
-        if was_connected:
+        self.active_peer = None
+        self.floor_state = "idle"
+        if was_connected or prev_floor_state != "idle":
             await self._set_floor_state("idle", reason="disconnected")
 
     async def initiate_prompt(self, topic_or_text: str) -> Dict[str, Any]:
@@ -764,6 +773,8 @@ class CollabManager:
                     env.payload.get("protocol_version") or env.protocol_version or PROTOCOL_VERSION
                 )
                 await self._set_floor_state("idle", reason="peer_hello")
+                action_cb = self._on_hello
+                reply_reason = "peer_hello"
             elif env.event_type == "bye":
                 self.peer_connected = False
                 self.connected_peer = None

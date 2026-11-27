@@ -113,6 +113,17 @@ class EpisodicMemoryStore:
         """Bidirectionally reconciles promises.md with SQLite promises_challenges."""
         self.sync.sync_promises_from_db(self.db)
 
+    def archive_old_promises(self, older_than_days: float = 30.0) -> int:
+        """Archives old fulfilled promises in SQLite and syncs promises.md."""
+        archived = self.db.archive_old_promises(older_than_days=older_than_days)
+        self.sync.sync_promises_from_db(self.db)
+        return archived
+
+    def flush(self, archive_older_than_days: float = 30.0) -> int:
+        """Reconciles and archives promises on session end / memory flush."""
+        self.sync_promises()
+        return self.archive_old_promises(older_than_days=archive_older_than_days)
+
 __all__ = [
     "EpisodicMemoryStore",
     "MemoryDatabase",

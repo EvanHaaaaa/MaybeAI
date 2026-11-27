@@ -431,16 +431,25 @@ class Orchestrator:
         if not listeners:
             return
 
-        async def _send_one(listener: Callable[[Dict[str, Any]], Any]) -> None:
+        async def _await_listener(listener: Callable[[Dict[str, Any]], Any], coro: Any) -> None:
             try:
-                res = listener(message)
-                if inspect.isawaitable(res):
-                    await asyncio.wait_for(res, timeout=2.0)
+                await asyncio.wait_for(coro, timeout=2.0)
             except Exception:
                 self.web_listeners.discard(listener)
                 self.metrics.set_gauge("active_ws_clients", len(self.web_listeners))
 
-        await asyncio.gather(*(_send_one(l) for l in listeners), return_exceptions=True)
+        pending = []
+        for listener in listeners:
+            try:
+                res = listener(message)
+                if inspect.isawaitable(res):
+                    pending.append(_await_listener(listener, res))
+            except Exception:
+                self.web_listeners.discard(listener)
+                self.metrics.set_gauge("active_ws_clients", len(self.web_listeners))
+
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     async def broadcast(self, event_type: str, data: Dict[str, Any]):
         bus_event = WS_TO_BUS_EVENT.get(event_type, event_type)
@@ -537,6 +546,7 @@ class Orchestrator:
             getattr(self, "singer", None),
             getattr(getattr(self.brain, "episodic_memory", None), "embedding_engine", None),
             getattr(self.brain, "embedding_engine", None),
+            getattr(self, "brain", None),
         ):
             if component is None:
                 continue
@@ -548,7 +558,6 @@ class Orchestrator:
                         await res
                 except Exception:
                     pass
-        await self.brain.close()
 
     async def ensure_plugins_loaded(self) -> None:
         """Lazily discovers and loads configured plugins once."""
@@ -891,6 +900,11 @@ class Orchestrator:
             rvc_enabled=tts_cfg.get("rvc_enabled"),
             rvc_url=tts_cfg.get("rvc_url"),
             rvc_pitch_shift=tts_cfg.get("rvc_pitch_shift"),
+            provider=tts_cfg.get("provider"),
+            fallback_voice=tts_cfg.get("fallback_voice"),
+            elevenlabs_voice_id=tts_cfg.get("elevenlabs_voice_id"),
+            kokoro_url=tts_cfg.get("kokoro_url"),
+            custom_tts_url=tts_cfg.get("custom_tts_url"),
         )
 
         # 2. Update VTS
@@ -1238,7 +1252,8 @@ class Orchestrator:
                 "text": clean_input
             })
 
-        self.brain.conversation.record_incoming_chat(
+        await asyncio.to_thread(
+            self.brain.conversation.record_incoming_chat,
             user=msg.user,
             text=clean_input,
             source=msg.source,
@@ -1246,7 +1261,7 @@ class Orchestrator:
             donation_amount=msg.donation_amount,
             donation_currency=msg.donation_currency,
             is_creator=is_creator_flag,
-            emit_events=False
+            emit_events=False,
         )
         await self.broadcast("mood_updated", self.brain.mood.get_state())
         await self.broadcast("relationship_updated", self.brain.relationships.get_state())

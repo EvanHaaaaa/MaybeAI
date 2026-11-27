@@ -184,6 +184,55 @@ class TestYouTubeKaraoke(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(ok, f"Unexpected config validation errors: {errors}")
         self.assertEqual(errors, [])
 
+    async def test_max_filesize_arg_and_concurrency_semaphore(self):
+        import asyncio
+        with tempfile.TemporaryDirectory() as tmp:
+            cache_dir = Path(tmp) / "karaoke_cache"
+            proc = YouTubeKaraokeProcessor(cache_dir=cache_dir, max_filesize="75M", max_concurrent_jobs=2)
+            seen_cmds = []
+            active = 0
+            max_active = 0
+            wav_bytes = _make_tone_wav_bytes(0.1)
+
+            async def fake_run_exec(*args, timeout=120.0):
+                nonlocal active, max_active
+                seen_cmds.append(args)
+                cmd = args[0]
+                if cmd == "yt-dlp" and "--dump-single-json" in args:
+                    active += 1
+                    max_active = max(max_active, active)
+                    await asyncio.sleep(0.05)
+                    active -= 1
+                    return 0, json.dumps({"title": "Cap Song", "duration": 60}), ""
+                if cmd == "yt-dlp":
+                    vid = args[-1].split("v=")[-1]
+                    vid_dir = cache_dir / vid
+                    vid_dir.mkdir(parents=True, exist_ok=True)
+                    (vid_dir / "source.wav").write_bytes(wav_bytes)
+                    return 0, "ok", ""
+                if cmd == "ffmpeg":
+                    vid_dir = Path(args[-1]).parent
+                    (vid_dir / "instrumental.wav").write_bytes(wav_bytes)
+                    return 0, "ok", ""
+                return 1, "", "unexpected"
+
+            with (
+                patch.object(YouTubeKaraokeProcessor, "tools_available", return_value={"yt_dlp": True, "ffmpeg": True, "demucs": False}),
+                patch.object(proc, "_run_exec", side_effect=fake_run_exec),
+            ):
+                await asyncio.gather(
+                    proc.prepare_song("https://www.youtube.com/watch?v=dQw4w9WgXcQ", mode="auto_karaoke"),
+                    proc.prepare_song("https://www.youtube.com/watch?v=oHg5SJYRHA0", mode="auto_karaoke"),
+                    proc.prepare_song("https://www.youtube.com/watch?v=9bZkp7q19f0", mode="auto_karaoke"),
+                )
+            self.assertLessEqual(max_active, 2)
+            dl_cmds = [c for c in seen_cmds if c[0] == "yt-dlp" and "--dump-single-json" not in c]
+            self.assertTrue(dl_cmds)
+            for c in dl_cmds:
+                self.assertIn("--max-filesize", c)
+                idx = c.index("--max-filesize")
+                self.assertEqual(c[idx + 1], "75M")
+
 
 if __name__ == "__main__":
     unittest.main()

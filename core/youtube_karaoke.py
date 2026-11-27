@@ -134,11 +134,15 @@ class YouTubeKaraokeProcessor:
         cache_dir: Optional[Path] = None,
         max_duration_sec: int = 600,
         rvc_converter: Any = None,
+        max_filesize: str = "150M",
+        max_concurrent_jobs: int = 2,
     ):
         self.cache_dir = Path(cache_dir) if cache_dir else _default_cache_root()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.max_duration_sec = max(30, int(max_duration_sec))
         self.rvc_converter = rvc_converter
+        self.max_filesize = str(max_filesize or "150M").strip() or "150M"
+        self._job_semaphore = asyncio.Semaphore(max(1, int(max_concurrent_jobs)))
 
     @staticmethod
     def tools_available() -> Dict[str, bool]:
@@ -184,6 +188,15 @@ class YouTubeKaraokeProcessor:
         on_status: Optional[Callable[[str, str], Awaitable[None] | None]] = None,
     ) -> Dict[str, Any]:
         """Prepare a YouTube URL into a Singer-compatible song dictionary."""
+        async with self._job_semaphore:
+            return await self._prepare_song_impl(url=url, mode=mode, on_status=on_status)
+
+    async def _prepare_song_impl(
+        self,
+        url: str,
+        mode: str = "ai_cover",
+        on_status: Optional[Callable[[str, str], Awaitable[None] | None]] = None,
+    ) -> Dict[str, Any]:
         norm_mode = str(mode or "ai_cover").strip().lower()
         if norm_mode not in ("ai_cover", "auto_karaoke"):
             norm_mode = "ai_cover"
@@ -258,6 +271,8 @@ class YouTubeKaraokeProcessor:
                 "wav",
                 "--audio-quality",
                 "0",
+                "--max-filesize",
+                self.max_filesize,
                 "--write-subs",
                 "--write-auto-subs",
                 "--sub-langs",

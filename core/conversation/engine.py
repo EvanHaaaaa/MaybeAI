@@ -7,6 +7,7 @@ from core.conversation.memory import UserMemory, ContextMemory, TopicTracker
 from core.conversation.prompts import MasterPromptBuilder
 from core.conversation.chat_curator import ChatCurator, LiveChatMessage, ChatInteraction
 from core.memory import EpisodicMemoryStore
+from core.moderator import Moderator
 from core.mood import MoodEngine
 from core.planning import GoalEngine
 from core.relationship import RelationshipEngine
@@ -234,6 +235,29 @@ class ConversationEngine:
                 "raw": bot_response,
             })
 
+    def fulfill_promise(self, promise_id: int) -> bool:
+        """Marks a promise fulfilled and syncs markdown memory."""
+        if not hasattr(self, "episodic_memory") or self.episodic_memory is None:
+            return False
+        return bool(self.episodic_memory.fulfill_promise(promise_id))
+
+    def complete_goal(self, promise_id: Optional[int] = None) -> bool:
+        """Hook invoked on goal/conversation completion to fulfill any linked promise."""
+        if promise_id is not None:
+            return self.fulfill_promise(promise_id)
+        return False
+
+    def flush_memory(self, archive_older_than_days: float = 30.0) -> int:
+        """Reconciles promises and archives old fulfilled promises on memory flush."""
+        if not hasattr(self, "episodic_memory") or self.episodic_memory is None:
+            return 0
+        self.episodic_memory.sync_promises()
+        return int(self.episodic_memory.archive_old_promises(older_than_days=archive_older_than_days))
+
+    def end_session(self, archive_older_than_days: float = 30.0) -> int:
+        """Flushes memory and archives old promises at session end."""
+        return self.flush_memory(archive_older_than_days=archive_older_than_days)
+
     def analyze_intent(self, user: str, text: str) -> Tuple[str, Optional[str]]:
         clean = text.strip()
         lower = clean.lower()
@@ -316,12 +340,18 @@ class ConversationEngine:
         visual_directive = ""
         if self.vision and self.vision.current_observation:
             obs = self.vision.current_observation
+            safe_summary = Moderator.sanitize_metadata(obs.summary, max_len=400)
+            safe_commentary = (
+                Moderator.sanitize_metadata(obs.eve_commentary, max_len=400)
+                if obs.eve_commentary
+                else "Looking attentively at the screen."
+            )
             visual_directive = f"""[LIVE VISUAL PERCEPTION / SCREEN AWARENESS]
 Eve can literally see the user's screen in real time!
 - Active Screen Scene: {obs.scene_label} ({obs.scene_type})
-- Visual Summary: {obs.summary}
+- Visual Summary: <visual_observation_data>{safe_summary}</visual_observation_data>
 - Event Detected on Screen: {obs.event_type if obs.is_event else 'None (Stable Stream)'}
-- Eve's Immediate Visual Perception: {obs.eve_commentary if obs.eve_commentary else 'Looking attentively at the screen.'}
+- Eve's Immediate Visual Perception: <visual_observation_data>{safe_commentary}</visual_observation_data>
 Grounded Rule: If the user asks what is on screen, comments on their gameplay/death/diamond, or references a video, speak with direct visual awareness of what you see!"""
 
         multiplayer_directive = self.multiplayer.get_prompt_directive() if self.multiplayer else ""

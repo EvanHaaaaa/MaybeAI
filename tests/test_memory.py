@@ -239,5 +239,21 @@ class TestConversationEpisodicIntegration(unittest.TestCase):
         self.assertIn("Janji ke-0", archive_md)
         self.assertIn("Janji ke-1", archive_md)
 
+    def test_conversation_promise_fulfill_and_session_end_flush(self):
+        store = self.conv.episodic_memory
+        pid = store.db.add_promise_or_challenge("Evan", "Main Minecraft bareng", ptype="promise")
+        self.assertTrue(self.conv.fulfill_promise(pid))
+        # Backdate fulfilled_at so archive_old_promises archives it on end_session()
+        with store.db._get_connection() as con:
+            con.execute("UPDATE promises_challenges SET fulfilled_at = 1.0 WHERE id = ?", (pid,))
+            con.commit()
+        archived = self.conv.end_session(archive_older_than_days=30.0)
+        self.assertEqual(archived, 1)
+        with store.db._get_connection() as con:
+            row = con.execute("SELECT status FROM promises_challenges WHERE id = ?", (pid,)).fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row[0], "archived")
+
+
 if __name__ == "__main__":
     unittest.main()
